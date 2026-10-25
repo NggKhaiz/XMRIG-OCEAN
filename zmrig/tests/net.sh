@@ -13,6 +13,7 @@
 #   ./zmrig/tests/net.sh --only tcp,wss  # a subset
 #   ./zmrig/tests/net.sh --quick         # 12 s per case instead of 25 s
 #   ./zmrig/tests/net.sh --soak          # also run the 4 minute soak scenario
+#   ./zmrig/tests/net.sh --only api      # read-only HTTP API (needs curl)
 #
 # Requirements: python3 with ssl support, openssl, a built zmrig binary.
 set -uo pipefail
@@ -280,6 +281,41 @@ if selected wss-socks5; then
 fi
 
 # --- behaviours ------------------------------------------------------------
+if selected api; then
+    api_port=$((port + 200))
+    log="${LOGDIR}/api.log"
+    run_miner api "$RUN_SECONDS" "$log" -o "127.0.0.1:${POOL_PORT}" -t 1 --mode light \
+        --http-port "$api_port" --http-access-token "tok-${POOL_PORT}" &
+    miner_pid=$!
+    body=""
+    for _ in $(seq 1 40); do
+        sleep 0.5
+        body=$(curl -s -m 2 -H "Authorization: Bearer tok-${POOL_PORT}" "http://127.0.0.1:${api_port}/1/summary" 2>/dev/null) && [ -n "$body" ] && break
+    done
+    unauth=$(curl -s -m 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${api_port}/1/summary" 2>/dev/null)
+    notfound=$(curl -s -m 2 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer tok-${POOL_PORT}" "http://127.0.0.1:${api_port}/nope" 2>/dev/null)
+    kill -INT "$miner_pid" 2>/dev/null
+    wait "$miner_pid" 2>/dev/null
+
+    if [ -z "$body" ]; then
+        record FAIL "http api" "no response on :${api_port}"
+    elif ! printf '%s' "$body" | grep -q '"hashrate"' || ! printf '%s' "$body" | grep -q '"shares_good"'; then
+        record FAIL "http api" "malformed summary (see $log)"
+    else
+        record PASS "http api" "summary served on :${api_port}"
+    fi
+    if [ "$unauth" = "401" ]; then
+        record PASS "http api token" "unauthenticated request refused"
+    else
+        record FAIL "http api token" "expected 401, got ${unauth:-nothing}"
+    fi
+    if [ "$notfound" = "404" ]; then
+        record PASS "http api 404" "unknown path rejected"
+    else
+        record FAIL "http api 404" "expected 404, got ${notfound:-nothing}"
+    fi
+fi
+
 if selected reject; then
     port_r=$((port++))
     python3 "$NET/pool.py" --port "$port_r" --mode basic --reject-login "invalid address" \

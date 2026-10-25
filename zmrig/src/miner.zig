@@ -402,6 +402,17 @@ pub const Miner = struct {
         return self.shared.thread_count;
     }
 
+    /// Huge page usage as [allocated, required] in 2 MiB pages, for the API.
+    pub fn hugePages(self: *const Self) [2]usize {
+        const page = 2 * 1024 * 1024;
+
+        if (self.engine.wrapped) |wrapped| {
+            return .{ wrapped.hugePageBytes() / page, wrapped.totalMemory() / page };
+        }
+
+        return .{ 0, 0 };
+    }
+
     pub fn start(self: *Self) !void {
         if (self.started) return;
 

@@ -383,7 +383,6 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8) ParseEr
             const value = try needValue(args, &i, inline_value);
             opts.transport_override = transport.Kind.fromName(value) orelse return error.UnknownOption;
         } else if (std.mem.eql(u8, name, "--cloudflare")) {
-            opts.cloudflare = true;
             // `--cloudflare=host` is a convenience: it also sets the pool. The
             // space separated form works too, as long as what follows is not
             // another flag (`--cloudflare --ws-path /x` stays a plain preset).
@@ -392,6 +391,10 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8) ParseEr
                 i += 1;
                 value_opt = args[i];
             }
+            // With a host this is a complete shortcut (the pool it creates is
+            // already wss on 443), so it must not also rewrite the transport of
+            // pools given with -o. Without a host it is a preset for all pools.
+            if (value_opt == null) opts.cloudflare = true;
             if (value_opt) |value| {
                 const url = if (std.mem.indexOf(u8, value, "://") != null)
                     value
@@ -506,6 +509,17 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8) ParseEr
             opts.background = true;
         } else {
             return error.UnknownOption;
+        }
+    }
+
+    // `-o a -o b -u WALLET` must not leave the first pool without a wallet:
+    // a user given on the command line is a default for every pool that does
+    // not carry one of its own.
+    if (pending.user) |value| {
+        for (opts.pools.items) |*pool| {
+            if (pool.user.len == 0) {
+                pool.user = allocator.dupe(u8, value) catch return error.OutOfMemory;
+            }
         }
     }
 

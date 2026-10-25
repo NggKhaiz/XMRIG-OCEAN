@@ -7,6 +7,7 @@ const api = @import("api.zig");
 const job_mod = @import("job.zig");
 const log = @import("log.zig");
 const miner_mod = @import("miner.zig");
+const api_http = @import("api_http.zig");
 const options = @import("options.zig");
 const stratum = @import("stratum.zig");
 const util = @import("util.zig");
@@ -73,7 +74,8 @@ pub fn main() !void {
     };
 
     if (opts.help) {
-        try std.io.getStdOut().writeAll(options.usage);
+        // `zmrig --help | head` closes the pipe early: that is not an error.
+        std.io.getStdOut().writeAll(options.usage) catch {};
 
         return;
     }
@@ -93,7 +95,7 @@ pub fn main() !void {
             (miner_mod.l3CacheSize() orelse 0) / (1024 * 1024),
         }) catch "?";
 
-        try std.io.getStdOut().writer().print("zmrig {s} ({s}, {s})\n", .{ version, api.xmo_engine_name(), cpu });
+        std.io.getStdOut().writer().print("zmrig {s} ({s}, {s})\n", .{ version, api.xmo_engine_name(), cpu }) catch {};
 
         return;
     }
@@ -117,7 +119,8 @@ pub fn main() !void {
     };
 
     if (opts.check) {
-        try printConfigSummary(&opts);
+        // A closed pipe (`--check | head`) is not a failure.
+        printConfigSummary(&opts) catch {};
         return;
     }
 
@@ -148,6 +151,45 @@ pub fn main() !void {
     }
 
     logger.info("wallet: {s}", .{opts.pools.items[0].user});
+
+    // Optional read-only monitoring API (--http-port). It reads atomics only,
+    // so an open dashboard cannot slow the miner down.
+    var http_api: ?api_http.Server = null;
+    if (opts.api_port != 0) {
+        const first_pool = opts.pools.items[0];
+        var url_buf: [256]u8 = undefined;
+        const pool_url = std.fmt.bufPrint(&url_buf, "{s}://{s}:{d}", .{
+            first_pool.transport.label(),
+            first_pool.host,
+            first_pool.port,
+        }) catch first_pool.host;
+
+        http_api = api_http.Server{
+            .allocator = allocator,
+            .logger = logger,
+            .host = opts.http_host,
+            .port = opts.api_port,
+            .token = opts.api_token,
+            .info = .{
+                .version = version,
+                .pool_url = pool_url,
+                .worker_id = first_pool.rig_id orelse "zmrig",
+                .miner = &miner,
+                .threads = miner.threadCount(),
+                .started_ms = std.time.milliTimestamp(),
+                .accepted = &miner.submitter.accepted,
+                .rejected = &miner.submitter.rejected,
+                .failed = &miner.submitter.failed,
+                .view = &monitor.view,
+            },
+        };
+
+        http_api.?.start() catch |e| {
+            logger.warn("http api disabled: {s}", .{@errorName(e)});
+            http_api = null;
+        };
+    }
+    defer if (http_api) |*server| server.stopServer();
 
     var pool_index: usize = 0;
     var failures: u32 = 0;
@@ -200,6 +242,7 @@ pub fn main() !void {
 
         miner.submitter.attach(&session);
         monitor.last_message.store(std.time.milliTimestamp(), .release);
+        monitor.view.markConnected(std.time.milliTimestamp());
 
         miner.applyJob(&first_job) catch |e| {
             logger.err("cannot start mining: {s}", .{@errorName(e)});
@@ -210,6 +253,7 @@ pub fn main() !void {
 
         const result = runSession(allocator, &session, &miner, &opts, &monitor, algo, logger);
         monitor.socket.store(-1, .release);
+        monitor.view.markDisconnected();
 
         miner.submitter.detach();
         // Keep the workers running on the last job while we reconnect: a pool
@@ -316,6 +360,8 @@ const Monitor = struct {
     keepalive_ms: i64 = 60_000,
     keepalive_enabled: bool = true,
     last_message: std.atomic.Value(i64) = std.atomic.Value(i64).init(0),
+    /// Hashrates published to the HTTP API once a second.
+    view: api_http.View = .{},
     socket: std.atomic.Value(i32) = std.atomic.Value(i32).init(-1),
     stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     thread: ?std.Thread = null,
@@ -357,6 +403,14 @@ const Monitor = struct {
                 last_report = now;
                 self.miner.report();
             }
+
+            self.view.store(
+                self.miner.hashrate(10),
+                self.miner.hashrate(60),
+                self.miner.hashrate(900),
+                self.miner.stats.max_rate,
+                self.miner.shared.totalHashes(),
+            );
 
             // A SIGTERM must not wait for the pool to say something: the main
             // thread is parked in a blocking read, so nudge it here.
