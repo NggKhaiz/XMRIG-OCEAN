@@ -85,7 +85,7 @@ pub extern fn xmo_vm_new(engine: *Engine, flags: c_int, numa_node: u32, err: [*]
 pub extern fn xmo_vm_free(vm: ?*Vm) void;
 pub extern fn xmo_hash(vm: *Vm, blob: [*]const u8, len: usize, out: *[32]u8) void;
 pub extern fn xmo_hash_first(vm: *Vm, blob: [*]const u8, len: usize, temp: *align(64) [8]u64) void;
-pub extern fn xmo_hash_next(vm: *Vm, temp: *align(64) const [8]u64, blob: [*]const u8, len: usize, out: *[32]u8) void;
+pub extern fn xmo_hash_next(vm: *Vm, temp: *align(64) [8]u64, blob: [*]const u8, len: usize, out: *[32]u8) void;
 pub extern fn xmo_commitment(blob: [*]const u8, len: usize, hash_in: *const [32]u8, out: *[32]u8) void;
 pub extern fn xmo_set_scratchpad_prefetch(mode: c_int) void;
 pub extern fn xmo_set_huge_pages_jit(enabled: c_int) void;

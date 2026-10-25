@@ -6,6 +6,8 @@
 #
 #   sudo ./oneclick.sh                     # full install, asks for the wallet
 #   sudo ./oneclick.sh --wallet 4... --yes  # fully unattended
+#   sudo ./oneclick.sh --wallet 4... --engine zmrig --cloudflare --ws-path /pool
+#                                          # mine through a CDN / HTTPS-only egress
 #   ./oneclick.sh status                   # is it mining? at what hashrate?
 #   ./oneclick.sh bench                    # reproducible hashrate measurement
 #   ./oneclick.sh verify                   # prove the 0% fee
@@ -29,7 +31,7 @@
 #
 set -euo pipefail
 
-ONECLICK_VERSION="1.1"
+ONECLICK_VERSION="1.2"
 ZIG_VERSION="${MINER_ZIG_VERSION:-0.13.0}"
 
 SELF="${BASH_SOURCE[0]:-}"
@@ -54,6 +56,19 @@ ENGINE="${MINER_ENGINE:-xmrig}"
 # silently override the choice.
 ENGINE_EXPLICIT="${MINER_ENGINE:+1}"
 TLS="false"
+# Restrictive-network options (zmrig only; they end up in the pool section of
+# config.json, which the C++ engine ignores and zmrig understands).
+NET_CLOUDFLARE=0
+NET_CF_HOST=""
+NET_CF_PORT=""
+NET_TRANSPORT=""
+NET_WS_PATH=""
+NET_WS_ORIGIN=""
+NET_PROXY=""
+NET_CONNECT_TO=""
+NET_TLS_CA=""
+NET_IDLE_TIMEOUT=""
+NET_KEEPALIVE_INTERVAL=""
 CPU_HINT="100"
 ASSUME_YES=0
 FORCE_CONFIG=0
@@ -102,7 +117,19 @@ Options
   --rig-id NAME          rig identifier shown on the pool dashboard
   --algo NAME            force one algorithm instead of pool auto-selection
   --engine NAME          xmrig (default, all algorithms) or zmrig (Zig rewrite, rx/* only)
+  --cloudflare[=HOST[:PORT]]  WebSocket+TLS on 443 and the zmrig engine: the
+                         one path that works on HTTPS-only hosts and CDNs
   --tls                  use TLS for the pool connection
+  --cloudflare[=HOST[:PORT]]  pool over WebSocket+TLS on 443 (works through
+                         CDNs and firewalls that only allow HTTPS). Switches to
+                         the zmrig engine, which is the only one that speaks it
+  --transport KIND       tcp | tls | ws | wss, override the scheme in --pool
+  --ws-path PATH         WebSocket path for --cloudflare (default: /)
+  --ws-origin URL        Origin header for the WebSocket upgrade
+  --proxy URL            http://user:pass@host:port or socks5://host:port
+  --connect-to HOST:PORT dial this address but keep the pool name for SNI/Host
+  --tls-ca FILE          trust the certificates in FILE (private CA / pinning)
+  --idle-timeout N       reconnect if the pool is silent for N seconds (0 = never)
   --cpu-hint N           max-threads-hint percentage (default: 100)
   --build-dir DIR        where to compile        (default: PREFIX/src/xmrig-ocean-build)
   --all-backends         also build OpenCL/CUDA support
@@ -143,6 +170,28 @@ while [ $# -gt 0 ]; do
         --engine)        ENGINE="${2:?}"; ENGINE_EXPLICIT=1; shift ;;
         --engine=*)      ENGINE="${1#*=}"; ENGINE_EXPLICIT=1 ;;
         --tls)           TLS="true" ;;
+        --cloudflare)    NET_CLOUDFLARE=1 ;;
+        --cloudflare=*)  NET_CLOUDFLARE=1
+                         CF_VALUE="${1#*=}"
+                         case "$CF_VALUE" in
+                             *:*) NET_CF_HOST="${CF_VALUE%%:*}"; NET_CF_PORT="${CF_VALUE##*:}" ;;
+                             "")  ;;
+                             *)   NET_CF_HOST="$CF_VALUE" ;;
+                         esac ;;
+        --transport)     NET_TRANSPORT="${2:?}"; shift ;;
+        --transport=*)   NET_TRANSPORT="${1#*=}" ;;
+        --ws-path)       NET_WS_PATH="${2:?}"; shift ;;
+        --ws-path=*)     NET_WS_PATH="${1#*=}" ;;
+        --ws-origin)     NET_WS_ORIGIN="${2:?}"; shift ;;
+        --ws-origin=*)   NET_WS_ORIGIN="${1#*=}" ;;
+        --proxy)         NET_PROXY="${2:?}"; shift ;;
+        --proxy=*)       NET_PROXY="${1#*=}" ;;
+        --connect-to)    NET_CONNECT_TO="${2:?}"; shift ;;
+        --connect-to=*)  NET_CONNECT_TO="${1#*=}" ;;
+        --tls-ca)        NET_TLS_CA="${2:?}"; shift ;;
+        --tls-ca=*)      NET_TLS_CA="${1#*=}" ;;
+        --idle-timeout)  NET_IDLE_TIMEOUT="${2:?}"; shift ;;
+        --idle-timeout=*) NET_IDLE_TIMEOUT="${1#*=}" ;;
         --cpu-hint)      CPU_HINT="${2:?}"; shift ;;
         --cpu-hint=*)    CPU_HINT="${1#*=}" ;;
         --build-dir)     BUILD_DIR_DEFAULT="${2:?}"; shift ;;
@@ -163,6 +212,29 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$COMMAND" ] || COMMAND="install"
+
+# The C++ engine has no WebSocket client, so any WebSocket transport means the
+# Zig front end. Fail loudly instead of writing a config nothing can use.
+if [ "$NET_CLOUDFLARE" = 1 ] || [ "$NET_TRANSPORT" = ws ] || [ "$NET_TRANSPORT" = wss ]; then
+    case "$ENGINE" in
+        zmrig) ;;
+        *)
+            if [ "$ENGINE_EXPLICIT" = 1 ] && [ "$ENGINE" != zmrig ]; then
+                printf '\n%s!!%s %s\n' "${C_Y:-}" "${C_RESET:-}" "this transport needs the zmrig engine (the C++ miner has no WebSocket support); re-run without --engine $ENGINE" >&2
+                exit 1
+            fi
+            ENGINE="zmrig"
+            ENGINE_EXPLICIT=1
+            ;;
+    esac
+fi
+
+if [ -n "$NET_PROXY" ] || [ -n "$NET_CONNECT_TO" ] || [ -n "$NET_TLS_CA" ]; then
+    if [ "$ENGINE" != zmrig ]; then
+        printf '\n%s!!%s %s\n' "${C_Y:-}" "${C_RESET:-}" "--proxy/--connect-to/--tls-ca are implemented by zmrig; add --engine zmrig" >&2
+        exit 1
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # environment detection
@@ -545,6 +617,73 @@ write_config() {
     local algo_json="null"
     [ -n "$ALGO" ] && algo_json="\"${ALGO}\""
 
+    # Restrictive-network presets. Everything lands in the pool section, which
+    # zmrig reads and the C++ engine ignores.
+    local pool_url="$POOL"
+    local tls_flag="$TLS"
+    if [ "$NET_CLOUDFLARE" = 1 ]; then
+        local cf_host="${NET_CF_HOST:-${POOL%%:*}}"
+        local cf_port=443
+        # A port the user typed in --pool wins over the 443 preset; the preset
+        # only fills in what was not specified.
+        if [ -n "$NET_CF_PORT" ]; then
+            cf_port="$NET_CF_PORT"
+        elif [ -z "$NET_CF_HOST" ]; then
+            case "$POOL" in
+                *:*:*) ;;                      # IPv6 literal, keep 443
+                *:*)   cf_port="${POOL##*:}" ;;
+            esac
+        fi
+        local cf_path="${NET_WS_PATH:-/}"
+        case "$cf_path" in /*) ;; *) cf_path="/${cf_path}" ;; esac
+        pool_url="wss://${cf_host}:${cf_port}${cf_path}"
+        tls_flag="true"
+    elif [ -n "$NET_TRANSPORT" ] && [ "$NET_TRANSPORT" != tcp ]; then
+        local t_host="${POOL%%:*}" t_port="${POOL##*:}"
+        [ "$t_port" = "$t_host" ] && t_port=443
+        case "$NET_TRANSPORT" in
+            tls) pool_url="stratum+ssl://${t_host}:${t_port}"; tls_flag="true" ;;
+            ws)  pool_url="ws://${t_host}:${t_port}${NET_WS_PATH:-/}" ;;
+            wss) pool_url="wss://${t_host}:${t_port}${NET_WS_PATH:-/}"; tls_flag="true" ;;
+        esac
+    fi
+
+    # A CA file has to survive for the lifetime of the service: /tmp is
+    # private to the unit (PrivateTmp) and often wiped at boot, so keep our own
+    # copy next to the config and point the pool there.
+    local tls_ca_path=""
+    if [ -n "$NET_TLS_CA" ]; then
+        if [ -r "$NET_TLS_CA" ]; then
+            as_root mkdir -p "$CONFIG_DIR"
+            as_root install -m 0644 "$NET_TLS_CA" "${CONFIG_DIR}/tls-ca.pem" \
+                && tls_ca_path="${CONFIG_DIR}/tls-ca.pem" \
+                || warn "cannot copy ${NET_TLS_CA}, using it in place"
+        else
+            warn "cannot read the CA file ${NET_TLS_CA}"
+        fi
+        [ -n "$tls_ca_path" ] || tls_ca_path="$NET_TLS_CA"
+    fi
+
+    local extra_pool=""
+    [ -n "$NET_TRANSPORT" ] && extra_pool="${extra_pool},
+            \"transport\": \"${NET_TRANSPORT}\""
+    [ -n "$NET_WS_PATH" ] && extra_pool="${extra_pool},
+            \"ws-path\": \"${NET_WS_PATH}\""
+    [ -n "$NET_WS_ORIGIN" ] && extra_pool="${extra_pool},
+            \"ws-origin\": \"${NET_WS_ORIGIN}\""
+    [ -n "$NET_PROXY" ] && extra_pool="${extra_pool},
+            \"proxy\": \"${NET_PROXY}\""
+    [ -n "$NET_CONNECT_TO" ] && extra_pool="${extra_pool},
+            \"connect-to\": \"${NET_CONNECT_TO}\""
+    [ -n "$tls_ca_path" ] && extra_pool="${extra_pool},
+            \"tls-ca\": \"${tls_ca_path}\""
+    # These two are process-wide in zmrig, so they go next to retries.
+    local extra_root=""
+    [ -n "$NET_IDLE_TIMEOUT" ] && extra_root="${extra_root},
+    \"idle-timeout\": ${NET_IDLE_TIMEOUT}"
+    [ -n "$NET_KEEPALIVE_INTERVAL" ] && extra_root="${extra_root},
+    \"keepalive-interval\": ${NET_KEEPALIVE_INTERVAL}"
+
     local tmp
     tmp=$(mktemp)
     cat >"$tmp" <<EOF
@@ -606,26 +745,26 @@ write_config() {
         {
             "algo": ${algo_json},
             "coin": null,
-            "url": "${POOL}",
+            "url": "${pool_url}",
             "user": "${WALLET}",
             "pass": "${POOL_PASS}",
             "rig-id": "${rig}",
             "nicehash": false,
             "keepalive": true,
             "enabled": true,
-            "tls": ${TLS},
+            "tls": ${tls_flag},
             "tls-fingerprint": null,
             "daemon": false,
             "socks5": null,
             "self-select": null,
-            "submit-to-origin": false
+            "submit-to-origin": false${extra_pool}
         }
     ],
     "print-time": 60,
     "health-print-time": 60,
     "dmi": true,
     "retries": 5,
-    "retry-pause": 5,
+    "retry-pause": 5${extra_root},
     "syslog": false,
     "tls": {
         "enabled": false,
@@ -664,7 +803,12 @@ EOF
     as_root install -m 0640 "$tmp" "$CONFIG_FILE"
     rm -f "$tmp"
     ok "config: ${CONFIG_FILE}"
-    info "pool:   ${POOL}$([ "$TLS" = true ] && echo ' (TLS)')"
+    info "pool:   ${pool_url}$([ "$tls_flag" = true ] && echo ' (TLS)')"
+    if [ "$NET_CLOUDFLARE" = 1 ]; then
+        info "mode:   Cloudflare-friendly WebSocket over TLS (${pool_url#wss://})"
+        [ -n "$NET_PROXY" ] && info "proxy:  ${NET_PROXY}"
+        [ -n "$NET_CONNECT_TO" ] && info "route:  connect ${NET_CONNECT_TO}, keep ${pool_url#wss://}"
+    fi
     info "wallet: ${WALLET:0:12}...${WALLET: -6}"
 }
 
@@ -866,18 +1010,59 @@ current_hashrate() {
 
     # Both engines print "speed 10s/60s/15m <a> <b> <c> H/s max <d> H/s"; keep
     # only the three numbers.
-    local line
-    line=$(log_tail 200 | sed 's/\x1b\[[0-9;]*m//g' | grep -oE 'speed 10s/60s/15m [^H]*' | tail -1 \
+    local raw stamp line
+    raw=$(log_tail 200 | sed 's/\x1b\[[0-9;]*m//g' | grep -E 'speed 10s/60s/15m' | tail -1) || true
+    [ -n "$raw" ] || return 1
+
+    # A line from the current run can still be minutes old when the miner is
+    # stuck reconnecting; showing it would claim a hashrate that is not
+    # happening. Anything older than 90 s is treated as stale.
+    # journalctl prefixes its own timestamp, so take the last HH:MM:SS in the
+    # line: that is the miner's.
+    stamp=$(printf '%s' "$raw" | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -1) || true
+    if [ -n "$stamp" ]; then
+        local then now delta
+        then=$(date -d "today ${stamp}" +%s 2>/dev/null || echo 0)
+        now=$(date +%s)
+        if [ "$then" -gt 0 ]; then
+            delta=$((now - then))
+            [ "$delta" -lt 0 ] && delta=$((delta + 86400))
+            [ "$delta" -le 90 ] || return 1
+        fi
+    fi
+
+    line=$(printf '%s' "$raw" | grep -oE 'speed 10s/60s/15m [^H]*' \
            | sed 's/speed 10s\/60s\/15m //; s/[[:space:]]*$//') || true
     [ -n "$line" ] || return 1
     printf '%s\n' "$line"
 }
 
+# When this shell did not start the service, "since" has to come from systemd:
+# otherwise journalctl happily returns the previous run's hashrate and status
+# looks alive while the miner is stuck in a reconnect loop.
+service_log_since() {
+    if [ -n "${LOG_SINCE:-}" ]; then
+        printf '%s' "$LOG_SINCE"
+        return 0
+    fi
+
+    local stamp
+    stamp=$(as_root systemctl show -p ActiveEnterTimestamp --value "${SERVICE_NAME}.service" 2>/dev/null || true)
+    if [ -n "$stamp" ] && [ "$stamp" != "n/a" ]; then
+        printf '%s' "$stamp"
+        return 0
+    fi
+
+    return 1
+}
+
 log_tail() {
     local lines="${1:-40}"
     if has_systemd && systemctl list-unit-files "${SERVICE_NAME}.service" >/dev/null 2>&1; then
-        if [ -n "${LOG_SINCE:-}" ]; then
-            as_root journalctl -u "${SERVICE_NAME}.service" --since "$LOG_SINCE" -n "$lines" --no-pager 2>/dev/null || true
+        local since
+        since=$(service_log_since 2>/dev/null || true)
+        if [ -n "$since" ]; then
+            as_root journalctl -u "${SERVICE_NAME}.service" --since "$since" -n "$lines" --no-pager 2>/dev/null || true
         else
             as_root journalctl -u "${SERVICE_NAME}.service" -n "$lines" --no-pager 2>/dev/null || true
         fi
@@ -891,8 +1076,10 @@ log_tail() {
 log_recent() {
     local minutes="${1:-5}"
     if has_systemd && systemctl list-unit-files "${SERVICE_NAME}.service" >/dev/null 2>&1; then
-        if [ -n "${LOG_SINCE:-}" ]; then
-            as_root journalctl -u "${SERVICE_NAME}.service" --since "$LOG_SINCE" --no-pager 2>/dev/null || true
+        local since
+        since=$(service_log_since 2>/dev/null || true)
+        if [ -n "$since" ]; then
+            as_root journalctl -u "${SERVICE_NAME}.service" --since "$since" --no-pager 2>/dev/null || true
             return 0
         fi
         as_root journalctl -u "${SERVICE_NAME}.service" --since "-${minutes} min" --no-pager 2>/dev/null || true

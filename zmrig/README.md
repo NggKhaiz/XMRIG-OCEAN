@@ -86,6 +86,25 @@ Supported flags mirror XMRig (`-o/-u/-p/-a/-t/-k/--cpu-affinity/--huge-pages/
 --retries/--retry-pause/--priority/--no-color/--verbose/--log-file/--tls`), so an
 existing `config.json` can be used unchanged.
 
+## Restrictive networks
+
+`zmrig` speaks four transports and can tunnel through two kinds of proxy, which
+is what makes it usable on a VPS that only allows 443/tcp or sits behind a CDN:
+
+```sh
+zmrig --url wss://relay.example.com/monero/TOKEN -u <wallet>   # WebSocket+TLS
+zmrig --url tls://pool.example.org:443 -u <wallet> --tls-ca ca.pem
+zmrig -o pool:3333 -u <wallet> --proxy socks5://user:pass@10.0.0.5:1080
+zmrig -o pool:3333 -u <wallet> --proxy http://user:pass@10.0.0.5:3128
+zmrig --cloudflare=relay.example.com --ws-path /monero/TOKEN -u <wallet>
+```
+
+`--connect-to HOST:PORT` keeps the pool name for TLS SNI and the HTTP `Host`
+header while dialling another address, `--tls-ca FILE` pins a private CA,
+`--idle-timeout` and `--keepalive-interval` control how a silent socket is
+treated. See [`doc/NETWORK.md`](../doc/NETWORK.md) for the whole picture,
+including a Cloudflare Worker that turns any pool into a `wss` endpoint.
+
 ## Measured performance
 
 Validation host: 2 vCPU Xeon VM (AES, AVX2, AVX-512, VAES, SHA-NI), 3.9 GiB RAM,
@@ -108,7 +127,8 @@ dataset are the same code, so the remaining difference between runs is noise.
   `rx/yada`, `panthera`); the engine has an `rx/xla` code path but the miner
   does not implement the MoneroOcean v2 commitment yet.
 * `--tls-insecure` is not implemented: Zig 0.13's TLS client has no
-  "do not verify" switch. TLS with a valid chain works.
+  "do not verify" switch. TLS with a valid chain works, and `--tls-ca` covers
+  private CAs and pinned relays.
 * The CPU backend is the only backend. GPU mining of RandomX is not a thing
   (RandomX was designed to be CPU-only), and CUDA/PTX work would be dead code.
 * Linux/x86-64 is the tested platform; the engine itself also builds for ARM64.

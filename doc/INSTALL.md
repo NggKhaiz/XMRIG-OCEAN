@@ -60,6 +60,14 @@ sudo ./oneclick.sh uninstall  # stop, disable, remove binaries
 | `--algo NAME` | pin one algorithm (`rx/0`, `cn/r`, …). Also **skips the 2-minute calibration**, see below. |
 | `--engine NAME` | `xmrig` (default, every algorithm) or `zmrig` (the Zig miner, RandomX only). See [The Zig engine](#the-zig-engine). |
 | `--tls` | TLS stratum |
+| `--cloudflare[=HOST[:PORT]]` | WebSocket inside TLS on 443 and the `zmrig` engine: the one shape that passes HTTPS-only egress and CDNs. See [doc/NETWORK.md](NETWORK.md). |
+| `--transport KIND` | `tcp`, `tls`, `ws` or `wss`, overriding the scheme in `--pool` |
+| `--ws-path PATH` | WebSocket path used by `--cloudflare` |
+| `--ws-origin URL` | `Origin` header for the WebSocket upgrade |
+| `--proxy URL` | `http://user:pass@host:port` or `socks5://user:pass@host:port` |
+| `--connect-to HOST:PORT` | dial this address, keep the pool name for SNI/`Host` |
+| `--tls-ca FILE` | trust a private CA / pin a relay certificate |
+| `--idle-timeout N` | reconnect when the pool is silent for `N` s (`0` = never) |
 | `--cpu-hint N` | `max-threads-hint`, default `100` |
 | `--all-backends` | also build OpenCL/CUDA support |
 | `--no-tune` | do not touch huge pages / MSR / governor |
@@ -99,7 +107,8 @@ Differences worth knowing:
 | build deps | cmake, libuv, OpenSSL, hwloc | `g++`, `ar`, zig 0.13 (installed automatically) |
 | binary | `/usr/local/bin/xmrig-ocean` | `/usr/local/bin/zmrig` + `xmrig-ocean` symlink |
 | measured | 1075.7 H/s (`scripts/bench.sh`) | 1084–1089 H/s installed, 1.08–1.10 kH/s `--bench` |
-| TLS | full (including `--tls-insecure`) | full verification only (Zig 0.13 has no "skip verify") |
+| TLS | full (including `--tls-insecure`) | full verification, private CA via `--tls-ca` (Zig 0.13 has no "skip verify") |
+| transports | TCP, TLS | TCP, TLS, WebSocket, WebSocket+TLS, HTTP CONNECT, SOCKS5 |
 | self-test | — | `zmrig --self-test` (vectors + 2 GiB dataset) |
 
 The chosen engine is recorded in `/etc/xmrig-ocean/engine`, so the subcommands
@@ -108,6 +117,11 @@ binary without repeating `--engine`. Passing `--engine` again overrides it.
 
 Host tuning still applies: without huge pages the Zig miner falls back to
 `mmap`'d pages and loses ~10%, exactly like the C++ one.
+
+On a host that only allows 443/tcp, or behind a CDN, use
+`--engine zmrig --cloudflare`; the complete guide (including a Cloudflare
+Worker that turns any pool into a `wss` endpoint) is in
+[doc/NETWORK.md](NETWORK.md).
 
 ---
 

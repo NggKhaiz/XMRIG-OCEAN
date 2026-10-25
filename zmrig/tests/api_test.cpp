@@ -69,6 +69,13 @@ int main()
     xmo_hash(vm, reinterpret_cast<const uint8_t *>(inA.data()), inA.size(), outA);
     check("rx/0 light hash A", outA, wantA);
 
+    /* Same hash into a deliberately misaligned destination. */
+    {
+        uint8_t raw[33] = {};
+        xmo_hash(vm, reinterpret_cast<const uint8_t *>(inA.data()), inA.size(), raw + 1);
+        check("rx/0 light hash A (unaligned out)", raw + 1, wantA);
+    }
+
     xmo_hash(vm, reinterpret_cast<const uint8_t *>(inB.data()), inB.size(), outB);
 
     /* RandomX pipelining: first() prepares blob A, and each next() returns the
@@ -80,6 +87,30 @@ int main()
     xmo_hash_next(vm, temp, reinterpret_cast<const uint8_t *>(inC.data()), inC.size(), nextB);
     check("rx/0 light first/next A", nextA, outA);
     check("rx/0 light first/next B", nextB, outB);
+
+    /* Regression: the pipelined state has to survive an *unaligned* staging
+     * buffer. The wrapper has a slow path for that, and it used to forget to
+     * copy the new state back, which silently corrupted every hash after the
+     * first one. Chain four hashes through both paths. */
+    {
+        const std::string inputs[5] = { inA, inB, inC, inA, inB };
+        uint8_t oneshot[5][32] = {};
+        for (int i = 0; i < 5; ++i) {
+            xmo_hash(vm, reinterpret_cast<const uint8_t *>(inputs[i].data()), inputs[i].size(), oneshot[i]);
+        }
+
+        uint8_t raw[8 * sizeof(uint64_t) + 1] = {};           /* deliberately misaligned +1 */
+        uint64_t *misaligned = reinterpret_cast<uint64_t *>(raw + 1);
+
+        xmo_hash_first(vm, reinterpret_cast<const uint8_t *>(inputs[0].data()), inputs[0].size(), misaligned);
+        for (int i = 1; i < 5; ++i) {
+            uint8_t got[32] = {};
+            xmo_hash_next(vm, misaligned, reinterpret_cast<const uint8_t *>(inputs[i].data()), inputs[i].size(), got);
+            char name[64];
+            std::snprintf(name, sizeof(name), "pipelined unaligned #%d", i);
+            check(name, got, oneshot[i - 1]);
+        }
+    }
 
     xmo_vm_free(vm);
     xmo_engine_free(light);

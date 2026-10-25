@@ -386,18 +386,23 @@ void xmo_hash_first(xmo_vm *vm, const uint8_t *blob, size_t len, uint64_t *temp)
 }
 
 
-void xmo_hash_next(xmo_vm *vm, const uint64_t *temp, const uint8_t *blob, size_t len, uint8_t *out)
+void xmo_hash_next(xmo_vm *vm, uint64_t *temp, const uint8_t *blob, size_t len, uint8_t *out)
 {
     if (isAligned64(temp)) {
-        randomx_calculate_hash_next(vm->vm, *const_cast<uint64_t (*)[8]>(reinterpret_cast<const uint64_t (*)[8]>(temp)),
-                                    blob, len, out, vm->algorithm);
+        randomx_calculate_hash_next(vm->vm, *reinterpret_cast<uint64_t (*)[8]>(temp), blob, len, out, vm->algorithm);
 
         return;
     }
 
+    // RandomX wants a 64-byte aligned staging block, so hash through a local
+    // copy - and copy the *updated* state back, otherwise the next call would
+    // start from the previous blob and every hash after the first one would be
+    // wrong. (That is not theoretical: it produced one bad share in ~300
+    // before it was found.)
     uint64_t local[8] __attribute__((aligned(64)));
     std::memcpy(local, temp, sizeof(local));
     randomx_calculate_hash_next(vm->vm, *reinterpret_cast<uint64_t (*)[8]>(local), blob, len, out, vm->algorithm);
+    std::memcpy(temp, local, sizeof(local));
 }
 
 

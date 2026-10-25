@@ -1,3 +1,57 @@
+# v6.26.0-mo9 — mining through picky networks
+
+The transport layer of `zmrig` was rewritten into a byte-stream layer
+(`zmrig/src/transport.zig`) and grew everything a VPS behind a restrictive
+firewall or a CDN needs. The C++ engine is untouched.
+
+### New
+- `--cloudflare[=HOST[:PORT]]` (installer and `zmrig`): pool over
+  WebSocket inside TLS on 443, the one shape that passes CDN-only and
+  HTTPS-only egress. The installer writes it into the pool section of
+  `config.json` and switches to the `zmrig` engine, which is the only one with a
+  WebSocket client. `--cloudflare=host` also sets the pool.
+- WebSocket and WebSocket-over-TLS stratum clients (`ws://`, `wss://`,
+  `--transport ws|wss`), including RFC 6455 framing (client masking, 126/127
+  extended lengths, ping/pong, close), accept-key verification and a synthetic
+  line terminator so the stratum reader is shared with the TCP path.
+- Proxy support: HTTP `CONNECT` with basic auth and SOCKS5 with
+  username/password and remote DNS (`--proxy http://... | socks5://...`).
+- `--connect-to HOST[:PORT]`: dial a specific address while keeping the pool
+  name for TLS SNI and the `Host` header (whitelisted CDN ranges, anycast).
+- `--tls-ca FILE`: trust a private CA / pin a relay certificate. The installer
+  copies the file to `/etc/xmrig-ocean/tls-ca.pem` so the unit's private `/tmp`
+  cannot break it.
+- `--idle-timeout N` (default 300 s, 0 disables) and a periodic `keepalived`
+  (`--keepalive-interval`, default 60 s) so CDNs and NATs do not cut idle
+  sockets.
+- `doc/NETWORK.md`: the whole feature, plus a complete Cloudflare Worker relay
+  that turns any plain pool into a `wss` endpoint.
+
+### Fixes
+- **Reconnect left the rig at 0 H/s.** The disconnect path paused the workers
+  and only a *seed change* unpaused them, so a dropped connection with an
+  unchanged seed never resumed hashing. `applyJob` now always unpauses.
+- **SIGTERM could hang for minutes** while the main thread was parked in a
+  blocking read: the monitor thread now closes the socket when shutdown starts.
+- **Mining stopped during a reconnect.** Workers keep hashing the last job;
+  shares found in the gap are dropped with a rate-limited warning instead of
+  pausing the rig.
+- **SOCKS5 greeting had a wrong method count** (`NMETHODS=2` with one method
+  byte), which deadlocked against a real proxy until the OS timeout. The
+  greeting now always matches its length, and "no authentication" is offered
+  next to username/password.
+- **Proxy and TLS/WebSocket handshakes had no deadline**, so a half-open proxy
+  could park the miner in `read()` forever. Handshakes now run with a 20 s
+  socket timeout that is removed once the session is up.
+- **Shares were submitted with a hardcoded `"algo":"rx/0"`**; the job's own
+  algorithm is used now.
+- **`--cloudflare` dropped an explicit port** (`--pool host:4702` became 443).
+- **`status` could report the previous run's hashrate.** It is now scoped to
+  the current service start and ignored when older than 90 s, so a reconnect
+  loop shows "no data yet" instead of a number that looks live.
+- **`--tls` marked the pool as TLS but kept port 3333** when the URL did not
+  specify one; it now follows the transport's default port.
+
 # v6.26.0-mo8 — the Zig miner
 
 A complete second miner, in Zig, on top of the same RandomX engine: same

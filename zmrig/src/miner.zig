@@ -29,12 +29,19 @@ pub const Share = struct {
     nonce: u32 = 0,
     hash: [32]u8 = undefined,
     height: u64 = 0,
+    /// Algorithm of the job the share belongs to: pools validate the name, and
+    /// a hardcoded "rx/0" is wrong the moment the pool switches algo.
+    algo: api.Algo = .rx_0,
 };
 
 /// Hands shares to the pool connection from worker threads.
 pub const Submitter = struct {
     mutex: std.Thread.Mutex = .{},
     session: ?*stratum.Session = null,
+    /// Timestamp of the last byte we sent, used to decide when a keepalive is
+    /// due. Shares count as traffic, so a busy rig never sends one.
+    last_write: std.atomic.Value(i64) = std.atomic.Value(i64).init(0),
+    last_drop_warn: std.atomic.Value(i64) = std.atomic.Value(i64).init(0),
     accepted: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     rejected: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     failed: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
@@ -43,6 +50,28 @@ pub const Submitter = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         self.session = session;
+        self.last_write.store(std.time.milliTimestamp(), .monotonic);
+    }
+
+    /// Sends `keepalived` when nothing has gone out for `interval_ms`.
+    /// Runs on the monitor thread: the same mutex keeps it from interleaving
+    /// with a share submission, and `session == null` after detach makes it a
+    /// no-op while the connection is being replaced.
+    pub fn keepaliveIfIdle(self: *Submitter, interval_ms: i64, logger: *log.Logger) void {
+        const now = std.time.milliTimestamp();
+        if (now - self.last_write.load(.monotonic) < interval_ms) return;
+
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const session = self.session orelse return;
+        if (now - self.last_write.load(.monotonic) < interval_ms) return;
+
+        self.last_write.store(now, .monotonic);
+
+        session.keepalive() catch |e| {
+            logger.debug("cannot send keepalive: {s}", .{@errorName(e)});
+        };
     }
 
     pub fn detach(self: *Submitter) void {
@@ -57,12 +86,22 @@ pub const Submitter = struct {
 
         const session = self.session orelse {
             _ = self.failed.fetchAdd(1, .monotonic);
-            logger.warn("share found while disconnected, dropped (nonce {x})", .{share.nonce});
+
+            // A disconnect can last minutes and a 1 kH/s rig finds a share
+            // every few seconds; log the first one and then at most every
+            // 30 s so the log stays readable.
+            const now = std.time.milliTimestamp();
+            if (now - self.last_drop_warn.load(.monotonic) > 30_000) {
+                self.last_drop_warn.store(now, .monotonic);
+                logger.warn("share found while disconnected, dropped (nonce {x}, {d} dropped so far)", .{ share.nonce, self.failed.load(.monotonic) });
+            }
 
             return;
         };
 
-        _ = session.submit(share.job_id[0..share.job_id_len], share.nonce, &share.hash, share.height) catch |e| {
+        self.last_write.store(std.time.milliTimestamp(), .monotonic);
+
+        _ = session.submit(share.job_id[0..share.job_id_len], share.nonce, &share.hash, share.height, share.algo) catch |e| {
             _ = self.failed.fetchAdd(1, .monotonic);
             logger.warn("cannot send share: {s}", .{@errorName(e)});
 
@@ -304,6 +343,12 @@ pub const Miner = struct {
     pub fn init(logger: *log.Logger, opts: *const options.Options) !Self {
         const hw_threads = cpuCount();
 
+        // These are process-wide engine settings and must be in place before
+        // the first cache is built (the JIT bakes them into the program).
+        api.xmo_set_scratchpad_prefetch(opts.scratchpad_prefetch);
+        api.xmo_set_huge_pages_jit(@intFromBool(opts.huge_pages_jit));
+        api.xmo_set_optimized_dataset_init(@intFromBool(opts.optimized_init));
+
         var flags = api.EngineFlags{
             .huge_pages = opts.huge_pages,
             .huge_pages_jit = opts.huge_pages_jit,
@@ -398,13 +443,15 @@ pub const Miner = struct {
             self.shared.pause();
             std.time.sleep(20 * std.time.ns_per_ms);
             try self.engine.seedNow(new_job.seed, self.shared.thread_count);
-
-            if (!self.started) try self.start();
-            self.shared.unpause();
-        } else if (!self.started) {
-            try self.start();
         }
 
+        if (!self.started) try self.start();
+
+        // Always unpause: the reconnect path pauses the workers, and a new job
+        // with an unchanged seed (the common case after a dropped connection)
+        // would otherwise leave them asleep forever and the rig would sit at
+        // 0 H/s while everything looked healthy.
+        self.shared.unpause();
         self.shared.publish(new_job);
     }
 
@@ -459,7 +506,9 @@ fn workerMain(worker: *Worker) void {
     var prev_nonce: u32 = 0;
     var rounds: u32 = 0;
     var temp: [8]u64 align(64) = undefined;
-    var hash: [32]u8 = undefined;
+    // RandomX writes the final digest with SIMD stores; keep the destination
+    // aligned so that never becomes an unaligned-access fault.
+    var hash: [32]u8 align(64) = undefined;
 
     while (shared.running.load(.acquire)) {
         const generation = shared.generation.load(.acquire);
@@ -505,7 +554,7 @@ fn workerMain(worker: *Worker) void {
         }
 
         if (local_job.hashMeetsTarget(&hash)) {
-            var share = Share{ .nonce = prev_nonce, .hash = hash, .height = local_job.height };
+            var share = Share{ .nonce = prev_nonce, .hash = hash, .height = local_job.height, .algo = local_job.algo };
             const id = local_job.idSlice();
             share.job_id_len = id.len;
             @memcpy(share.job_id[0..id.len], id);

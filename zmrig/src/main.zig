@@ -11,7 +11,7 @@ const options = @import("options.zig");
 const stratum = @import("stratum.zig");
 const util = @import("util.zig");
 
-pub const version = "6.26.0-mo8";
+pub const version = "6.26.0-mo9";
 
 var running = std.atomic.Value(bool).init(true);
 
@@ -55,12 +55,19 @@ pub fn main() !void {
         var file_opts = options.Options{};
         try options.parseConfigFile(allocator, &file_opts, path);
 
-        const cli = try options.parseArgs(allocator, args[1..]);
-        mergeOptions(&file_opts, &cli);
-        allocator.free(cli.pools.items); // pool strings now owned by file_opts
+        var cli = try options.parseArgs(allocator, args[1..]);
+        mergeOptions(allocator, &file_opts, &cli);
+        allocator.free(cli.pools.items); // strings were moved, the array goes away
         opts.deinit(allocator);
         opts = file_opts;
     }
+
+    options.applyTransportDefaults(allocator, &opts) catch |e| {
+        var stderr = std.io.getStdErr().writer();
+        try stderr.print("zmrig: {s}\n", .{@errorName(e)});
+
+        std.process.exit(1);
+    };
 
     if (opts.help) {
         try std.io.getStdOut().writeAll(options.usage);
@@ -127,6 +134,9 @@ pub fn main() !void {
         .miner = &miner,
         .logger = logger,
         .print_interval = @as(i64, @intCast(opts.print_time)) * 1000,
+        .idle_timeout_ms = @as(i64, @intCast(opts.idle_timeout)) * 1000,
+        .keepalive_ms = @as(i64, @intCast(opts.keepalive_interval)) * 1000,
+        .keepalive_enabled = opts.keepalive_interval > 0,
     };
     monitor.thread = try std.Thread.spawn(.{ .stack_size = 256 * 1024 }, Monitor.run, .{&monitor});
     defer {
@@ -142,10 +152,11 @@ pub fn main() !void {
     while (running.load(.acquire)) {
         const pool = opts.pools.items[pool_index % opts.pools.items.len];
 
-        logger.info("connecting to {s}{s}:{d}", .{
-            if (pool.tls) "stratum+ssl://" else "stratum+tcp://",
+        logger.info("connecting to {s}://{s}:{d}{s}", .{
+            pool.transport.label(),
             pool.host,
             pool.port,
+            if (pool.transport.usesWs()) (pool.ws_path orelse "/") else "",
         });
 
         const algo = opts.poolAlgo(&pool);
@@ -180,7 +191,7 @@ pub fn main() !void {
         });
 
         miner.submitter.attach(&session);
-        monitor.socket.store(@intCast(session.conn.stream.handle), .release);
+        monitor.socket.store(@intCast(session.conn.handle()), .release);
         monitor.last_message.store(std.time.milliTimestamp(), .release);
 
         miner.applyJob(&first_job) catch |e| {
@@ -194,7 +205,9 @@ pub fn main() !void {
         monitor.socket.store(-1, .release);
 
         miner.submitter.detach();
-        miner.shared.pause();
+        // Keep the workers running on the last job while we reconnect: a pool
+        // that drops a socket for a second must not cost a minute of hashing.
+        // Shares found in the gap are dropped by the submitter with a warning.
 
         switch (result) {
             .disconnected => |e| logger.warn("connection lost: {s}", .{@errorName(e)}),
@@ -292,12 +305,21 @@ const Monitor = struct {
     miner: *miner_mod.Miner,
     logger: *log.Logger,
     print_interval: i64,
+    idle_timeout_ms: i64 = 300_000,
+    keepalive_ms: i64 = 60_000,
+    keepalive_enabled: bool = true,
     last_message: std.atomic.Value(i64) = std.atomic.Value(i64).init(0),
     socket: std.atomic.Value(i32) = std.atomic.Value(i32).init(-1),
     stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     thread: ?std.Thread = null,
 
-    const timeout_ms: i64 = 180_000;
+    /// Closes the active socket so a blocking read returns and the main thread
+    /// can notice `running == false`. Called from the monitor thread, which is
+    /// the only one allowed to touch the descriptor besides the main loop.
+    pub fn kick(self: *Monitor) void {
+        const fd = self.socket.load(.acquire);
+        if (fd >= 0) std.posix.shutdown(@intCast(fd), .both) catch {};
+    }
 
     fn run(self: *Monitor) void {
         var last_report = std.time.milliTimestamp();
@@ -329,9 +351,18 @@ const Monitor = struct {
                 self.miner.report();
             }
 
+            // A SIGTERM must not wait for the pool to say something: the main
+            // thread is parked in a blocking read, so nudge it here.
+            if (!running.load(.acquire)) self.kick();
+
+            // A Cloudflare-fronted WebSocket (and any NAT/firewall in between)
+            // drops a connection that carries no traffic. Sending keepalived
+            // from this thread keeps the same socket alive for hours.
+            if (self.keepalive_enabled) self.miner.submitter.keepaliveIfIdle(self.keepalive_ms, self.logger);
+
             const last = self.last_message.load(.acquire);
             const fd = self.socket.load(.acquire);
-            if (last != 0 and fd >= 0 and now - last > timeout_ms) {
+            if (self.idle_timeout_ms > 0 and last != 0 and fd >= 0 and now - last > self.idle_timeout_ms) {
                 self.logger.warn("pool has been silent for {d} s, dropping the connection", .{@divTrunc(now - last, 1000)});
                 std.posix.shutdown(@intCast(fd), .both) catch {};
             }
@@ -339,12 +370,22 @@ const Monitor = struct {
     }
 };
 
-fn mergeOptions(base: *options.Options, extra: *const options.Options) void {
+fn mergeOptions(allocator: std.mem.Allocator, base: *options.Options, extra: *options.Options) void {
     if (extra.algo) |v| base.algo = v;
     if (extra.threads) |v| base.threads = v;
     if (extra.pools.items.len > 0) {
-        // Command line pools replace config file pools, like xmrig does.
+        // Command line pools replace config file pools, like xmrig does. Take
+        // ownership of the CLI buffers instead of copying: `extra` is discarded
+        // right after the merge and a copy would leak on every start.
+        for (base.pools.items) |pool| options.freePool(allocator, pool);
+
         base.pools.clearRetainingCapacity();
+        base.pools.appendSlice(allocator, extra.pools.items) catch {
+            // Out of memory here means we cannot mine anyway; keep the config
+            // pools rather than dying inside a void function.
+            return;
+        };
+        extra.pools.clearRetainingCapacity();
     }
     base.mode = extra.mode;
     base.huge_pages = extra.huge_pages;
@@ -365,6 +406,26 @@ fn mergeOptions(base: *options.Options, extra: *const options.Options) void {
         base.benchmark = true;
         base.bench_hashes = extra.bench_hashes;
     }
+
+    // These short-circuit the run, so they must survive the merge: dropping
+    // them turned `zmrig -c config.json --check` into a live miner.
+    if (extra.check) base.check = true;
+    if (extra.self_test) base.self_test = true;
+    if (extra.self_test_light) base.self_test_light = true;
+    if (extra.help) base.help = true;
+    if (extra.version) base.version = true;
+    if (extra.verbose) base.verbose = true;
+    if (extra.background) base.background = true;
+    if (extra.http_host.len > 0) base.http_host = extra.http_host;
+
+    if (extra.transport_override) |v| base.transport_override = v;
+    if (extra.ws_path) |v| base.ws_path = v;
+    if (extra.ws_origin) |v| base.ws_origin = v;
+    if (extra.host_header) |v| base.host_header = v;
+    if (extra.connect_to) |v| base.connect_to = v;
+    if (extra.tls_ca) |v| base.tls_ca = v;
+    if (extra.proxy_url) |v| base.proxy_url = v;
+    if (extra.cloudflare) base.cloudflare = true;
 }
 
 /// --check: print what the miner would do, without touching the network.
@@ -374,13 +435,25 @@ fn printConfigSummary(opts: *const options.Options) !void {
     try out.print("config ok\n", .{});
 
     for (opts.pools.items) |pool| {
-        try out.print("  pool    {s}{s}:{d} user={s} algo={s}\n", .{
-            if (pool.tls) "stratum+ssl://" else "stratum+tcp://",
+        try out.print("  pool    {s}://{s}:{d}{s} user={s} algo={s}\n", .{
+            pool.transport.label(),
             pool.host,
             pool.port,
+            if (pool.transport.usesWs()) (pool.ws_path orelse "/") else "",
             pool.user,
             if (opts.poolAlgo(&pool)) |algo| algo.label() else "auto",
         });
+
+        if (pool.connect_host) |host| {
+            try out.print("  route   connect {s}:{d}, Host: {s}\n", .{
+                host,
+                pool.connect_port orelse pool.port,
+                pool.host_header orelse pool.host,
+            });
+        }
+        if (pool.proxy_spec.kind != .none) {
+            try out.print("  proxy   {s} {s}:{d}\n", .{ @tagName(pool.proxy_spec.kind), pool.proxy_spec.host, pool.proxy_spec.port });
+        }
     }
 
     try out.print("  threads {d} (default would be {d})\n", .{ opts.threads orelse miner_mod.defaultThreads(miner_mod.cpuCount()), miner_mod.defaultThreads(miner_mod.cpuCount()) });

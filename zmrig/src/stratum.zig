@@ -9,9 +9,10 @@ const api = @import("api.zig");
 const job = @import("job.zig");
 const log = @import("log.zig");
 const options = @import("options.zig");
+const transport = @import("transport.zig");
 const util = @import("util.zig");
 
-pub const agent = "zmrig/6.26.0-mo8";
+pub const agent = "zmrig/6.26.0-mo9";
 
 pub const ConnectError = error{
     ConnectFailed,
@@ -22,9 +23,7 @@ pub const ConnectError = error{
 
 pub const Connection = struct {
     allocator: std.mem.Allocator,
-    stream: std.net.Stream,
-    tls: ?std.crypto.tls.Client = null,
-    bundle: ?std.crypto.Certificate.Bundle = null,
+    conn: *transport.Conn,
     buf: [64 * 1024]u8 = undefined,
     start: usize = 0,
     end: usize = 0,
@@ -32,62 +31,41 @@ pub const Connection = struct {
     const Self = @This();
 
     pub fn open(allocator: std.mem.Allocator, pool: *const options.Pool, logger: *log.Logger) ConnectError!*Self {
-        const stream = std.net.tcpConnectToHost(allocator, pool.host, pool.port) catch |e| {
-            logger.warn("connect to {s}:{d} failed: {s}", .{ pool.host, pool.port, @errorName(e) });
+        const target = transport.Target{
+            .kind = pool.transport,
+            .host = pool.host,
+            .port = pool.port,
+            .path = pool.ws_path orelse "/",
+            .host_header = pool.host_header,
+            .origin = pool.ws_origin,
+            .connect_host = pool.connect_host,
+            .connect_port = pool.connect_port,
+            .tls_ca = pool.tls_ca,
+            .proxy = pool.proxy(),
+            .user_agent = agent,
+        };
+
+        const conn = transport.Conn.open(allocator, target, logger) catch |e| {
+            logger.warn("connect to {s}://{s}:{d} failed: {s}", .{ pool.transport.label(), pool.host, pool.port, @errorName(e) });
+
             return error.ConnectFailed;
         };
-        errdefer stream.close();
 
         const self = allocator.create(Self) catch return error.OutOfMemory;
         errdefer allocator.destroy(self);
 
-        self.* = .{ .allocator = allocator, .stream = stream };
-
-        // Keep idle connections from being dropped silently by a NAT.
-        setKeepAlive(stream.handle);
-
-        if (pool.tls) {
-            var bundle = std.crypto.Certificate.Bundle{};
-            bundle.rescan(allocator) catch {
-                logger.warn("cannot load the system certificate bundle, TLS will fail", .{});
-                return error.NoCertificateBundle;
-            };
-            self.bundle = bundle;
-
-            self.tls = std.crypto.tls.Client.init(stream, bundle, pool.host) catch |e| {
-                logger.warn("TLS handshake with {s} failed: {s}", .{ pool.host, @errorName(e) });
-                return error.TlsInitFailed;
-            };
-        }
+        self.* = .{ .allocator = allocator, .conn = conn };
 
         return self;
     }
 
     pub fn close(self: *Self) void {
-        if (self.tls) |*tls| tls.writeAllEnd(self.stream, "", true) catch {};
-        self.stream.close();
-        if (self.bundle) |*bundle| bundle.deinit(self.allocator);
+        self.conn.destroy();
     }
 
     pub fn destroy(self: *Self) void {
         self.close();
         self.allocator.destroy(self);
-    }
-
-    fn readRaw(self: *Self, out: []u8) !usize {
-        if (self.tls) |*tls| {
-            return tls.read(self.stream, out);
-        }
-
-        return self.stream.read(out);
-    }
-
-    fn writeAll(self: *Self, data: []const u8) !void {
-        if (self.tls) |*tls| {
-            return tls.writeAll(self.stream, data);
-        }
-
-        return self.stream.writeAll(data);
     }
 
     fn fill(self: *Self) !void {
@@ -100,7 +78,11 @@ pub const Connection = struct {
             self.end = 0;
         }
 
-        const n = try self.readRaw(self.buf[self.end..]);
+        const n = self.conn.read(self.buf[self.end..]) catch |e| switch (e) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return error.ConnectionClosed,
+        };
+
         if (n == 0) return error.ConnectionClosed;
 
         self.end += n;
@@ -131,8 +113,12 @@ pub const Connection = struct {
     }
 
     pub fn writeLine(self: *Self, line: []const u8) !void {
-        try self.writeAll(line);
-        try self.writeAll("\n");
+        self.conn.writeMessage(line) catch return error.ConnectionClosed;
+    }
+
+    /// File descriptor of the underlying socket, used by the silence watchdog.
+    pub fn handle(self: *Self) std.posix.socket_t {
+        return self.conn.stream.handle;
     }
 };
 
@@ -264,7 +250,7 @@ pub const Session = struct {
         }
     }
 
-    pub fn submit(self: *Self, job_id: []const u8, nonce: u32, hash: *const [32]u8, height: u64) !u64 {
+    pub fn submit(self: *Self, job_id: []const u8, nonce: u32, hash: *const [32]u8, height: u64, algo: api.Algo) !u64 {
         const nonce_hex = try std.fmt.allocPrint(self.allocator, "{x:0>8}", .{nonce});
         defer self.allocator.free(nonce_hex);
 
@@ -275,7 +261,7 @@ pub const Session = struct {
         const line = try std.fmt.allocPrint(
             self.allocator,
             "{{\"id\":{d},\"jsonrpc\":\"2.0\",\"method\":\"submit\",\"params\":{{\"id\":\"{s}\",\"job_id\":\"{s}\",\"nonce\":\"{s}\",\"result\":\"{s}\",\"algo\":\"{s}\",\"height\":{d}}}}}",
-            .{ id, self.pool.rig_id orelse self.pool.user, job_id, nonce_hex, hash_hex, "rx/0", height },
+            .{ id, self.pool.rig_id orelse self.pool.user, job_id, nonce_hex, hash_hex, algo.label(), height },
         );
         defer self.allocator.free(line);
 

@@ -45,6 +45,19 @@ validation host: **1084–1089 H/s installed** versus 1075.7 H/s for the C++
 frontend, i.e. the frontend is not the bottleneck. See
 [`zmrig/README.md`](zmrig/README.md).
 
+Restrictive network? A host that only lets 443/tcp out, or sits behind a CDN,
+can still mine:
+
+```bash
+sudo ./oneclick.sh install --wallet 4YourMoneroAddress... \
+     --pool your-relay.example.com:443 --cloudflare --ws-path /monero/TOKEN
+```
+
+`--cloudflare` switches the pool to WebSocket-over-TLS on 443 (the one shape
+that passes HTTPS-only egress) and selects the engine that speaks it. Proxies,
+edge-IP dialling and certificate pinning are covered in
+[`doc/NETWORK.md`](doc/NETWORK.md).
+
 ## Documentation
 
 * [`doc/INSTALL.md`](doc/INSTALL.md) — one-click installer, options, service
@@ -60,6 +73,10 @@ frontend, i.e. the frontend is not the bottleneck. See
   hashrate, measured on real hardware, plus a troubleshooting table.
 * [`doc/ZERO_FEE.md`](doc/ZERO_FEE.md) — what was removed, why it matters for
   RandomX performance, and how to verify the binary yourself.
+* [`doc/NETWORK.md`](doc/NETWORK.md) — mining from a VPS that only allows 443:
+  `--cloudflare`, WebSocket/TLS transports, HTTP CONNECT and SOCKS5 proxies,
+  `--connect-to`, certificate pinning, and a ready-to-deploy Cloudflare Worker
+  relay.
 
 ## Manual install
 

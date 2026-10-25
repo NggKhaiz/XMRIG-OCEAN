@@ -68,7 +68,9 @@ void xmo_hash(xmo_vm *vm, const uint8_t *blob, size_t len, uint8_t *out);
 /* Pipelined hashing, same order as XMRig's worker loop: the first call only
  * prepares the scratchpad, each following call hashes the *next* blob. */
 void xmo_hash_first(xmo_vm *vm, const uint8_t *blob, size_t len, uint64_t *temp);
-void xmo_hash_next(xmo_vm *vm, const uint64_t *temp, const uint8_t *blob,
+/* `temp` is both input and output: RandomX fills it with the state of `blob`
+ * for the next call. It must stay valid and untouched between the two calls. */
+void xmo_hash_next(xmo_vm *vm, uint64_t *temp, const uint8_t *blob,
                    size_t len, uint8_t *out);
 
 /* Commitments are part of the Monero v2 proof of work. */
