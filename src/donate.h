@@ -23,22 +23,23 @@
 /*
  * Dev donation.
  *
- * Percentage of your hashing power that you want to donate to the developer can be 0% but supports XMRig Development.
+ * THIS BUILD IS PERMANENTLY FEE-FREE (0%): both the default and the minimum
+ * donation level are zero, the donation strategy was removed from the binary
+ * and `Network` never instantiates a second stratum session.
  *
- * Example of how it works for the setting of 1%:
- * Your miner will mine into your usual pool for a random time (in a range from 49.5 to 148.5 minutes),
- * then switch to the developer's pool for 1 minute, then switch again to your pool for 99 minutes
- * and then switch again to developer's pool for 1 minute; these rounds will continue until the miner stops.
+ * Consequences, all of them intentional:
+ *   - 100% of the hashing time is spent on the pools configured by the user;
+ *   - no runtime context switch between pools, so no RandomX dataset rebuild,
+ *     no VM teardown and no lost nonce scope;
+ *   - `--donate-level` / `donate-level` are still accepted for compatibility
+ *     with existing scripts and configs, but they are ignored.
  *
- * Randomised only on the first round to prevent waves on the donation pool.
- *
- * Switching is instant and only happens after a successful connection, so you never lose any hashes.
- *
- * If you plan on changing donations to 0%, please consider making a one-off donation to my wallet:
- * XMR: 48edfHu7V9Z84YzzMa6fUueoELZ9ZRXq9VetWzYGzKt52XU5xvqgzYnDK9URnRoJMk1j8nLwEVsaSWJ4fhdUyZijBGUicoD
+ * If you want to support the upstream XMRig developers, do it as a voluntary
+ * one-off donation through the address published in the upstream README.
+ * There is intentionally no wallet address compiled into this tree.
  */
-constexpr const int kDefaultDonateLevel = 1;
-constexpr const int kMinimumDonateLevel = 1;
+constexpr const int kDefaultDonateLevel = 0;
+constexpr const int kMinimumDonateLevel = 0;
 
 
 #endif // XMRIG_DONATE_H

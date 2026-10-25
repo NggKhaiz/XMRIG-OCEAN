@@ -23,6 +23,7 @@
  *   along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <algorithm>
 #include <cstdlib>
 #include <uv.h>
 
@@ -91,7 +92,20 @@ int xmrig::App::exec()
         m_controller->pre_start();
         m_controller->config()->benchmark().set_controller(m_controller);
 
-        if (m_controller->config()->benchmark().isNewBenchRun() || m_controller->config()->isRebenchAlgo()) {
+        // The calibration exists to tell a pool with automatic algorithm
+        // selection how fast this machine mines every algorithm. When every
+        // pool pins one algorithm, that data is unused and the calibration
+        // would only delay the first share by minutes, so skip it.
+        const bool pinned = std::all_of(pools.begin(), pools.end(), [](const Pool &pool) {
+            return pool.algorithm() != Algorithm::INVALID;
+        });
+
+        if (pinned && (m_controller->config()->benchmark().isNewBenchRun() || m_controller->config()->isRebenchAlgo())) {
+            LOG_INFO("%s " CYAN_BOLD_S "algorithm pinned in the config, skipping algo-perf calibration", Tags::benchmark());
+            m_controller->config()->benchmark().skip();
+        }
+
+        if (!pinned && (m_controller->config()->benchmark().isNewBenchRun() || m_controller->config()->isRebenchAlgo())) {
             if (m_controller->config()->isShouldSave()) {
                 m_controller->config()->save();
             }

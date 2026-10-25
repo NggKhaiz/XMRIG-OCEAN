@@ -90,10 +90,13 @@ private:
     AesMode m_aes           = AES_AUTO;
     Assembly m_assembly;
     bool m_enabled          = true;
-    bool m_hugePagesJit     = false;
+    // Performance defaults for a dedicated mining box: JIT code in huge pages,
+    // no thread yielding (we want the CPU, not the scheduler) and an automatic
+    // scratchpad pool so MoneroOcean algorithm switches do not re-map memory.
+    bool m_hugePagesJit     = true;
     bool m_shouldSave       = false;
-    bool m_yield            = true;
-    int m_memoryPool        = 0;
+    bool m_yield            = false;
+    int m_memoryPool        = -1;
     int m_priority          = -1;
     size_t m_hugePageSize   = kDefaultHugePageSizeKb;
     String m_argon2Impl;

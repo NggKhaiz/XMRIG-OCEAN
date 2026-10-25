@@ -1,3 +1,187 @@
+# v6.26.0-mo9 — mining through picky networks
+
+The transport layer of `zmrig` was rewritten into a byte-stream layer
+(`zmrig/src/transport.zig`) and grew everything a VPS behind a restrictive
+firewall or a CDN needs. The C++ engine is untouched.
+
+### New
+- `--cloudflare[=HOST[:PORT]]` (installer and `zmrig`): pool over
+  WebSocket inside TLS on 443, the one shape that passes CDN-only and
+  HTTPS-only egress. The installer writes it into the pool section of
+  `config.json` and switches to the `zmrig` engine, which is the only one with a
+  WebSocket client. `--cloudflare=host` also sets the pool.
+- WebSocket and WebSocket-over-TLS stratum clients (`ws://`, `wss://`,
+  `--transport ws|wss`), including RFC 6455 framing (client masking, 126/127
+  extended lengths, ping/pong, close), accept-key verification and a synthetic
+  line terminator so the stratum reader is shared with the TCP path.
+- Proxy support: HTTP `CONNECT` with basic auth and SOCKS5 with
+  username/password and remote DNS (`--proxy http://... | socks5://...`).
+- `--connect-to HOST[:PORT]`: dial a specific address while keeping the pool
+  name for TLS SNI and the `Host` header (whitelisted CDN ranges, anycast).
+- `--tls-ca FILE`: trust a private CA / pin a relay certificate. The installer
+  copies the file to `/etc/xmrig-ocean/tls-ca.pem` so the unit's private `/tmp`
+  cannot break it.
+- `--idle-timeout N` (default 300 s, 0 disables) and a periodic `keepalived`
+  (`--keepalive-interval`, default 60 s) so CDNs and NATs do not cut idle
+  sockets.
+- `doc/NETWORK.md`: the whole feature, plus a complete Cloudflare Worker relay
+  that turns any plain pool into a `wss` endpoint.
+
+### Fixes
+- **Reconnect left the rig at 0 H/s.** The disconnect path paused the workers
+  and only a *seed change* unpaused them, so a dropped connection with an
+  unchanged seed never resumed hashing. `applyJob` now always unpauses.
+- **SIGTERM could hang for minutes** while the main thread was parked in a
+  blocking read: the monitor thread now closes the socket when shutdown starts.
+- **Mining stopped during a reconnect.** Workers keep hashing the last job;
+  shares found in the gap are dropped with a rate-limited warning instead of
+  pausing the rig.
+- **SOCKS5 greeting had a wrong method count** (`NMETHODS=2` with one method
+  byte), which deadlocked against a real proxy until the OS timeout. The
+  greeting now always matches its length, and "no authentication" is offered
+  next to username/password.
+- **Proxy and TLS/WebSocket handshakes had no deadline**, so a half-open proxy
+  could park the miner in `read()` forever. Handshakes now run with a 20 s
+  socket timeout that is removed once the session is up.
+- **Shares were submitted with a hardcoded `"algo":"rx/0"`**; the job's own
+  algorithm is used now.
+- **`--cloudflare` dropped an explicit port** (`--pool host:4702` became 443).
+- **`status` could report the previous run's hashrate.** It is now scoped to
+  the current service start and ignored when older than 90 s, so a reconnect
+  loop shows "no data yet" instead of a number that looks live.
+- **`--tls` marked the pool as TLS but kept port 3333** when the URL did not
+  specify one; it now follows the transport's default port.
+
+# v6.26.0-mo8 — the Zig miner
+
+A complete second miner, in Zig, on top of the same RandomX engine: same
+hashrate as the C++ frontend, no runtime, no donation code, and a build that
+needs only `g++` + `zig`.
+
+### New: `zmrig`
+- `zmrig/` — Zig frontend (stratum over TCP/TLS, login/job/seed rotation,
+  keepalive, failover, share submission, huge pages, thread pinning, priority,
+  pipelined hashing, XMRig-compatible CLI and JSON config, live 10 s/60 s/15 min
+  hashrate, session maximum, `--version/--check/--self-test/--bench`).
+- `zmrig/capi/` — a small C ABI over the RandomX engine in
+  `src/crypto/randomx` (`xmo_*`), so the miner keeps the reference JIT and its
+  AVX-512/VAES paths instead of re-implementing them.
+- `zmrig/build.sh` — compiles the engine with the project's own flags, caches
+  objects per flag signature, then links the Zig frontend against
+  `libxmorx.a` and the system `libstdc++`/`libgcc_s` (Zig 0.13 cannot resolve
+  `-lstdc++` on a bare Debian).
+- `zmrig/tests/run.sh` + `zmrig/tests/api_test.cpp` — engine conformance:
+  reference vectors, pipelined vs one-shot hashing, 2 GiB dataset vs cache.
+- `zmrig/README.md` — architecture, build, test, measured numbers, known limits.
+
+### Installer (1.1)
+- `--engine xmrig|zmrig` (`MINER_ENGINE`), recorded in
+  `/etc/xmrig-ocean/engine`; `zmrig` installs `${PREFIX}/bin/zmrig` plus the
+  `xmrig-ocean` symlink so the unit, logs and helpers stay identical.
+- Zig is provisioned automatically from the PyPI wheel
+  (`pip3 install ziglang==0.13.0`) when it is not on `PATH`.
+- `status`/`logs`/`bench`/`verify`/`start`/`stop`/`restart` resolve the installed
+  engine; `bench` drives `zmrig --bench=N` and `verify` runs the Zig self-test
+  plus a `strings | grep -c donat` audit.
+- Engine-specific dependencies: the `zmrig` path no longer requires
+  libuv/cmake/OpenSSL/hwloc.
+- Fixes found by running it end to end: `--engine` on the command line now wins
+  over a stale install marker; reinstalling restarts a running miner instead of
+  leaving the old process with the old config; log parsing starts at the new
+  service start, so `status`/`wait_ready` cannot read yesterday's hashrate;
+  `status` reports "not running" instead of a stale number; the self-test falls
+  back to `--self-test=light` while a full-memory miner holds the huge pages;
+  `as_root` strips leaked D-Bus session variables that make `systemctl` fail.
+
+### Performance
+- `zmrig` installed as a service: **1084–1089 H/s** (C++ frontend on the same
+  host: 1075.7 H/s via `scripts/bench.sh`), dataset init 15.2 s, 2336 MB of the
+  cache+dataset in 2 MiB huge pages, 0 rejected shares over the validation run.
+- `zmrig --bench=100000 -t 2`: 100001 hashes in 91 071 ms = 1.098 kH/s.
+
+### Docs
+- New section in `doc/ALTERNATIVES.md` answering the "rewrite it in Zig + NASM +
+  CUDA" proposal with measurements: what the Zig host buys (latency, not
+  hashrate), why the NASM core already exists as the RandomX JIT, and why a
+  CUDA layer cannot mine Monero.
+
+# v6.26.0-mo7 — one-click deployment
+
+Everything needed to go from a bare Linux machine to a tuned, supervised,
+fee-free miner in one command, plus the measurements that justify the choice of
+miner.
+
+### One-click
+- New `oneclick.sh`: dependency install, native build, host tuning, validated
+  config, systemd service + boot-time tuning unit, first-share wait, fee audit
+  and a summary card. Idempotent, with `install|build|tune|config|start|stop|
+  restart|status|logs|bench|verify|update|uninstall` subcommands.
+- Falls back to a supervised background process when systemd is not available.
+- `status` reports service state, live hashrate (10 s/60 s/15 m), accepted
+  shares, huge pages and the log tail from the local HTTP API.
+- Helper binaries installed next to the miner: `xmrig-ocean-tune`,
+  `xmrig-ocean-bench`, `xmrig-ocean-verify`.
+
+### Performance / behaviour
+- **Skip the algo-perf calibration when every pool pins an algorithm.** With
+  `--algo` set the table is never consumed, so the first share no longer waits
+  ~2 minutes (`src/App.cpp`, `MoBenchmark::skip()`).
+- `scripts/tune-linux.sh --quiet` for unattended/systemd use.
+- `scripts/bench.sh`: new `--hashes` window option, validated against the sizes
+  the miner accepts (250K/500K/1M-9M), and a per-thread hashrate line.
+
+### Docs
+- New `doc/INSTALL.md` (installer, options, fleet install, troubleshooting) and
+  `doc/ALTERNATIVES.md` (Rust/Go/other miners versus this one, with measured
+  numbers: the RandomX JIT is 6.1x faster than the portable interpreter on the
+  validation host).
+- README starts with the one-click path; the old instructions are now "manual
+  install".
+
+# v6.26.0-mo6 — fee-free / performance release
+
+Rebuilt from `6.26.0-mo5` with two goals: **0% developer fee** and the highest
+achievable CPU hashrate on the machine that compiles the binary.
+
+### Zero fee
+- Removed `src/net/strategies/DonateStrategy.{h,cpp}`, the `donate` job index,
+  the donation submit path, the donation pool endpoints and the developer wallet.
+- `kDefaultDonateLevel` and `kMinimumDonateLevel` are `0`; `Pools::donateLevel()`
+  is a `constexpr` returning `0`; the API and `Summary` report `0%`.
+- `--donate-level` / `--donate-over-proxy` are still parsed for compatibility but
+  have no effect (`doc/ZERO_FEE.md`).
+- Removed the MoneroOcean hack that disabled the fee only when the first pool host
+  matched `moneroocean.stream`.
+- `scripts/verify-fee-free.sh` audits source and binary.
+
+### Performance
+- New `cmake/tuning.cmake`: `-march=native/-mtune=native`, `-fno-plt`,
+  function/loop alignment and optional PGO (`generate`/`use`). LTO is available
+  but **off by default**: GCC 12 miscompiles CryptoNight under LTO and the CPU
+  backend then refuses to start (`self-test failed`).
+- Runtime defaults for dedicated rigs: `huge-pages-jit` on, `yield` off,
+  scratchpad `memory-pool` on, 1 GiB pages auto-detected (only requested when the
+  kernel actually reserved them, no more misleading error).
+- Linux: `cpu.priority` now really applies `setpriority()` (was a no-op).
+- Actionable warning when huge pages are not fully allocated.
+- `scripts/build-optimized.sh`, `scripts/tune-linux.sh`, `scripts/bench.sh` and
+  `config/performance.json`.
+- Measured in the validation sandbox: RandomX hashrate is not affected by
+  compiler flags (JIT), the gain comes from memory setup and from removing the
+  donation switch — see `doc/PERFORMANCE.md` §1 and §6.
+
+### Fixes
+- Login now advertises the `mo-native` and `submit-result` extensions for every
+  algorithm, not only when a KAWPOW GPU algorithm is enabled (CPU-only builds
+  never negotiated them before).
+- Console logging no longer produces an empty log when stdout is redirected to a
+  regular file (`xmrig > miner.log`, cron, some service managers).
+- RandomX dataset allocation no longer logs a hard error when 1 GiB pages are
+  requested but unavailable; it falls back silently in auto mode.
+
+### Docs
+- `doc/ARCHITECTURE.md`, `doc/PERFORMANCE.md`, `doc/ZERO_FEE.md`, new README.
+
 # v6.26.0
 - [#3769](https://github.com/xmrig/xmrig/pull/3769), [#3772](https://github.com/xmrig/xmrig/pull/3772), [#3774](https://github.com/xmrig/xmrig/pull/3774), [#3775](https://github.com/xmrig/xmrig/pull/3775), [#3776](https://github.com/xmrig/xmrig/pull/3776), [#3782](https://github.com/xmrig/xmrig/pull/3782), [#3783](https://github.com/xmrig/xmrig/pull/3783) **Added support for RandomX v2.**
 - [#3746](https://github.com/xmrig/xmrig/pull/3746) RISC-V: vectorized RandomX main loop.
