@@ -1,3 +1,80 @@
+# v6.26.0-mo7 — one-click deployment
+
+Everything needed to go from a bare Linux machine to a tuned, supervised,
+fee-free miner in one command, plus the measurements that justify the choice of
+miner.
+
+### One-click
+- New `oneclick.sh`: dependency install, native build, host tuning, validated
+  config, systemd service + boot-time tuning unit, first-share wait, fee audit
+  and a summary card. Idempotent, with `install|build|tune|config|start|stop|
+  restart|status|logs|bench|verify|update|uninstall` subcommands.
+- Falls back to a supervised background process when systemd is not available.
+- `status` reports service state, live hashrate (10 s/60 s/15 m), accepted
+  shares, huge pages and the log tail from the local HTTP API.
+- Helper binaries installed next to the miner: `xmrig-ocean-tune`,
+  `xmrig-ocean-bench`, `xmrig-ocean-verify`.
+
+### Performance / behaviour
+- **Skip the algo-perf calibration when every pool pins an algorithm.** With
+  `--algo` set the table is never consumed, so the first share no longer waits
+  ~2 minutes (`src/App.cpp`, `MoBenchmark::skip()`).
+- `scripts/tune-linux.sh --quiet` for unattended/systemd use.
+- `scripts/bench.sh`: new `--hashes` window option, validated against the sizes
+  the miner accepts (250K/500K/1M-9M), and a per-thread hashrate line.
+
+### Docs
+- New `doc/INSTALL.md` (installer, options, fleet install, troubleshooting) and
+  `doc/ALTERNATIVES.md` (Rust/Go/other miners versus this one, with measured
+  numbers: the RandomX JIT is 6.1x faster than the portable interpreter on the
+  validation host).
+- README starts with the one-click path; the old instructions are now "manual
+  install".
+
+# v6.26.0-mo6 — fee-free / performance release
+
+Rebuilt from `6.26.0-mo5` with two goals: **0% developer fee** and the highest
+achievable CPU hashrate on the machine that compiles the binary.
+
+### Zero fee
+- Removed `src/net/strategies/DonateStrategy.{h,cpp}`, the `donate` job index,
+  the donation submit path, the donation pool endpoints and the developer wallet.
+- `kDefaultDonateLevel` and `kMinimumDonateLevel` are `0`; `Pools::donateLevel()`
+  is a `constexpr` returning `0`; the API and `Summary` report `0%`.
+- `--donate-level` / `--donate-over-proxy` are still parsed for compatibility but
+  have no effect (`doc/ZERO_FEE.md`).
+- Removed the MoneroOcean hack that disabled the fee only when the first pool host
+  matched `moneroocean.stream`.
+- `scripts/verify-fee-free.sh` audits source and binary.
+
+### Performance
+- New `cmake/tuning.cmake`: `-march=native/-mtune=native`, `-fno-plt`,
+  function/loop alignment and optional PGO (`generate`/`use`). LTO is available
+  but **off by default**: GCC 12 miscompiles CryptoNight under LTO and the CPU
+  backend then refuses to start (`self-test failed`).
+- Runtime defaults for dedicated rigs: `huge-pages-jit` on, `yield` off,
+  scratchpad `memory-pool` on, 1 GiB pages auto-detected (only requested when the
+  kernel actually reserved them, no more misleading error).
+- Linux: `cpu.priority` now really applies `setpriority()` (was a no-op).
+- Actionable warning when huge pages are not fully allocated.
+- `scripts/build-optimized.sh`, `scripts/tune-linux.sh`, `scripts/bench.sh` and
+  `config/performance.json`.
+- Measured in the validation sandbox: RandomX hashrate is not affected by
+  compiler flags (JIT), the gain comes from memory setup and from removing the
+  donation switch — see `doc/PERFORMANCE.md` §1 and §6.
+
+### Fixes
+- Login now advertises the `mo-native` and `submit-result` extensions for every
+  algorithm, not only when a KAWPOW GPU algorithm is enabled (CPU-only builds
+  never negotiated them before).
+- Console logging no longer produces an empty log when stdout is redirected to a
+  regular file (`xmrig > miner.log`, cron, some service managers).
+- RandomX dataset allocation no longer logs a hard error when 1 GiB pages are
+  requested but unavailable; it falls back silently in auto mode.
+
+### Docs
+- `doc/ARCHITECTURE.md`, `doc/PERFORMANCE.md`, `doc/ZERO_FEE.md`, new README.
+
 # v6.26.0
 - [#3769](https://github.com/xmrig/xmrig/pull/3769), [#3772](https://github.com/xmrig/xmrig/pull/3772), [#3774](https://github.com/xmrig/xmrig/pull/3774), [#3775](https://github.com/xmrig/xmrig/pull/3775), [#3776](https://github.com/xmrig/xmrig/pull/3776), [#3782](https://github.com/xmrig/xmrig/pull/3782), [#3783](https://github.com/xmrig/xmrig/pull/3783) **Added support for RandomX v2.**
 - [#3746](https://github.com/xmrig/xmrig/pull/3746) RISC-V: vectorized RandomX main loop.

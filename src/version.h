@@ -11,9 +11,9 @@
 #define APP_ID        "xmrig"
 #define APP_NAME      "XMRig"
 #define APP_DESC      "XMRig miner"
-// MoneroOcean: mark this runtime fork build distinctly from upstream XMRig.
-#define APP_VERSION   "6.26.0-mo5"
-// End MoneroOcean
+// Fee-free / performance fork: distinguishable from upstream XMRig and from
+// the original MoneroOcean 6.26.0-mo5 release.
+#define APP_VERSION   "6.26.0-mo7"
 #define APP_DOMAIN    "xmrig.com"
 #define APP_SITE      "www.xmrig.com"
 #define APP_COPYRIGHT "Copyright (C) 2016-2026 xmrig.com"

@@ -97,6 +97,9 @@ class MoBenchmark : public IJobResultListener {
 
         void start_perf(); // start benchmarks
         void flush_perf();
+        // Mark the calibration as not needed (used when every pool pins one
+        // algorithm, so algo-perf data would never be consumed).
+        void skip() { m_isNewBenchRun = false; }
 
         bool isNewBenchRun() const { return m_isNewBenchRun; }
         const char *poolAlgoName(const Algorithm &algo) const;

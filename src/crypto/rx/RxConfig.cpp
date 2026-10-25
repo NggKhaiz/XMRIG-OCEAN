@@ -17,6 +17,7 @@
  */
 
 #include "crypto/rx/RxConfig.h"
+#include "crypto/common/VirtualMemory.h"
 #include "crypto/randomx/randomx.h"
 #include "3rdparty/rapidjson/document.h"
 #include "backend/cpu/Cpu.h"
@@ -92,7 +93,11 @@ bool xmrig::RxConfig::read(const rapidjson::Value &value)
         m_cacheQoS = Json::getBool(value, kCacheQoS, m_cacheQoS);
 
 #       ifdef XMRIG_OS_LINUX
-        m_oneGbPages = Json::getBool(value, kOneGbPages, m_oneGbPages);
+        // Tri-state: missing key keeps auto detection, explicit bool is honoured.
+        const auto &oneGbPages = Json::getValue(value, kOneGbPages);
+        if (oneGbPages.IsBool()) {
+            m_oneGbPages = oneGbPages.GetBool() ? 1 : 0;
+        }
 #       endif
 
 #       ifdef XMRIG_FEATURE_HWLOC
@@ -138,7 +143,12 @@ rapidjson::Value xmrig::RxConfig::toJSON(rapidjson::Document &doc) const
     obj.AddMember(StringRef(kInit),         m_threads, allocator);
     obj.AddMember(StringRef(kInitAVX2),     m_initDatasetAVX2, allocator);
     obj.AddMember(StringRef(kMode),         StringRef(modeName()), allocator);
-    obj.AddMember(StringRef(kOneGbPages),   m_oneGbPages, allocator);
+    // Only persist an explicit choice. Omitting the key keeps "auto" alive, so a
+    // saved config on a host without reserved 1GB pages does not degrade to
+    // "always off" for the next start.
+    if (m_oneGbPages >= 0) {
+        obj.AddMember(StringRef(kOneGbPages), m_oneGbPages > 0, allocator);
+    }
     obj.AddMember(StringRef(kRdmsr),        m_rdmsr, allocator);
 
 #   ifdef XMRIG_FEATURE_MSR
@@ -203,6 +213,18 @@ std::vector<uint32_t> xmrig::RxConfig::nodeset() const
     return (m_numa && (n > 1) && (freem_mem > n * dataset_mem + cache_mem + threads_mem)) ? Cpu::info()->nodeset() : std::vector<uint32_t>();
 }
 #endif
+
+
+bool xmrig::RxConfig::isOneGbPages() const
+{
+    if (m_oneGbPages < 0) {
+        // Auto mode: only request 1GB pages when they are really available,
+        // otherwise fall back to 2MB pages without an error in the log.
+        return VirtualMemory::isOneGbPagesAvailable();
+    }
+
+    return m_oneGbPages > 0;
+}
 
 
 const char *xmrig::RxConfig::modeName() const

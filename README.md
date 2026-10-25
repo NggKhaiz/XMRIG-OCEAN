@@ -1,47 +1,104 @@
-# XMRig
+# XMRig — fee-free, performance-first fork
 
-[![Github All Releases](https://img.shields.io/github/downloads/xmrig/xmrig/total.svg)](https://github.com/xmrig/xmrig/releases)
-[![GitHub release](https://img.shields.io/github/release/xmrig/xmrig/all.svg)](https://github.com/xmrig/xmrig/releases)
-[![GitHub Release Date](https://img.shields.io/github/release-date/xmrig/xmrig.svg)](https://github.com/xmrig/xmrig/releases)
-[![GitHub license](https://img.shields.io/github/license/xmrig/xmrig.svg)](https://github.com/xmrig/xmrig/blob/master/LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/xmrig/xmrig.svg)](https://github.com/xmrig/xmrig/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/xmrig/xmrig.svg)](https://github.com/xmrig/xmrig/network)
+A fork of [XMRig](https://github.com/xmrig/xmrig) `6.26.0` (MoneroOcean flavour,
+native RandomX v2 support) rebuilt around two hard requirements:
 
-XMRig is a high performance, open source, cross platform RandomX, KawPow, CryptoNight and [GhostRider](https://github.com/xmrig/xmrig/tree/master/src/crypto/ghostrider#readme) unified CPU/GPU miner and [RandomX benchmark](https://xmrig.com/benchmark). Official binaries are available for Windows, Linux, macOS and FreeBSD.
+* **0 % developer fee** — the donation strategy, its time slicing, its wallet and
+  its pool endpoint are removed from the source tree and from the binary. The
+  miner reports `DONATE 0%` and never opens a second stratum session.
+* **maximum hashrate on the machine you build on** — tuned build flags, tuned
+  runtime defaults (JIT huge pages, 1 GiB page auto-detection, scratchpad memory
+  pool, no thread yielding), real Linux process priority, an OS tuning script and
+  a reproducible benchmark harness.
 
-## Mining backends
-- **CPU** (x86/x64/ARMv7/ARMv8/RISC-V)
-- **OpenCL** for AMD GPUs.
-- **CUDA** for NVIDIA GPUs via external [CUDA plugin](https://github.com/xmrig/xmrig-cuda).
-
-## Download
-* **[Binary releases](https://github.com/xmrig/xmrig/releases)**
-* **[Build from source](https://xmrig.com/docs/miner/build)**
-
-## Usage
-The preferred way to configure the miner is the [JSON config file](https://xmrig.com/docs/miner/config) as it is more flexible and human friendly. The [command line interface](https://xmrig.com/docs/miner/command-line-options) does not cover all features, such as mining profiles for different algorithms. Important options can be changed during runtime without miner restart by editing the config file or executing [API](https://xmrig.com/docs/miner/api) calls.
-
-* **[Wizard](https://xmrig.com/wizard)** helps you create initial configuration for the miner.
-* **[Workers](http://workers.xmrig.info)** helps manage your miners via HTTP API.
-
-## Hash tests
-Run the offline CPU hash suite without pool, API, or miner network dependencies:
+## One-click install
 
 ```bash
-./tests/hash/check.sh
+# fresh machine: fetch, build, tune, install as a service, verify, print stats
+curl -fsSL https://raw.githubusercontent.com/NggKhaiz/XMRIG-OCEAN/arena/918a7f95-xmrig-ocean/oneclick.sh \
+  | sudo bash -s -- --wallet 4YourMoneroAddress...
 ```
 
-The script builds the standalone hash-test binary and runs both the regular known-answer suite and the full RandomX mode checks.
+```bash
+sudo ./oneclick.sh status     # service + live hashrate + accepted shares
+sudo ./oneclick.sh bench      # 180 s RandomX measurement
+sudo ./oneclick.sh verify     # prove the 0% fee
+sudo ./oneclick.sh update     # git pull, rebuild, restart
+```
 
-## Donations
-* Default donation 1% (1 minute in 100 minutes) can be increased via option `donate-level` or disabled in source code.
-* XMR: `48edfHu7V9Z84YzzMa6fUueoELZ9ZRXq9VetWzYGzKt52XU5xvqgzYnDK9URnRoJMk1j8nLwEVsaSWJ4fhdUyZijBGUicoD`
+It installs `xmrig-ocean` (miner), `xmrig-ocean-tune` (host tuning),
+`xmrig-ocean-bench`, `xmrig-ocean-verify`, a supervised systemd service and a
+boot-time tuning unit. Safe to re-run; the config is never overwritten without
+`--force`. Details, options and troubleshooting: [`doc/INSTALL.md`](doc/INSTALL.md).
 
-## Developers
-* **[xmrig](https://github.com/xmrig)**
-* **[sech1](https://github.com/SChernykh)**
+## Documentation
 
-## Contacts
-* support@xmrig.com
-* [reddit](https://www.reddit.com/user/XMRig/)
-* [twitter](https://twitter.com/xmrig_dev)
+* [`doc/INSTALL.md`](doc/INSTALL.md) — one-click installer, options, service
+  layout, unattended fleet install, troubleshooting.
+* [`doc/ALTERNATIVES.md`](doc/ALTERNATIVES.md) — measured comparison against
+  Rust/Go/other miners, and why the C++ RandomX JIT stays.
+* [`doc/ARCHITECTURE.md`](doc/ARCHITECTURE.md) — complete map of the code base:
+  threads, job flow, RandomX internals, config system, where to change what.
+* [`doc/PERFORMANCE.md`](doc/PERFORMANCE.md) — every lever that affects
+  hashrate, measured on real hardware, plus a troubleshooting table.
+* [`doc/ZERO_FEE.md`](doc/ZERO_FEE.md) — what was removed, why it matters for
+  RandomX performance, and how to verify the binary yourself.
+
+## Manual install
+
+```bash
+# 1. build for this CPU (Release + native ISA, CPU-only)
+./scripts/build-optimized.sh
+
+# 2. prepare the host: huge pages, THP, governor, MSR (root, once per boot)
+sudo ./scripts/tune-linux.sh
+
+# 3. edit config/performance.json (wallet + pool) and start
+sudo ./build/xmrig -c config/performance.json
+
+# 4. measure, and prove there is no fee
+./scripts/bench.sh --seconds 300
+./scripts/verify-fee-free.sh
+```
+
+Startup log should show `huge pages 100%`, `dataset ready`, `READY` and the MSR
+preset applied. Anything else is explained in `doc/PERFORMANCE.md` §9.
+
+To make sure huge pages and MSR survive a reboot, call
+`scripts/tune-linux.sh` from a systemd oneshot unit.
+
+## Mining backends
+
+- **CPU** (x86/x64, ARMv7/ARMv8, RISC-V, RandomX v2, CryptoNight family, Argon2,
+  GhostRider, Flex/KCN, Panthera)
+- **OpenCL** for AMD GPUs (`--all-backends` build)
+- **CUDA** for NVIDIA GPUs via the external
+  [CUDA plugin](https://github.com/xmrig/xmrig-cuda) (`--all-backends` build)
+
+## Configuration
+
+`config/performance.json` is a ready-to-edit template for a CPU rig on
+MoneroOcean (auto algorithm switching). The miner still accepts every upstream
+XMRig option; see `--help`, `doc/` and the upstream
+[config documentation](https://xmrig.com/docs/miner/config).
+
+`donate-level` and `donate-over-proxy` are accepted and ignored: this build is
+permanently fee-free.
+
+## Tests
+
+```bash
+./tests/hash/check.sh                     # hash known-answer suite
+node run_tests.js --safe --build-dir build # what CI runs
+```
+
+## Credits and license
+
+XMRig is Copyright (C) 2016-2026 xmrig.com, Copyright (C) 2018-2026 SChernykh,
+and the RandomX authors, licensed under **GPL-3.0**. The MoneroOcean additions
+are Copyright (C) MoneroOcean. This fork keeps all copyright headers and the
+license intact; see [`LICENSE`](LICENSE).
+
+If you want to support upstream development, make a voluntary one-off donation
+using the address published in the upstream project — nothing in this tree is
+wired to it.

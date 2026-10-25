@@ -56,7 +56,7 @@ public:
     void execCommand(char command);
     void pause();
     void setEnabled(bool enabled);
-    void setJob(const Job &job, bool donate);
+    void setJob(const Job &job);
     void stop();
 
 protected:
