@@ -783,13 +783,28 @@ EOF
     ok "service installed: ${SERVICE_NAME}"
 }
 
+# restart is implemented as stop -> timestamp -> start so that a log line from
+# the outgoing process can never be newer than LOG_SINCE (wait_ready and status
+# parse the journal tail and would otherwise report the previous run).
 svc_ctl() {
-    case "$1" in
-        start|restart|try-restart|reload-or-restart) mark_log_start ;;
-    esac
-
     if has_systemd && systemctl list-unit-files "${SERVICE_NAME}.service" >/dev/null 2>&1; then
-        as_root systemctl "$1" "${SERVICE_NAME}.service"
+        case "$1" in
+            start)
+                mark_log_start
+                as_root systemctl start "${SERVICE_NAME}.service"
+                ;;
+            restart)
+                as_root systemctl stop "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
+                mark_log_start
+                as_root systemctl start "${SERVICE_NAME}.service"
+                ;;
+            stop)
+                as_root systemctl stop "${SERVICE_NAME}.service"
+                ;;
+            *)
+                as_root systemctl "$1" "${SERVICE_NAME}.service"
+                ;;
+        esac
     else
         bg_ctl "$1"
     fi
@@ -984,6 +999,23 @@ show_logs() {
     fi
 }
 
+# Seconds since systemd started the unit. Empty when unknown (no systemd, or a
+# `date` that cannot parse systemd's timestamp format).
+service_age() {
+    has_systemd || return 1
+
+    local ts
+    ts=$(as_root systemctl show -p ActiveEnterTimestamp --value "${SERVICE_NAME}.service" 2>/dev/null) || return 1
+    [ -n "$ts" ] || return 1
+
+    local started now
+    started=$(date -d "$ts" +%s 2>/dev/null) || return 1
+    now=$(date +%s)
+
+    [ "$started" -gt 0 ] 2>/dev/null || return 1
+    printf '%s' "$((now - started))"
+}
+
 # ---------------------------------------------------------------------------
 # self check
 # ---------------------------------------------------------------------------
@@ -1176,6 +1208,10 @@ case "$COMMAND" in
             # The last hashrate line in the log is from the previous run; report
             # nothing rather than a number that looks live but is not.
             info "hashrate: n/a (the miner is not running, use 'start')"
+        elif age=$(service_age) && [ "${age:-999}" -lt 40 ] 2>/dev/null; then
+            # The previous process may have logged a hashrate line seconds
+            # before this one started; do not report it as current.
+            info "hashrate: warming up (started ${age}s ago, the dataset needs ~15s)"
         else
             hr=$(current_hashrate 2>/dev/null || true)
             shares=$(summary_shares 2>/dev/null || true)
