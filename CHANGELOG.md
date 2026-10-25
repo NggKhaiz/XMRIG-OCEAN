@@ -1,3 +1,56 @@
+# v6.26.0-mo8 — the Zig miner
+
+A complete second miner, in Zig, on top of the same RandomX engine: same
+hashrate as the C++ frontend, no runtime, no donation code, and a build that
+needs only `g++` + `zig`.
+
+### New: `zmrig`
+- `zmrig/` — Zig frontend (stratum over TCP/TLS, login/job/seed rotation,
+  keepalive, failover, share submission, huge pages, thread pinning, priority,
+  pipelined hashing, XMRig-compatible CLI and JSON config, live 10 s/60 s/15 min
+  hashrate, session maximum, `--version/--check/--self-test/--bench`).
+- `zmrig/capi/` — a small C ABI over the RandomX engine in
+  `src/crypto/randomx` (`xmo_*`), so the miner keeps the reference JIT and its
+  AVX-512/VAES paths instead of re-implementing them.
+- `zmrig/build.sh` — compiles the engine with the project's own flags, caches
+  objects per flag signature, then links the Zig frontend against
+  `libxmorx.a` and the system `libstdc++`/`libgcc_s` (Zig 0.13 cannot resolve
+  `-lstdc++` on a bare Debian).
+- `zmrig/tests/run.sh` + `zmrig/tests/api_test.cpp` — engine conformance:
+  reference vectors, pipelined vs one-shot hashing, 2 GiB dataset vs cache.
+- `zmrig/README.md` — architecture, build, test, measured numbers, known limits.
+
+### Installer (1.1)
+- `--engine xmrig|zmrig` (`MINER_ENGINE`), recorded in
+  `/etc/xmrig-ocean/engine`; `zmrig` installs `${PREFIX}/bin/zmrig` plus the
+  `xmrig-ocean` symlink so the unit, logs and helpers stay identical.
+- Zig is provisioned automatically from the PyPI wheel
+  (`pip3 install ziglang==0.13.0`) when it is not on `PATH`.
+- `status`/`logs`/`bench`/`verify`/`start`/`stop`/`restart` resolve the installed
+  engine; `bench` drives `zmrig --bench=N` and `verify` runs the Zig self-test
+  plus a `strings | grep -c donat` audit.
+- Engine-specific dependencies: the `zmrig` path no longer requires
+  libuv/cmake/OpenSSL/hwloc.
+- Fixes found by running it end to end: `--engine` on the command line now wins
+  over a stale install marker; reinstalling restarts a running miner instead of
+  leaving the old process with the old config; log parsing starts at the new
+  service start, so `status`/`wait_ready` cannot read yesterday's hashrate;
+  `status` reports "not running" instead of a stale number; the self-test falls
+  back to `--self-test=light` while a full-memory miner holds the huge pages;
+  `as_root` strips leaked D-Bus session variables that make `systemctl` fail.
+
+### Performance
+- `zmrig` installed as a service: **1084–1089 H/s** (C++ frontend on the same
+  host: 1075.7 H/s via `scripts/bench.sh`), dataset init 15.2 s, 2336 MB of the
+  cache+dataset in 2 MiB huge pages, 0 rejected shares over the validation run.
+- `zmrig --bench=100000 -t 2`: 100001 hashes in 91 071 ms = 1.098 kH/s.
+
+### Docs
+- New section in `doc/ALTERNATIVES.md` answering the "rewrite it in Zig + NASM +
+  CUDA" proposal with measurements: what the Zig host buys (latency, not
+  hashrate), why the NASM core already exists as the RandomX JIT, and why a
+  CUDA layer cannot mine Monero.
+
 # v6.26.0-mo7 — one-click deployment
 
 Everything needed to go from a bare Linux machine to a tuned, supervised,

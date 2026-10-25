@@ -31,12 +31,29 @@ It installs `xmrig-ocean` (miner), `xmrig-ocean-tune` (host tuning),
 boot-time tuning unit. Safe to re-run; the config is never overwritten without
 `--force`. Details, options and troubleshooting: [`doc/INSTALL.md`](doc/INSTALL.md).
 
+Two frontends are available, and the installer picks one:
+
+```bash
+sudo ./oneclick.sh install --wallet 4YourMoneroAddress...                # C++ XMRig (all algorithms)
+sudo ./oneclick.sh install --wallet 4YourMoneroAddress... --engine zmrig # Zig miner (RandomX)
+```
+
+`zmrig` is a full RandomX miner written in Zig on top of the same hash engine,
+installed side by side as `/usr/local/bin/zmrig`; the service, the config, the
+benchmark and the fee audit work the same way for both. Measured on the
+validation host: **1084–1089 H/s installed** versus 1075.7 H/s for the C++
+frontend, i.e. the frontend is not the bottleneck. See
+[`zmrig/README.md`](zmrig/README.md).
+
 ## Documentation
 
 * [`doc/INSTALL.md`](doc/INSTALL.md) — one-click installer, options, service
   layout, unattended fleet install, troubleshooting.
 * [`doc/ALTERNATIVES.md`](doc/ALTERNATIVES.md) — measured comparison against
-  Rust/Go/other miners, and why the C++ RandomX JIT stays.
+  Rust/Go/other miners, why the C++ RandomX JIT stays, and what a "rewrite it
+  in a fast language" project can and cannot buy.
+* [`zmrig/README.md`](zmrig/README.md) — the Zig miner: architecture, build,
+  tests, measured hashrate, known limits.
 * [`doc/ARCHITECTURE.md`](doc/ARCHITECTURE.md) — complete map of the code base:
   threads, job flow, RandomX internals, config system, where to change what.
 * [`doc/PERFORMANCE.md`](doc/PERFORMANCE.md) — every lever that affects
@@ -66,6 +83,24 @@ preset applied. Anything else is explained in `doc/PERFORMANCE.md` §9.
 
 To make sure huge pages and MSR survive a reboot, call
 `scripts/tune-linux.sh` from a systemd oneshot unit.
+
+## The Zig miner
+
+`zmrig/` contains a second, complete miner: Zig frontend (stratum, jobs, threads,
+config, stats) + the RandomX JIT from `src/crypto/randomx` behind a small C ABI.
+Same hashrate as the C++ frontend, no runtime, no GC, 0% fee, and it builds in
+about a minute once the engine objects are cached.
+
+```bash
+./zmrig/build.sh                                   # build zmrig/out/zmrig
+./zmrig/tests/run.sh                               # engine conformance tests
+./zmrig/out/zmrig --self-test                      # vectors + 2 GiB dataset check
+./zmrig/out/zmrig -o pool:port -u <wallet> -t 2    # mine
+```
+
+Why Zig instead of Rust or Go is answered with measurements in
+[`zmrig/README.md`](zmrig/README.md) and [`doc/ALTERNATIVES.md`](doc/ALTERNATIVES.md):
+a pure Rust/Go RandomX is the portable interpreter, which is 6.1x slower here.
 
 ## Mining backends
 

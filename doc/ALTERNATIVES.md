@@ -8,7 +8,8 @@ instead of trusted.
 - [2. Measured on this hardware](#2-measured-on-this-hardware)
 - [3. The candidates](#3-the-candidates)
 - [4. Verdict](#4-verdict)
-- [5. How to re-run the comparison](#5-how-to-re-run-the-comparison)
+- [5. What a "high-performance rewrite" can and cannot buy](#5-what-a-high-performance-rewrite-can-and-cannot-buy)
+- [6. How to re-run the comparison](#6-how-to-re-run-the-comparison)
 
 ---
 
@@ -103,6 +104,11 @@ in October 2026.
    donation switch, fixing the memory defaults, and making huge pages + MSR
    actually apply. That is what this fork changed (see
    [ZERO_FEE.md](ZERO_FEE.md) and [PERFORMANCE.md](PERFORMANCE.md)).
+4. **A fast-language frontend is still worth having**, because it removes the
+   C++ build dependency and the libuv/OpenSSL/hwloc surface without touching the
+   hash loop. That is `zmrig/`: 1084–1089 H/s installed, same as the C++
+   frontend, built with a single `g++`+`zig` toolchain. See
+   [../zmrig/README.md](../zmrig/README.md).
 
 What would change this answer: a Rust/Go RandomX implementation with its own
 JIT that matches the reference on the official test vectors. None exists today.
@@ -110,7 +116,80 @@ If one appears, the comparison in section 5 is the test to run.
 
 ---
 
-## 5. How to re-run the comparison
+## 5. What a "high-performance rewrite" can and cannot buy
+
+A common proposal is a three-layer "supreme" miner: a Zig host controller, a
+hand-written NASM RandomX core for the CPU and CUDA/PTX for the GPU. It was
+evaluated against measurements on this machine, layer by layer.
+
+### Layer 1 — Zig host controller: do it, but it buys latency, not hashrate
+
+Delivered in `zmrig/` (see [../zmrig/README.md](../zmrig/README.md)). What the
+proposal promises and what actually happens:
+
+| promise | reality |
+| --- | --- |
+| zero allocation in the mining loop | done: fixed buffers, the only allocator traffic is once per job (JSON parse into an arena that is reset, never freed) |
+| protocol/constants computed at compile time (comptime) | done: algorithm table, nonce offsets, the share target arithmetic and the JSON field names are compile-time |
+| epoll / io_uring for nanosecond job delivery | **not done, deliberately.** A pool sends ~2.5 messages/s per connection; a `read()` on a blocking socket costs ~2 µs, and dataset re-init for a new seed costs 15 000 000 µs. The previous deadline-driven non-blocking reader also broke TLS record framing, which is why the reader is blocking and the 180 s silence timeout is a second thread calling `shutdown(2)` |
+| lower stale-share rate | the dominant term is *when the job reaches the worker*, not how the frontend reads it: on a real pool, job propagation is milliseconds while a share takes ~0.4 s to find at 1000 H/s |
+
+Measured result: the Zig frontend reaches 1084–1089 H/s on the same engine where
+the C++ frontend reaches 1075.7 H/s — a difference inside run-to-run noise, which
+is exactly the point: **the frontend is not on the critical path.**
+
+### Layer 2 — hand-written NASM CPU core: already there, and it is called the JIT
+
+RandomX does not run a fixed inner loop; it *generates a random program for
+every hash* and executes it. The optimised assembly already exists:
+
+* `src/crypto/randomx/jit_compiler_x86_static.S` — hand-written assembly for the
+  fixed parts of the VM (prologue, register init, interp loop, scratchpad ops);
+* `jit_compiler_x86.cpp` — emits the per-hash program, chooses AES/VAES and
+  AVX-512 encodings for the CPU it runs on, and keeps VM state in registers.
+
+`zmrig` links exactly that code, so "write the core by hand in NASM" is what we
+already run. The alternative — a portable interpreter, which is what a from-
+scratch Rust/Go/NASM rewrite effectively is — measured **178 H/s versus
+1090 H/s**, i.e. 6.1x slower. Writing a second JIT that beats the reference one
+on Monero's own consensus code is a research project, not a weekend rewrite.
+
+Two claims from the proposal that cannot work:
+
+* *"never spill to RAM, keep the hash state in zmm0–zmm31"* — RandomX programs
+  address a 2 MiB scratchpad by design; the register allocation is decided by
+  the JIT per generated program, and the ISA mix (AES rounds + integer ops) is
+  fixed by the algorithm's specification, not by the frontend.
+* *"zero cache misses"* — the whole point of a memory-hard PoW is that the hash
+  streams through 2 MiB per thread with deliberate latency. Huge pages and
+  prefetch distance are the levers that exist, and both are already on
+  (2336 MB in 2 MiB pages, `RX_MSR`/prefetch tuned), measured at 1103 H/s peak
+  versus 1091 H/s without them.
+
+### Layer 3 — CUDA/PTX GPU core: not applicable to Monero
+
+RandomX was designed to be hostile to GPUs and ASICs: 2 MiB of scratchpad per
+thread, latency-bound random reads, and a JIT that changes with every seed. There
+is no GPU miner for Monero worth running, and no amount of PTX tuning changes
+that. The Ethash/ProgPoW techniques in the proposal (coalesced access, shared
+memory bank layout, occupancy) belong to memory-bandwidth algorithms, not to
+this one. This repository's GPU backends are for CryptoNight variants and are
+untouched by the RandomX path.
+
+### Profiling tools named in the proposal
+
+`VTune`, `uProf`, `Nsight` and `llvm-mca` are the right tools for a
+compute-bound kernel; they were not available in the validation environment
+(no MSR access, no GPU, no profilers), so every number above comes from A/B
+benchmarks of the real miner (`--bench`, `scripts/bench.sh`, identical huge-page
+and thread settings, 60 s column). The conclusion they support is simple:
+**at 1090 H/s on hardware whose reference JIT reaches 1090 H/s, the hash loop
+has no headroom left; the remaining wins are memory configuration, thread
+placement and not wasting CPU on donations.**
+
+---
+
+## 6. How to re-run the comparison
 
 Any miner can be compared on the same hardware as long as the measurement is
 fair:

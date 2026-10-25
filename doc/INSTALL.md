@@ -58,6 +58,7 @@ sudo ./oneclick.sh uninstall  # stop, disable, remove binaries
 | `--pass VALUE` | pool password, default `x` |
 | `--rig-id NAME` | name shown on the pool dashboard |
 | `--algo NAME` | pin one algorithm (`rx/0`, `cn/r`, …). Also **skips the 2-minute calibration**, see below. |
+| `--engine NAME` | `xmrig` (default, every algorithm) or `zmrig` (the Zig miner, RandomX only). See [The Zig engine](#the-zig-engine). |
 | `--tls` | TLS stratum |
 | `--cpu-hint N` | `max-threads-hint`, default `100` |
 | `--all-backends` | also build OpenCL/CUDA support |
@@ -71,7 +72,42 @@ sudo ./oneclick.sh uninstall  # stop, disable, remove binaries
 
 Environment variables for unusual setups: `UV_INCLUDE_DIR`, `UV_LIBRARY`
 (locally built libuv), `MINER_REPO_URL`, `MINER_BRANCH`, `MINER_POOL`,
-`MINER_PASS`, `MINER_PREFIX`, `MINER_CONFIG_DIR`, `MINER_STATE_DIR`.
+`MINER_PASS`, `MINER_PREFIX`, `MINER_CONFIG_DIR`, `MINER_STATE_DIR`,
+`MINER_ENGINE` (same as `--engine`), `MINER_ZIG_VERSION` (default `0.13.0`).
+
+---
+
+## The Zig engine
+
+`--engine zmrig` builds and installs `zmrig`, the Zig miner from `zmrig/`
+instead of the C++ frontend. It is the same RandomX engine, the same config
+file, the same service and the same helpers — only the process in front of the
+hash loop changes.
+
+```bash
+sudo ./oneclick.sh install --yes --wallet 4YourAddress... --engine zmrig --algo rx/0
+sudo ./oneclick.sh status      # identical output, hashrate comes from the zmrig log
+sudo ./oneclick.sh bench       # runs zmrig --bench=N (default 20000 hashes)
+sudo ./oneclick.sh verify      # --self-test + strings|grep -c donat
+```
+
+Differences worth knowing:
+
+| | `xmrig` (default) | `zmrig` |
+|---|---|---|
+| algorithms | all backends/algorithms in this fork | RandomX family only (`rx/0`, `rx/2`, `rx/wow`, `rx/arq`, `rx/graft`, `rx/sfx`, `rx/yada`, `panthera`) |
+| build deps | cmake, libuv, OpenSSL, hwloc | `g++`, `ar`, zig 0.13 (installed automatically) |
+| binary | `/usr/local/bin/xmrig-ocean` | `/usr/local/bin/zmrig` + `xmrig-ocean` symlink |
+| measured | 1075.7 H/s (`scripts/bench.sh`) | 1084–1089 H/s installed, 1.08–1.10 kH/s `--bench` |
+| TLS | full (including `--tls-insecure`) | full verification only (Zig 0.13 has no "skip verify") |
+| self-test | — | `zmrig --self-test` (vectors + 2 GiB dataset) |
+
+The chosen engine is recorded in `/etc/xmrig-ocean/engine`, so the subcommands
+that run later (`status`, `logs`, `bench`, `verify`, `start`, …) pick the same
+binary without repeating `--engine`. Passing `--engine` again overrides it.
+
+Host tuning still applies: without huge pages the Zig miner falls back to
+`mmap`'d pages and loses ~10%, exactly like the C++ one.
 
 ---
 

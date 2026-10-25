@@ -29,7 +29,8 @@
 #
 set -euo pipefail
 
-ONECLICK_VERSION="1.0"
+ONECLICK_VERSION="1.1"
+ZIG_VERSION="${MINER_ZIG_VERSION:-0.13.0}"
 
 SELF="${BASH_SOURCE[0]:-}"
 REPO_URL="${MINER_REPO_URL:-https://github.com/NggKhaiz/XMRIG-OCEAN.git}"
@@ -48,6 +49,10 @@ POOL="${MINER_POOL:-gulf.moneroocean.stream:10001}"
 POOL_PASS="${MINER_PASS:-x}"
 RIG_ID=""
 ALGO=""
+ENGINE="${MINER_ENGINE:-xmrig}"
+# Set when the engine was named by the user, so a stale install marker does not
+# silently override the choice.
+ENGINE_EXPLICIT="${MINER_ENGINE:+1}"
 TLS="false"
 CPU_HINT="100"
 ASSUME_YES=0
@@ -96,6 +101,7 @@ Options
   --pass VALUE           pool password            (default: x)
   --rig-id NAME          rig identifier shown on the pool dashboard
   --algo NAME            force one algorithm instead of pool auto-selection
+  --engine NAME          xmrig (default, all algorithms) or zmrig (Zig rewrite, rx/* only)
   --tls                  use TLS for the pool connection
   --cpu-hint N           max-threads-hint percentage (default: 100)
   --build-dir DIR        where to compile        (default: PREFIX/src/xmrig-ocean-build)
@@ -134,6 +140,8 @@ while [ $# -gt 0 ]; do
         --rig-id=*)      RIG_ID="${1#*=}" ;;
         --algo)          ALGO="${2:?}"; shift ;;
         --algo=*)        ALGO="${1#*=}" ;;
+        --engine)        ENGINE="${2:?}"; ENGINE_EXPLICIT=1; shift ;;
+        --engine=*)      ENGINE="${1#*=}"; ENGINE_EXPLICIT=1 ;;
         --tls)           TLS="true" ;;
         --cpu-hint)      CPU_HINT="${2:?}"; shift ;;
         --cpu-hint=*)    CPU_HINT="${1#*=}" ;;
@@ -161,16 +169,24 @@ done
 # ---------------------------------------------------------------------------
 BIN_DIR="${PREFIX}/bin"
 BINARY="${BIN_DIR}/xmrig-ocean"
+# The engine decides which frontend gets installed and started:
+#   xmrig - the C++ miner, all 34 algorithms (default)
+#   zmrig - the Zig rewrite in zmrig/, RandomX family only
+ENGINE_BINARY=""
 CONFIG_FILE="${CONFIG_DIR}/config.json"
 BUILD_DIR="${BUILD_DIR_DEFAULT}"
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# sudo sanitises the environment by default, but `sudo -E` (or sudoers env_keep)
+# can leak a stale D-Bus session address, which makes every systemctl call fail
+# with "Failed to connect to bus". Strip those variables explicitly.
 as_root() {
     if [ "$(id -u)" -eq 0 ]; then
-        "$@"
+        env -u DBUS_SESSION_BUS_ADDRESS -u XDG_RUNTIME_DIR "$@"
     elif have sudo; then
-        sudo -n "$@" 2>/dev/null || sudo "$@"
+        sudo -n env -u DBUS_SESSION_BUS_ADDRESS -u XDG_RUNTIME_DIR "$@" 2>/dev/null \
+            || sudo env -u DBUS_SESSION_BUS_ADDRESS -u XDG_RUNTIME_DIR "$@"
     else
         die "root is required for: $*"
     fi
@@ -255,6 +271,17 @@ pkg_install() {
 ensure_deps() {
     step "checking build dependencies"
 
+    resolve_engine
+
+    # zmrig compiles the RandomX engine directly and needs no libuv, OpenSSL,
+    # hwloc or cmake - only a C++ compiler, ar and zig (installed below).
+    if [ "$ENGINE" = "zmrig" ]; then
+        have g++ || die "g++ is required to build the zmrig hash engine"
+        have ar  || die "ar (binutils) is required to build the zmrig hash engine"
+        ok "toolchain: $(c++ --version 2>/dev/null | head -1)"
+        return 0
+    fi
+
     local missing=()
     have cmake      || missing+=("cmake")
     have c++        || missing+=("g++")
@@ -315,10 +342,90 @@ find_uv_header() {
 }
 
 # ---------------------------------------------------------------------------
+# engine selection
+# ---------------------------------------------------------------------------
+# Picks the miner frontend. zmrig only speaks the RandomX family, so it always
+# pins the algorithm: advertising more than that would get jobs it cannot hash.
+resolve_engine() {
+    # A previous install records which frontend is in place.
+    if [ -z "${ENGINE_EXPLICIT:-}" ] && [ -f "${CONFIG_DIR}/engine" ]; then
+        ENGINE=$(cat "${CONFIG_DIR}/engine" 2>/dev/null || echo xmrig)
+    fi
+
+    case "$ENGINE" in
+        xmrig)
+            ;;
+        zmrig)
+            if [ -z "$ALGO" ]; then
+                ALGO="rx/0"
+                info "zmrig mines the RandomX family only, pinning --algo rx/0"
+            fi
+            ;;
+        *)
+            die "unknown engine '${ENGINE}' (use xmrig or zmrig)"
+            ;;
+    esac
+
+    case "$ALGO" in
+        ""|rx|rx/0|randomx) ;;
+        rx/*|panthera) ;;
+        *)
+            if [ "$ENGINE" = "zmrig" ]; then
+                die "zmrig cannot mine ${ALGO}: it implements the RandomX family only (rx/0, rx/2, rx/wow, ...)"
+            fi
+            ;;
+    esac
+
+    # One installed binary per engine, so switching back and forth keeps both.
+    if [ "$ENGINE" = "zmrig" ]; then
+        ENGINE_BINARY="${BIN_DIR}/zmrig"
+    else
+        ENGINE_BINARY="${BIN_DIR}/xmrig-ocean"
+    fi
+}
+
+# zig is not packaged by every distro, so fall back to the PyPI wheel which
+# ships a complete static compiler.
+ensure_zig() {
+    if have zig; then
+        ZIG_BIN=$(command -v zig)
+        ok "zig: $("$ZIG_BIN" version)"
+        return 0
+    fi
+
+    step "installing the Zig compiler"
+    if have pip3 || have pip; then
+        local pip="pip3"
+        have pip3 || pip="pip"
+
+        if as_root "$pip" install --break-system-packages --quiet "ziglang==${ZIG_VERSION}" 2>/dev/null \
+           || as_root "$pip" install --quiet "ziglang==${ZIG_VERSION}" 2>/dev/null; then
+            local zig_path
+            zig_path=$(as_root "$pip" show -f ziglang 2>/dev/null | awk '/Location:/ { print $2 }')
+            if [ -n "$zig_path" ] && [ -x "${zig_path}/ziglang/zig" ]; then
+                as_root ln -sf "${zig_path}/ziglang/zig" "${BIN_DIR}/zig"
+                ZIG_BIN="${zig_path}/ziglang/zig"
+                ok "zig ${ZIG_VERSION} installed"
+                return 0
+            fi
+        fi
+    fi
+
+    die "zig is required to build zmrig. Install it (https://ziglang.org/download) or use --engine xmrig"
+}
+
+# ---------------------------------------------------------------------------
 # build
 # ---------------------------------------------------------------------------
 build_miner() {
     resolve_root
+    resolve_engine
+
+    if [ "$ENGINE" = "zmrig" ]; then
+        build_zmrig
+        return 0
+    fi
+
     step "building (Release, native ISA, CPU-optimised)"
 
     local args=(--build-dir "$BUILD_DIR" --jobs "$(nproc 2>/dev/null || echo 2)")
@@ -348,6 +455,36 @@ build_miner() {
     ok "built $( "${BUILD_DIR}/xmrig" --version 2>/dev/null | head -1 )"
 }
 
+# zmrig = Zig frontend + the RandomX engine from this repository. The engine is
+# compiled by zmrig/build.sh with the system C++ compiler, the miner by zig.
+build_zmrig() {
+    step "building zmrig (Zig frontend + RandomX JIT engine)"
+
+    [ -d "${CONFIGURED_ROOT}/zmrig" ] || die "zmrig sources missing in ${CONFIGURED_ROOT}"
+    ensure_zig
+
+    if [ -x "${BUILD_DIR}/zmrig" ] && [ -z "${FORCE_REBUILD:-}" ]; then
+        local newest
+        newest=$(find "${CONFIGURED_ROOT}/zmrig" "${CONFIGURED_ROOT}/src/crypto/randomx" \
+                      -type f -newer "${BUILD_DIR}/zmrig" -print -quit 2>/dev/null || true)
+        if [ -z "$newest" ]; then
+            ok "binary is up to date: ${BUILD_DIR}/zmrig"
+            return 0
+        fi
+        info "sources changed since the last build, rebuilding"
+    fi
+
+    as_root mkdir -p "$BUILD_DIR"
+
+    local jobs
+    jobs=$(nproc 2>/dev/null || echo 2)
+
+    ZIG="$ZIG_BIN" "${CONFIGURED_ROOT}/zmrig/build.sh" --jobs "$jobs" --output "${BUILD_DIR}"
+
+    [ -x "${BUILD_DIR}/zmrig" ] || die "build did not produce ${BUILD_DIR}/zmrig"
+    ok "built $( "${BUILD_DIR}/zmrig" --version 2>/dev/null | head -1 )"
+}
+
 # ---------------------------------------------------------------------------
 # config
 # ---------------------------------------------------------------------------
@@ -355,10 +492,14 @@ build_miner() {
 # directory varies between subcommands (install may have used --build-dir), so
 # probe the usual locations instead of assuming one.
 find_binary() {
+    local name="xmrig"
+    [ "${ENGINE:-xmrig}" = "zmrig" ] && name="zmrig"
+
     local candidate
-    for candidate in "${BUILD_DIR}/xmrig" "${BUILD_DIR_DEFAULT}/xmrig" \
-                     "${PREFIX}/src/xmrig-ocean-build/xmrig" "${BINARY}" \
-                     "${CONFIGURED_ROOT:-.}/build/xmrig"; do
+    for candidate in "${BUILD_DIR}/${name}" "${BUILD_DIR_DEFAULT}/${name}" \
+                     "${PREFIX}/src/xmrig-ocean-build/${name}" "${ENGINE_BINARY}" \
+                     "${BINARY}" "${CONFIGURED_ROOT:-.}/build/${name}" \
+                     "${CONFIGURED_ROOT:-.}/zmrig/out/zmrig"; do
         if [ -x "$candidate" ]; then
             printf '%s' "$candidate"
             return 0
@@ -550,10 +691,21 @@ run_tune() {
 # install + service
 # ---------------------------------------------------------------------------
 install_binary() {
+    resolve_engine
     step "installing"
     as_root mkdir -p "$BIN_DIR" "$STATE_DIR"
-    as_root install -m 0755 "${BUILD_DIR}/xmrig" "${BINARY}"
-    ok "binary: ${BINARY}"
+
+    if [ "$ENGINE" = "zmrig" ]; then
+        as_root install -m 0755 "${BUILD_DIR}/zmrig" "${ENGINE_BINARY}"
+        # xmrig-ocean stays the name used by the service, logs and tooling.
+        as_root ln -sf "${ENGINE_BINARY}" "${BINARY}"
+    else
+        as_root install -m 0755 "${BUILD_DIR}/xmrig" "${ENGINE_BINARY}"
+        as_root ln -sf "${ENGINE_BINARY}" "${BINARY}"
+    fi
+
+    ok "binary: ${ENGINE_BINARY} ($("${ENGINE_BINARY}" --version 2>/dev/null | head -1))"
+    printf '%s\n' "$ENGINE" | as_root tee "${CONFIG_DIR}/engine" >/dev/null 2>&1 || true
 
     if [ -f "${CONFIGURED_ROOT}/scripts/tune-linux.sh" ]; then
         as_root install -m 0755 "${CONFIGURED_ROOT}/scripts/tune-linux.sh" "${BIN_DIR}/xmrig-ocean-tune"
@@ -632,6 +784,10 @@ EOF
 }
 
 svc_ctl() {
+    case "$1" in
+        start|restart|try-restart|reload-or-restart) mark_log_start ;;
+    esac
+
     if has_systemd && systemctl list-unit-files "${SERVICE_NAME}.service" >/dev/null 2>&1; then
         as_root systemctl "$1" "${SERVICE_NAME}.service"
     else
@@ -639,16 +795,27 @@ svc_ctl() {
     fi
 }
 
+# Timestamp of the last service start. wait_ready/status parse the journal tail,
+# and without this they would happily read the previous run's hashrate line.
+LOG_SINCE=""
+
+mark_log_start() {
+    LOG_SINCE=$(date '+%Y-%m-%d %H:%M:%S')
+}
+
 PIDFILE="${STATE_DIR}/miner.pid"
 LOGFILE="${STATE_DIR}/miner.log"
 
 bg_start() {
+    mark_log_start
     as_root mkdir -p "$STATE_DIR"
     if bg_running; then
         info "already running (pid $(cat "$PIDFILE" 2>/dev/null))"
         return 0
     fi
-    as_root touch "$LOGFILE"
+    # A fresh log per start: wait_ready and status parse the tail, so stale
+    # lines from a previous run would be reported as current state.
+    as_root sh -c ': > "$1"' _ "$LOGFILE"
     # shellcheck disable=SC2024
     as_root nohup "$BINARY" -c "$CONFIG_FILE" --no-color >>"$LOGFILE" 2>&1 &
     echo $! | as_root tee "$PIDFILE" >/dev/null
@@ -682,8 +849,11 @@ current_hashrate() {
         return 0
     fi
 
+    # Both engines print "speed 10s/60s/15m <a> <b> <c> H/s max <d> H/s"; keep
+    # only the three numbers.
     local line
-    line=$(log_tail 200 | sed 's/\x1b\[[0-9;]*m//g' | grep -oE 'speed 10s/60s/15m [^H]*' | tail -1 | sed 's/speed 10s\/60s\/15m //') || true
+    line=$(log_tail 200 | sed 's/\x1b\[[0-9;]*m//g' | grep -oE 'speed 10s/60s/15m [^H]*' | tail -1 \
+           | sed 's/speed 10s\/60s\/15m //; s/[[:space:]]*$//') || true
     [ -n "$line" ] || return 1
     printf '%s\n' "$line"
 }
@@ -691,7 +861,11 @@ current_hashrate() {
 log_tail() {
     local lines="${1:-40}"
     if has_systemd && systemctl list-unit-files "${SERVICE_NAME}.service" >/dev/null 2>&1; then
-        as_root journalctl -u "${SERVICE_NAME}.service" -n "$lines" --no-pager 2>/dev/null || true
+        if [ -n "${LOG_SINCE:-}" ]; then
+            as_root journalctl -u "${SERVICE_NAME}.service" --since "$LOG_SINCE" -n "$lines" --no-pager 2>/dev/null || true
+        else
+            as_root journalctl -u "${SERVICE_NAME}.service" -n "$lines" --no-pager 2>/dev/null || true
+        fi
     elif [ -f "$LOGFILE" ]; then
         tail -n "$lines" "$LOGFILE" || true
     fi
@@ -702,6 +876,10 @@ log_tail() {
 log_recent() {
     local minutes="${1:-5}"
     if has_systemd && systemctl list-unit-files "${SERVICE_NAME}.service" >/dev/null 2>&1; then
+        if [ -n "${LOG_SINCE:-}" ]; then
+            as_root journalctl -u "${SERVICE_NAME}.service" --since "$LOG_SINCE" --no-pager 2>/dev/null || true
+            return 0
+        fi
         as_root journalctl -u "${SERVICE_NAME}.service" --since "-${minutes} min" --no-pager 2>/dev/null || true
     elif [ -f "$LOGFILE" ]; then
         tail -n 200 "$LOGFILE" || true
@@ -796,6 +974,10 @@ summary_shares() {
 show_logs() {
     local lines="${1:-40}"
     if has_systemd && systemctl list-unit-files "${SERVICE_NAME}.service" >/dev/null 2>&1; then
+        if [ -n "${LOG_SINCE:-}" ]; then
+            as_root journalctl -u "${SERVICE_NAME}.service" --since "$LOG_SINCE" -n "$lines" --no-pager 2>/dev/null || true
+            return 0
+        fi
         as_root journalctl -u "${SERVICE_NAME}.service" -n "$lines" --no-pager 2>/dev/null || true
     elif [ -f "$LOGFILE" ]; then
         tail -n "$lines" "$LOGFILE" || true
@@ -805,13 +987,45 @@ show_logs() {
 # ---------------------------------------------------------------------------
 # self check
 # ---------------------------------------------------------------------------
+# The full self-test builds a 2 GiB dataset, which cannot fit next to a running
+# full-memory miner. Fall back to the light variant (reference vectors only) in
+# that case.
+zmrig_self_test() {
+    local binary="$1" level=""
+    if [ "$(service_state)" = "active" ] || bg_running; then
+        level="=light"
+    fi
+
+    "$binary" "--self-test${level}"
+}
+
 self_check() {
     resolve_root
     step "self-check"
 
     [ -x "$BINARY" ] && ok "binary installed: $("$BINARY" --version 2>/dev/null | head -1)" || fail "binary missing"
 
-    if [ -x "${CONFIGURED_ROOT}/scripts/verify-fee-free.sh" ]; then
+    if [ "${ENGINE:-xmrig}" = "zmrig" ]; then
+        if zmrig_self_test "$BINARY" >/tmp/zmrig-selftest.$$ 2>&1; then
+            if grep -q 'SKIP full-memory' /tmp/zmrig-selftest.$$; then
+                ok "hash engine self-test: passed (reference vector, dataset check skipped while mining)"
+            else
+                ok "hash engine self-test: passed (RandomX reference vector + dataset)"
+            fi
+        else
+            warn "hash engine self-test failed:"
+            tail -5 /tmp/zmrig-selftest.$$ || true
+        fi
+        rm -f /tmp/zmrig-selftest.$$
+
+        # zmrig has no donation code at all; prove it on the shipped binary.
+        if have strings; then
+            local dev_fee
+            dev_fee=$(strings "$BINARY" | grep -ci "donat" || true)
+            [ "${dev_fee:-0}" = 0 ] && ok "fee audit: no donation code in the binary (0%)" \
+                                    || warn "found ${dev_fee} donation related strings, inspect manually"
+        fi
+    elif [ -x "${CONFIGURED_ROOT}/scripts/verify-fee-free.sh" ]; then
         if "${CONFIGURED_ROOT}/scripts/verify-fee-free.sh" --binary "$BINARY" >/tmp/xmrig-ocean-verify.$$ 2>&1; then
             ok "fee audit: 0% developer fee"
         else
@@ -876,6 +1090,7 @@ cmd_install() {
     printf '%s\n' "  ${C_DIM}$(uname -srm), ${OS_ID:-unknown} ${OS_VER}, $(nproc 2>/dev/null || echo '?') threads, $(awk '/MemTotal/ {printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo '?') GiB RAM${C_RESET}"
 
     ensure_deps
+    resolve_engine
 
     if [ "$DO_BUILD" = 1 ]; then
         build_miner
@@ -890,7 +1105,13 @@ cmd_install() {
     write_service
 
     if [ "$DO_SERVICE" = 1 ]; then
-        svc_ctl start >/dev/null 2>&1 || true
+        # A reinstall must pick up the new binary and config, so restart when
+        # the miner is already up instead of silently keeping the old process.
+        if [ "$(service_state)" = "active" ] || bg_running; then
+            svc_ctl restart >/dev/null 2>&1 || true
+        else
+            svc_ctl start >/dev/null 2>&1 || true
+        fi
         wait_ready 90 || true
     fi
 
@@ -916,13 +1137,18 @@ cmd_update() {
 
 cmd_uninstall() {
     step "uninstalling"
+    resolve_engine
     svc_ctl stop >/dev/null 2>&1 || true
     if has_systemd; then
         as_root systemctl disable "${SERVICE_NAME}.service" "${SERVICE_NAME}-tune.service" >/dev/null 2>&1 || true
         as_root rm -f "$SERVICE_FILE" "$TUNE_SERVICE_FILE"
         as_root systemctl daemon-reload >/dev/null 2>&1 || true
     fi
-    as_root rm -f "$BINARY" "${BIN_DIR}/xmrig-ocean-tune" "${BIN_DIR}/xmrig-ocean-bench" "${BIN_DIR}/xmrig-ocean-verify"
+    # Both engines may be installed side by side, so remove both names and the
+    # marker that tells later subcommands which one was in use.
+    as_root rm -f "$BINARY" "${BIN_DIR}/xmrig-ocean" "${BIN_DIR}/zmrig" \
+        "${BIN_DIR}/xmrig-ocean-tune" "${BIN_DIR}/xmrig-ocean-bench" "${BIN_DIR}/xmrig-ocean-verify"
+    as_root rm -f "${CONFIG_DIR}/engine"
     ok "service and binaries removed"
     if [ "$FORCE_CONFIG" = 1 ]; then
         as_root rm -rf "$CONFIG_DIR"
@@ -938,20 +1164,28 @@ case "$COMMAND" in
     build)     detect_os; ensure_deps; build_miner ;;
     tune)      detect_os; run_tune ;;
     config)    detect_os; resolve_root; write_config ;;
-    start)     svc_ctl start; ok "start requested" ;;
-    stop)      svc_ctl stop; ok "stop requested" ;;
-    restart)   svc_ctl restart; ok "restart requested" ;;
+    start)     resolve_engine; svc_ctl start; ok "start requested" ;;
+    stop)      resolve_engine; svc_ctl stop; ok "stop requested" ;;
+    restart)   resolve_engine; svc_ctl restart; ok "restart requested" ;;
     status)
+        resolve_engine
         step "status"
-        info "service:  $(service_state)"
-        hr=$(current_hashrate 2>/dev/null || true)
-        shares=$(summary_shares 2>/dev/null || true)
-        if printf '%s' "$hr" | grep -qE '[1-9][0-9]*(\.| )'; then
-            info "hashrate: ${hr} H/s (10s/60s/15m)"
-        elif [ -n "$shares" ] && [ "${shares%%/*}" != "0" ]; then
-            info "hashrate: warming up (measurement window restarted)"
+        state=$(service_state)
+        info "service:  ${state}"
+        if [ "$state" != "active" ]; then
+            # The last hashrate line in the log is from the previous run; report
+            # nothing rather than a number that looks live but is not.
+            info "hashrate: n/a (the miner is not running, use 'start')"
         else
-            info "hashrate: no data yet (calibrating, connecting, or idle)"
+            hr=$(current_hashrate 2>/dev/null || true)
+            shares=$(summary_shares 2>/dev/null || true)
+            if printf '%s' "$hr" | grep -qE '[1-9][0-9]*(\.| )'; then
+                info "hashrate: ${hr} H/s (10s/60s/15m)"
+            elif [ -n "$shares" ] && [ "${shares%%/*}" != "0" ]; then
+                info "hashrate: warming up (measurement window restarted)"
+            else
+                info "hashrate: no data yet (calibrating, connecting, or idle)"
+            fi
         fi
         if [ -f "$CONFIG_FILE" ]; then
             info "config:   ${CONFIG_FILE}"
@@ -961,9 +1195,10 @@ case "$COMMAND" in
         [ -n "$shares" ] && info "shares:   ${shares} accepted"
         show_logs 6
         ;;
-    logs)      show_logs "${1:-40}" ;;
+    logs)      resolve_engine; show_logs "${1:-40}" ;;
     bench)
         resolve_root
+        resolve_engine
         binary=$(find_binary) || die "no binary found, run the installer first"
 
         # A running miner owns the reserved huge pages, so the benchmark would
@@ -977,7 +1212,13 @@ case "$COMMAND" in
         fi
 
         rc=0
-        "${CONFIGURED_ROOT}/scripts/bench.sh" --binary "$binary" "${ARGS[@]+"${ARGS[@]}"}" || rc=$?
+        if [ "${ENGINE:-xmrig}" = "zmrig" ]; then
+            # Top-level dispatch, so no `local` here: plain prefixed variables.
+            zm_hashes="${BENCH_HASHES:-20000}"
+            "$binary" --bench="$zm_hashes" -c "$CONFIG_FILE" --no-color || rc=$?
+        else
+            "${CONFIGURED_ROOT}/scripts/bench.sh" --binary "$binary" "${ARGS[@]+"${ARGS[@]}"}" || rc=$?
+        fi
 
         if [ "$was_running" = 1 ]; then
             svc_ctl start >/dev/null 2>&1 || true
@@ -987,8 +1228,20 @@ case "$COMMAND" in
         ;;
     verify)
         resolve_root
+        resolve_engine
         binary=$(find_binary) || die "no binary found, run the installer first"
-        "${CONFIGURED_ROOT}/scripts/verify-fee-free.sh" --binary "$binary"
+        if [ "$ENGINE" = "zmrig" ]; then
+            step "verifying zmrig"
+            zmrig_self_test "$binary" || die "self-test failed"
+            if have strings; then
+                zm_dev_fee=$(strings "$binary" | grep -ci "donat" || true)
+                [ "${zm_dev_fee:-0}" = 0 ] && ok "no donation code: 0% developer fee" \
+                                           || die "donation strings found in the binary"
+            fi
+            ok "verified"
+        else
+            "${CONFIGURED_ROOT}/scripts/verify-fee-free.sh" --binary "$binary"
+        fi
         ;;
     update)    cmd_update ;;
     uninstall) cmd_uninstall ;;
