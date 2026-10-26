@@ -18,6 +18,7 @@
     <a class="brand" href="index.html"><span class="mark">z</span> zmrig</a>
     <nav class="nav" aria-label="Chính">
       <a href="docs.html">Tài liệu</a>
+      <a href="#builder">Tạo lệnh</a>
       <a href="#dashboard">Bảng tính</a>
       <a href="docs.html#benchmark" class="hide-sm">Hiệu năng</a>
       <a href="https://github.com/NggKhaiz/XMRIG-OCEAN" class="hide-sm" target="_blank" rel="noreferrer">GitHub</a>
@@ -47,6 +48,94 @@
       <pre><code>curl -fsSL https://raw.githubusercontent.com/NggKhaiz/XMRIG-OCEAN/master/oneclick.sh \
   | sudo bash -s -- install --wallet YOUR_WALLET --pool gulf.moneroocean.stream:10001 --engine zmrig</code></pre>
       <p class="hint">Không chạy script từ mạng? Tải repo rồi chạy <code>sudo ./oneclick.sh install …</code>. Toàn bộ mã nằm trong repo, không tải binary lạ.</p>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section id="builder" class="builder">
+      <h2>Tạo lệnh cài đặt</h2>
+      <p class="muted">
+        Chọn vài ô bên dưới. Lệnh được ghép đúng như installer sẽ nhận, không có bước ẩn nào thêm:
+        dán vào terminal, nhập mật khẩu <code>sudo</code> khi được hỏi, xong.
+      </p>
+
+      <div class="card">
+        <div class="row">
+          <div class="field" style="flex:2 1 420px">
+            <label for="b-wallet">Địa chỉ ví Monero</label>
+            <input id="b-wallet" type="text" spellcheck="false" autocomplete="off" placeholder="4… hoặc 8… (95 ký tự)">
+            <p class="hint" id="b-wallet-hint">Ví chính bắt đầu bằng <code>4</code>, subaddress bằng <code>8</code>. Không bao giờ nhập seed hay private key.</p>
+          </div>
+          <div class="field">
+            <label for="b-rig">Tên máy <span class="muted">(tuỳ chọn)</span></label>
+            <input id="b-rig" type="text" spellcheck="false" autocomplete="off" placeholder="vps-hn-01" maxlength="32">
+            <p class="hint">Chỉ để phân biệt các máy trên pool.</p>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:10px">
+          <div class="field">
+            <label for="b-engine">Engine</label>
+            <select id="b-engine">
+              <option value="zmrig">zmrig — RandomX, 0% phí dev</option>
+              <option value="xmrig">xmrig — C++, mọi thuật toán</option>
+            </select>
+          </div>
+          <div class="field" style="flex:1 1 260px">
+            <label for="b-pool">Pool</label>
+            <select id="b-pool">
+              <option value="moneroocean">MoneroOcean — gulf.moneroocean.stream:10001</option>
+              <option value="supportxmr">SupportXMR — pool.supportxmr.com:3333</option>
+              <option value="ocean">Ocean Pool (tự dựng, wss)</option>
+              <option value="custom">Khác — tôi tự nhập host</option>
+            </select>
+          </div>
+          <div class="field" id="b-host-field" hidden style="flex:1 1 260px">
+            <label for="b-host">host:port của pool</label>
+            <input id="b-host" type="text" spellcheck="false" autocomplete="off" placeholder="pool.example.com:3333">
+          </div>
+          <div class="field" id="b-wspath-field" hidden style="flex:0 1 170px">
+            <label for="b-wspath">Đường dẫn WebSocket</label>
+            <input id="b-wspath" type="text" spellcheck="false" autocomplete="off" value="/stratum">
+          </div>
+          <div class="field" style="flex:0 1 150px">
+            <label for="b-cpu">CPU tối đa (%)</label>
+            <input id="b-cpu" type="number" min="10" max="100" step="5" value="100" inputmode="numeric">
+          </div>
+        </div>
+
+        <fieldset class="checks" style="margin-top:6px">
+          <legend>Tuỳ chọn</legend>
+          <label><input type="checkbox" id="b-cloudflare"> <span>Mạng chỉ mở 443 / sau CDN</span> <code>--cloudflare</code></label>
+          <label><input type="checkbox" id="b-proxy"> <span>Đi qua proxy HTTP/SOCKS5</span> <input id="b-proxy-url" type="text" spellcheck="false" placeholder="socks5://127.0.0.1:9050" hidden></label>
+          <label><input type="checkbox" id="b-notune"> <span>Không chỉnh hệ thống, chỉ cài miner</span> <code>--no-tune</code></label>
+          <label><input type="checkbox" id="b-force"> <span>Ghi đè config đang có</span> <code>--force</code></label>
+          <label><input type="checkbox" id="b-clone"> <span>Tôi đã clone repo và chạy từ thư mục đó</span></label>
+        </fieldset>
+
+        <div class="row" style="align-items:center; margin-top:14px">
+          <button class="btn primary" type="button" id="b-copy">Copy lệnh</button>
+          <button class="btn small" type="button" id="b-reset">Về mặc định</button>
+          <span class="status" id="b-status" role="status" aria-live="polite"></span>
+        </div>
+
+        <pre style="margin-top:10px"><code id="b-output">…</code></pre>
+        <p class="hint" id="b-note">Địa chỉ ví chỉ được đưa vào lệnh và file cấu hình trên máy bạn.</p>
+
+        <details class="help" style="margin-top:14px">
+          <summary>Lệnh này làm gì, theo thứ tự</summary>
+          <ol class="small muted" style="margin:10px 0 0 18px; padding:0">
+            <li>Cài dependency (g++, make, git, curl) nếu thiếu.</li>
+            <li>Clone repo, build engine RandomX và miner cho đúng CPU của máy.</li>
+            <li>Bật huge pages, THP, governor và MSR (bỏ qua nếu bạn chọn <code>--no-tune</code>).</li>
+            <li>Ghi <code>/etc/xmrig-ocean/config.json</code> với ví và pool ở trên.</li>
+            <li>Tạo service systemd, bật chạy cùng máy, chờ share đầu tiên rồi in hashrate.</li>
+          </ol>
+          <p class="small muted" style="margin-top:10px">
+            Script giữ nguyên config cũ trừ khi bạn chọn <code>--force</code>, nên chạy lại nhiều lần là an toàn.
+            Toàn bộ mã nằm trong repo; không có binary tải sẵn.
+          </p>
+        </details>
+      </div>
     </section>
 
     <section class="grid cols-3" aria-label="Điểm chính">
@@ -304,6 +393,7 @@
 </footer>
 
 <script src="assets/site.js"></script>
+<script src="assets/builder.js"></script>
 <script src="assets/rig.js"></script>
 <script src="assets/dash.js"></script>
 </body>

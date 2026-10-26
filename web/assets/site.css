@@ -548,3 +548,52 @@ footer a:hover { color: var(--text); }
   .table-wrap { border-color: #999; }
   th, td { border-color: #bbb; }
 }
+
+/* --- command builder ---------------------------------------------------- */
+
+.builder { margin-top: 26px; }
+.builder .checks {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px 14px;
+  margin: 14px 0 0;
+}
+.builder .checks legend {
+  padding: 0 6px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.builder .checks label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  color: var(--text);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.builder .checks input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  margin: 0;
+  flex: 0 0 auto;
+}
+.builder .checks input[type="text"] {
+  flex: 1 1 220px;
+  min-width: 160px;
+  padding: 5px 8px;
+  font-size: 0.84rem;
+}
+.builder .checks code {
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: var(--faint);
+}
+.hint.good { color: var(--ok); }
+.hint.bad { color: var(--bad); }

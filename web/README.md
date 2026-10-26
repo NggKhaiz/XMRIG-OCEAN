@@ -49,6 +49,7 @@ assets/md.js          renderer Markdown tối giản (không HTML thô từ nộ
 assets/docs.js        nạp mục lục, render trang, tìm kiếm client-side
 assets/rig.js         giải mã ZMRIG1.*, công thức điện/lợi nhuận (hàm thuần)
 assets/dash.js        giao diện bảng tính, localStorage, xuất/nhập JSON
+assets/builder.js     ghép lệnh cài đặt từ các tuỳ chọn (mục #builder)
 content/vi/index.json danh sách trang
 content/vi/*.md       nội dung tài liệu
 ```
