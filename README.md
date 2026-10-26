@@ -2,6 +2,10 @@
 
 A RandomX miner with **no developer fee**, and the pool that pays for it.
 
+[0 % fee](#the-money-model-stated-plainly) · [install in one command](#install-in-one-command) ·
+[measured tuning](#tuning-the-miner) · [documentation](#documentation) ·
+[donate (optional)](#supporting-the-work)
+
 This repository contains two halves of a working setup:
 
 | Part | What it is | What it costs |
