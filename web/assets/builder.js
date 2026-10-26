@@ -178,6 +178,8 @@
 
     nodes.output.textContent = result.text;
 
+    var blocked = !state.ok || (result.cloudflare && !result.pool.value);
+
     if (!state.ok) {
       nodes.status.textContent = state.empty ? "Nhập địa chỉ ví để có lệnh chạy được." : "Địa chỉ ví chưa đúng — kiểm tra lại.";
       nodes.status.className = "status bad";
@@ -188,6 +190,10 @@
       nodes.status.textContent = "";
       nodes.status.className = "status";
     }
+
+    // Copying a command that cannot work is worse than no button at all: the
+    // wallet would be planted in a systemd unit as-is.
+    if (nodes.copy) nodes.copy.disabled = blocked;
 
     var notes = [];
     if (result.cloudflare) notes.push("WebSocket trên 443: cần engine zmrig (C++ không có client WS).");

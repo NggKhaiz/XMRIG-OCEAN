@@ -8,7 +8,9 @@
   },
   "scripts": {
     "build": "node scripts/generate_cl.js",
-    "test": "node run_tests.js"
+    "test": "node run_tests.js",
+    "test:web": "node --test web/tests/*.test.js",
+    "test:pool": "node --test pool/tests/*.test.js"
   },
   "repository": {
     "type": "git",
