@@ -238,7 +238,7 @@ Everything is read-only; `POST` and friends get `405`.
 
 ```bash
 cd pool
-npm test          # 27 tests: unit, protocol, and end-to-end with a real miner
+npm test          # 28 tests: unit, protocol, and end-to-end with a real miner
 ```
 
 The end-to-end file starts a real pool, mines with `zmrig` over TCP **and** over

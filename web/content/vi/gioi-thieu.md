@@ -46,6 +46,7 @@ Phần còn lại của phí pool (thường 0–1%) do pool quy định, không
 oneclick.sh              cài đặt, cấu hình, service, verify, update, uninstall
 zmrig/src/*.zig          engine Zig: main, options, stratum, transport, miner, api_http, report
 zmrig/capi/              cầu nối C++ cho engine RandomX + shim
+pool/                    pool Monero tự dựng: stratum TCP + WebSocket, PPLNS, verify share
 zmrig/tests/             self-test, bộ test mạng (22 case), benchmark
 doc/                     tài liệu kỹ thuật: NETWORK, PERFORMANCE, INSTALL, ALTERNATIVES, ZERO_FEE
 web/                     website này (tĩnh, deploy được lên Cloudflare Pages / Vercel)

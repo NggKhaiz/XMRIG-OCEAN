@@ -132,7 +132,7 @@ Fly.io and the Cloudflare Worker bridge.
 cd pool
 node src/index.js --check --config config.json   # validate and exit
 node src/index.js --config config.json           # stratum + HTTP
-npm test                                         # 27 tests, includes a real miner
+npm test                                         # 28 tests, includes a real miner
 ```
 
 ## Restrictive networks
