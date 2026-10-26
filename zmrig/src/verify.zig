@@ -53,8 +53,14 @@ pub fn run(allocator: std.mem.Allocator, logger: *log.Logger) !void {
         if (text.len == 0) continue;
         if (std.mem.eql(u8, text, "quit")) break;
 
-        var request = parseRequest(allocator, text) catch {
-            try writer.writeAll("{\"error\":\"invalid request\"}\n");
+        var request = parseRequest(allocator, text) catch |e| {
+            const message = switch (e) {
+                error.UnsupportedAlgo => "{\"error\":\"this verifier only computes rx/0\"}\n",
+                error.InvalidNonce => "{\"error\":\"nonce must be a hex string\"}\n",
+                else => "{\"error\":\"invalid request\"}\n",
+            };
+
+            try writer.writeAll(message);
             try stdout_buf.flush();
 
             continue;
@@ -207,9 +213,21 @@ pub fn parseRequest(allocator: std.mem.Allocator, text: []const u8) !ParsedReque
         }
     }
     if (root.get("nonce")) |value| {
+        switch (value) {
+            .string => |material| {
+                allocator.free(result.nonce);
+                result.nonce = try allocator.dupe(u8, material);
+            },
+            // Hashing "the blob with nonce 0" for `"nonce": 123` would return
+            // a hash for a share that was never mined.
+            .null => {},
+            else => return error.InvalidNonce,
+        }
+    }
+    if (root.get("algo")) |value| {
         if (value == .string) {
-            allocator.free(result.nonce);
-            result.nonce = try allocator.dupe(u8, value.string);
+            const algo = api.Algo.fromName(value.string) orelse return error.UnsupportedAlgo;
+            if (algo != .rx_0) return error.UnsupportedAlgo;
         }
     }
     if (root.get("nonce_offset")) |value| {
@@ -252,4 +270,17 @@ test "parseRequest reads the fields it needs" {
     try testing.expectEqualStrings("bb", request.blob);
     try testing.expectEqualStrings("cc", request.nonce);
     try testing.expectEqual(@as(usize, 147), request.nonce_offset);
+}
+
+test "a malformed nonce or a foreign algorithm is refused" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    try testing.expectError(error.InvalidNonce, parseRequest(allocator, "{\"blob\":\"00\",\"nonce\":123}"));
+    try testing.expectError(error.UnsupportedAlgo, parseRequest(allocator, "{\"blob\":\"00\",\"algo\":\"cn/1\"}"));
+    // Explicit null means "not given", which is allowed: the blob's own nonce
+    // is used.
+    var request = try parseRequest(allocator, "{\"blob\":\"00\",\"nonce\":null}");
+    defer request.deinit(allocator);
+    try testing.expectEqual(@as(usize, 0), request.nonce.len);
 }
