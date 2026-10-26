@@ -1209,3 +1209,32 @@ test "an xmrig config.json is read with the keys it uses" {
     try testing.expectEqual(@as(usize, 1), opts.pools.items.len);
     try testing.expectEqualStrings("wallet", opts.pools.items[0].user);
 }
+
+test "proxy URLs: http and socks5, with credentials, defaults and junk" {
+    const testing = std.testing;
+
+    const http = try parseProxy(testing.allocator, "http://user:p%40ss@proxy.example:8080", null);
+    defer testing.allocator.free(http.host);
+    defer if (http.user) |v| testing.allocator.free(v);
+    defer if (http.pass) |v| testing.allocator.free(v);
+
+    try testing.expectEqual(transport.ProxyKind.http, http.kind);
+    try testing.expectEqualStrings("proxy.example", http.host);
+    try testing.expectEqual(@as(u16, 8080), http.port);
+    try testing.expectEqualStrings("user", http.user.?);
+
+    // No port on a socks5 proxy means 1080, not 8080.
+    const socks = try parseProxy(testing.allocator, "socks5://127.0.0.1", null);
+    defer testing.allocator.free(socks.host);
+    try testing.expectEqual(transport.ProxyKind.socks5, socks.kind);
+    try testing.expectEqual(@as(u16, 1080), socks.port);
+
+    // A bare "host:port" is an HTTP proxy, like in XMRig.
+    const bare = try parseProxy(testing.allocator, "proxy.example:3128", null);
+    defer testing.allocator.free(bare.host);
+    try testing.expectEqual(transport.ProxyKind.http, bare.kind);
+    try testing.expectEqual(@as(u16, 3128), bare.port);
+
+    try testing.expectError(error.InvalidPool, parseProxy(testing.allocator, "ftp://proxy.example:21", null));
+    try testing.expectError(error.InvalidPool, parseProxy(testing.allocator, "socks5://", null));
+}

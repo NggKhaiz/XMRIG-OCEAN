@@ -1169,3 +1169,20 @@ fn benchmark(allocator: std.mem.Allocator, opts: *const options.Options, cap_sec
         .huge_pages = huge_pages,
     };
 }
+
+test "reconnect backoff: quick first tries, then the configured pause" {
+    const testing = std.testing;
+
+    // A pool that refuses immediately must not be hammered every 200 ms
+    // forever, and a configured pause of 0 must stay 0.
+    try testing.expectEqual(@as(u64, 200), retryDelayMs(5, 1));
+    try testing.expectEqual(@as(u64, 500), retryDelayMs(5, 2));
+    try testing.expectEqual(@as(u64, 1000), retryDelayMs(5, 3));
+    try testing.expectEqual(@as(u64, 5000), retryDelayMs(5, 4));
+    try testing.expectEqual(@as(u64, 5000), retryDelayMs(5, 99));
+    try testing.expectEqual(@as(u64, 0), retryDelayMs(0, 9));
+
+    // retry-pause is in whole seconds, so the shortest non-zero pause is 1 s;
+    // the backoff still starts at 200 ms under that cap.
+    try testing.expectEqual(@as(u64, 200), retryDelayMs(1, 1));
+}

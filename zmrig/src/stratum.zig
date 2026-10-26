@@ -198,8 +198,20 @@ pub const Session = struct {
 
         const w = params.writer(self.allocator);
 
-        try w.print("{{\"login\":\"{s}\",\"pass\":\"{s}\",\"agent\":\"{s}\"", .{ self.pool.user, self.pool.password, agent });
-        if (self.pool.rig_id) |rig| try w.print(",\"rigid\":\"{s}\"", .{rig});
+        // The wallet, password and rig id are user input: escape them, or a
+        // quote in a password turns the login into malformed JSON.
+        try w.writeAll("{\"login\":\"");
+        try util.writeJsonString(w, self.pool.user);
+        try w.writeAll("\",\"pass\":\"");
+        try util.writeJsonString(w, self.pool.password);
+        try w.writeAll("\",\"agent\":\"");
+        try util.writeJsonString(w, user_agent orelse agent);
+        try w.writeByte('"');
+        if (self.pool.rig_id) |rig| {
+            try w.writeAll(",\"rigid\":\"");
+            try util.writeJsonString(w, rig);
+            try w.writeByte('"');
+        }
         if (algo) |a| try w.print(",\"algo\":[\"{s}\"]", .{a.label()});
         try w.writeAll(",\"extensions\":[\"algo\",\"keepalive\"]}");
 
@@ -293,23 +305,32 @@ pub const Session = struct {
         defer self.allocator.free(hash_hex);
 
         const id = self.allocId();
-        const line = try std.fmt.allocPrint(
-            self.allocator,
-            "{{\"id\":{d},\"jsonrpc\":\"2.0\",\"method\":\"submit\",\"params\":{{\"id\":\"{s}\",\"job_id\":\"{s}\",\"nonce\":\"{s}\",\"result\":\"{s}\",\"algo\":\"{s}\",\"height\":{d}}}}}",
-            .{ id, self.pool.rig_id orelse self.pool.user, job_id, nonce_hex, hash_hex, algo.label(), height },
-        );
-        defer self.allocator.free(line);
 
-        try self.conn.writeLine(line);
+        var payload: std.ArrayListUnmanaged(u8) = .{};
+        defer payload.deinit(self.allocator);
+        const w = payload.writer(self.allocator);
+
+        try w.print("{{\"id\":{d},\"jsonrpc\":\"2.0\",\"method\":\"submit\",\"params\":{{\"id\":\"", .{id});
+        try util.writeJsonString(w, self.pool.rig_id orelse self.pool.user);
+        try w.writeAll("\",\"job_id\":\"");
+        try util.writeJsonString(w, job_id);
+        try w.print("\",\"nonce\":\"{s}\",\"result\":\"{s}\",\"algo\":\"{s}\",\"height\":{d}}}}}", .{ nonce_hex, hash_hex, algo.label(), height });
+
+        try self.conn.writeLine(payload.items);
 
         return id;
     }
 
     pub fn keepalive(self: *Self) !void {
-        const line = try std.fmt.allocPrint(self.allocator, "{{\"id\":{d},\"jsonrpc\":\"2.0\",\"method\":\"keepalived\",\"params\":{{\"id\":\"{s}\"}}}}", .{ self.allocId(), self.pool.rig_id orelse self.pool.user });
-        defer self.allocator.free(line);
+        var payload: std.ArrayListUnmanaged(u8) = .{};
+        defer payload.deinit(self.allocator);
+        const w = payload.writer(self.allocator);
 
-        try self.conn.writeLine(line);
+        try w.print("{{\"id\":{d},\"jsonrpc\":\"2.0\",\"method\":\"keepalived\",\"params\":{{\"id\":\"", .{self.allocId()});
+        try util.writeJsonString(w, self.pool.rig_id orelse self.pool.user);
+        try w.writeAll("\"}}");
+
+        try self.conn.writeLine(payload.items);
     }
 };
 
@@ -442,4 +463,79 @@ fn parseMessage(arena: std.mem.Allocator, text: []const u8, logger: *log.Logger,
     }
 
     return .{ .reply = reply };
+}
+
+test "a login reply carries the first job, the id and the session id" {
+    const testing = std.testing;
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var logger = log.Logger.init(false, false);
+
+    const text =
+        \\{"id":1,"jsonrpc":"2.0","error":null,"result":{"id":"session-1","job":{
+        \\ "blob":"01010101010101010101010101010101010101010101010101010101010101010101010101010100000000020202020202020202020202020202020202020202020202020202020202020202",
+        \\ "job_id":"job-7","target":"3b0a0000","height":3000000,"algo":"rx/0","seed_hash":"abababababababababababababababababababababababababababababababab"}}}
+    ;
+
+    const message = try parseMessage(arena.allocator(), text, &logger, false);
+    try testing.expectEqual(@as(?u64, 1), message.reply.id);
+    try testing.expect(message.reply.ok);
+    try testing.expectEqualStrings("job-7", message.reply.job.?.idSlice());
+    try testing.expectEqual(@as(u64, 3000000), message.reply.job.?.height);
+}
+
+test "pool errors are reported, not swallowed" {
+    const testing = std.testing;
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var logger = log.Logger.init(false, false);
+
+    const object_error =
+        \\{"id":3,"jsonrpc":"2.0","error":{"code":-1,"message":"Invalid address used for login"}}
+    ;
+    const m1 = try parseMessage(arena.allocator(), object_error, &logger, false);
+    try testing.expect(!m1.reply.ok);
+    try testing.expectEqualStrings("Invalid address used for login", m1.reply.message.?);
+
+    // Some pools put the failure in result.status with a 200-style reply.
+    const status_error = "{\"id\":4,\"error\":null,\"result\":{\"status\":\"Invalid payment ID\"}}";
+    const m2 = try parseMessage(arena.allocator(), status_error, &logger, false);
+    try testing.expect(!m2.reply.ok);
+    try testing.expectEqualStrings("Invalid payment ID", m2.reply.message.?);
+
+    // A null error and an OK status is a success (submit accepted).
+    const ok = "{\"id\":5,\"error\":null,\"result\":{\"status\":\"OK\"}}";
+    const m3 = try parseMessage(arena.allocator(), ok, &logger, false);
+    try testing.expect(m3.reply.ok);
+}
+
+test "keepalived and unknown methods do not look like jobs" {
+    const testing = std.testing;
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var logger = log.Logger.init(false, false);
+
+    const keepalive = try parseMessage(arena.allocator(), "{\"method\":\"keepalived\"}", &logger, false);
+    try testing.expect(keepalive == .keepalive);
+
+    const other = try parseMessage(arena.allocator(), "{\"method\":\"client.get_version\",\"params\":{}}", &logger, false);
+    try testing.expectEqualStrings("client.get_version", other.other);
+
+    try testing.expectError(error.NotAnObject, parseMessage(arena.allocator(), "[]", &logger, false));
+}
+
+test "a job with a non-zero nonce switches the nonce mask on" {
+    const testing = std.testing;
+
+    const obj_text =
+        \\{"blob":"010101010101010101010101010101010101010101010101010101010101010101010101010101aabbccdd020202020202020202020202020202020202020202020202020202020202020202",
+        \\ "job_id":"j","target":"3b0a0000","height":1,"seed_hash":"abababababababababababababababababababababababababababababababab"}
+    ;
+    var parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, obj_text, .{});
+    defer parsed.deinit();
+
+    const job_value = try parseJobObject(parsed.value.object, api.Algo.rx_0, false);
+    // The blob carries extranonce bytes; mining must not overwrite them.
+    try testing.expect(job_value.nicehash);
+    try testing.expectEqual(@as(u32, 0x00FFFFFF), job_value.nonceMask());
 }

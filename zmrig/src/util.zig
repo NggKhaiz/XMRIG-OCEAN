@@ -122,3 +122,35 @@ test "little endian" {
     try std.testing.expectEqual(@as(u32, 0x04030201), readLe(u32, &bytes, 0));
     try std.testing.expectEqual(@as(u64, 0x0807060504030201), readLe(u64, &bytes, 0));
 }
+
+/// Writes `text` as the body of a JSON string (without the quotes), escaping
+/// everything the JSON grammar requires. A password or rig id is user input:
+/// pasting one containing a quote must not turn a login into malformed JSON.
+pub fn writeJsonString(writer: anytype, text: []const u8) !void {
+    for (text) |c| switch (c) {
+        '"' => try writer.writeAll("\\\""),
+        '\\' => try writer.writeAll("\\\\"),
+        '\n' => try writer.writeAll("\\n"),
+        '\r' => try writer.writeAll("\\r"),
+        '\t' => try writer.writeAll("\\t"),
+        0x08 => try writer.writeAll("\\b"),
+        0x0c => try writer.writeAll("\\f"),
+        else => {
+            if (c < 0x20) {
+                try writer.print("\\u{x:0>4}", .{c});
+            } else {
+                try writer.writeByte(c);
+            }
+        },
+    };
+}
+
+test "json string escaping" {
+    const testing = std.testing;
+
+    var buf: std.ArrayListUnmanaged(u8) = .{};
+    defer buf.deinit(testing.allocator);
+
+    try writeJsonString(buf.writer(testing.allocator), "pa\"ss\\w\nrd\t\x01");
+    try testing.expectEqualStrings("pa\\\"ss\\\\w\\nrd\\t\\u0001", buf.items);
+}

@@ -849,3 +849,65 @@ fn readExactFrom(stream: std.net.Stream, out: []u8) !void {
         filled += n;
     }
 }
+
+// ----------------------------------------------------------------------
+// tests: the handshake pieces that decide whether a pool connection lives
+// ----------------------------------------------------------------------
+
+test "status line parsing: HTTP/1.1, 101, and the junk a proxy can send" {
+    const testing = std.testing;
+
+    try testing.expectEqual(@as(?u16, 101), parseStatus("HTTP/1.1 101 Switching Protocols"));
+    try testing.expectEqual(@as(?u16, 200), parseStatus("HTTP/1.0 200 OK"));
+    try testing.expectEqual(@as(?u16, 407), parseStatus("HTTP/1.1 407 Proxy Authentication Required"));
+    // A stray blank line or an HTML error page must not be read as a status.
+    try testing.expectEqual(@as(?u16, null), parseStatus(""));
+    try testing.expectEqual(@as(?u16, null), parseStatus("HTTP/1.1"));
+    try testing.expectEqual(@as(?u16, null), parseStatus("<html>502 Bad Gateway</html>"));
+}
+
+test "header lookup is case insensitive and keeps the whole value" {
+    const testing = std.testing;
+
+    const head =
+        "HTTP/1.1 101 Switching Protocols\r\n" ++
+        "Upgrade: websocket\r\n" ++
+        "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n" ++
+        "Set-Cookie: a=b; c=d\r\n" ++
+        "\r\n" ++
+        "Sec-WebSocket-Accept: ignored\r\n";
+
+    try testing.expectEqualStrings("websocket", headerValue(head, "upgrade").?);
+    try testing.expectEqualStrings("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", headerValue(head, "SEC-WEBSOCKET-ACCEPT").?);
+    // A colon inside the value is not a separator.
+    try testing.expectEqualStrings("a=b; c=d", headerValue(head, "set-cookie").?);
+    // Headers after the blank line belong to the WebSocket stream.
+    try testing.expectEqual(@as(?[]const u8, null), headerValue(head, "Sec-WebSocket-Protocol"));
+}
+
+test "the WebSocket accept key matches the RFC 6455 example" {
+    const testing = std.testing;
+
+    // RFC 6455 section 1.3.
+    var buf: [28]u8 = undefined;
+    const accept = try computeAccept("dGhlIHNhbXBsZSBub25jZQ==", &buf);
+    try testing.expectEqualStrings("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", accept);
+}
+
+test "a proxy URL keeps kind, host and credentials apart" {
+    const testing = std.testing;
+
+    var p = Proxy{};
+    // This is the shape options.zig hands over after parsing.
+    p.kind = .socks5;
+    p.host = "proxy.example";
+    p.port = 1080;
+    p.user = "user";
+    p.pass = "p@ss";
+
+    try testing.expect(p.isSet());
+    try testing.expectEqual(ProxyKind.socks5, p.kind);
+    try testing.expectEqual(@as(u16, 1080), p.port);
+    const empty = Proxy{};
+    try testing.expect(!empty.isSet());
+}
