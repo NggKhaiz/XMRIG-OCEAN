@@ -655,6 +655,11 @@ fn workerMain(worker: *Worker) void {
             return;
         }
 
+        // RandomX's pipelined API: `hash_next` returns the digest of the input
+        // given to the *previous* call (the nonce patched into the blob before
+        // it) and starts hashing the new one into `temp`. So the digest in
+        // `hash` belongs to `prev_nonce`, not to `nonce`; submitting `nonce`
+        // here would hand the pool a hash that does not match its nonce.
         if (local_job.hashMeetsTarget(&hash)) {
             var share = Share{ .nonce = prev_nonce, .hash = hash, .height = local_job.height, .algo = local_job.algo };
             const id = local_job.idSlice();

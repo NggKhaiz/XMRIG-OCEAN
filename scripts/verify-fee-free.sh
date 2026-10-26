@@ -117,11 +117,14 @@ else
 
         tmp=$(mktemp)
         "$BINARY" --dry-run --url pool.example.com:3333 --user FEEAUDIT --donate-level=9 >"$tmp" 2>&1 || true
-        if sed 's/\x1b\[[0-9;]*m//g' "$tmp" | grep -q 'DONATE *0%'; then
-            pass "runtime reports DONATE 0% even with --donate-level=9"
+        # Both engines must prove the same thing in their own words: the C++
+        # banner prints "DONATE 0%", zmrig answers the request with
+        # "--donate-level=9 ignored ... 0% developer fee".
+        if sed 's/\x1b\[[0-9;]*m//g' "$tmp" | grep -qE 'DONATE *0%|0% developer fee'; then
+            pass "runtime keeps the fee at 0% even with --donate-level=9"
         else
-            fail "runtime does not report DONATE 0%"
-            sed 's/\x1b\[[0-9;]*m//g' "$tmp" | grep -i donate || true
+            fail "runtime does not report a 0% fee"
+            sed 's/\x1b\[[0-9;]*m//g' "$tmp" | grep -iE 'donate|fee' || true
         fi
         rm -f "$tmp"
     fi

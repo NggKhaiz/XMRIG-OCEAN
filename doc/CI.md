@@ -19,7 +19,7 @@ What they cover:
 
 | Check | What it proves |
 |---|---|
-| `verify-fee-free.sh` | no donation strategy in the source or the binary, no developer wallet, `DONATE 0%` even when `--donate-level=9` is passed |
+| `verify-fee-free.sh` | no donation strategy in the source or the binary, no developer wallet, keeps the fee at 0 % even when `--donate-level=9` is passed (C++ prints `DONATE 0%`, zmrig says the flag is ignored) |
 | `miner-integration` | the built binary talks stratum, accepts a job and submits a share for all 34 CPU algorithms (`tests/common/miner_harness.js` runs a fake pool) |
 
 For `zmrig`, the equivalent is the network suite (no CI privileges needed, it
