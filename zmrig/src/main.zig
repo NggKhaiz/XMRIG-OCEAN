@@ -195,7 +195,11 @@ pub fn main() !void {
         try stderr.print("zmrig: {s}\n\n", .{@errorName(e)});
         try stderr.writeAll(options.usage);
 
-        return;
+        // A rejected configuration must not look like a successful `--check`:
+        // oneclick.sh installs the config only when this exits 0. `return`
+        // here used to leave the exit status at 0, so a config with no wallet
+        // was written and then failed under systemd.
+        std.process.exit(1);
     };
 
     if (opts.check) {
@@ -845,14 +849,23 @@ fn printConfigSummary(opts: *const options.Options) !void {
     });
 }
 
+/// How much RandomX memory a mode needs, in MiB. `auto` resolves exactly the
+/// way `Miner.init` does, so `--check` cannot promise 2 MiB pages for a dataset
+/// the miner will not build on a small box.
+fn datasetMb(mode: options.Mode, total_ram: u64) u64 {
+    const fast = switch (mode) {
+        .light => false,
+        .fast => true,
+        .auto => total_ram >= 3 * 1024 * 1024 * 1024,
+    };
+
+    return if (fast) 2416 else 320;
+}
+
 /// Reads the kernel's huge page pool and turns it into one sentence a human can
 /// act on. Kept separate so --check and the warning in miner.zig agree.
 fn hugePageStatus(mode: options.Mode) []const u8 {
-    const needed_mb: u64 = switch (mode) {
-        .light => 320,
-        .fast => 2416,
-        .auto => 2416,
-    };
+    const needed_mb = datasetMb(mode, miner_mod.totalMemory());
     const pages_needed = (needed_mb + 1) / 2;
 
     var buf: [32]u8 = undefined;
@@ -1185,4 +1198,16 @@ test "reconnect backoff: quick first tries, then the configured pause" {
     // retry-pause is in whole seconds, so the shortest non-zero pause is 1 s;
     // the backoff still starts at 200 ms under that cap.
     try testing.expectEqual(@as(u64, 200), retryDelayMs(1, 1));
+}
+
+test "the memory a mode needs follows the same rule as the miner" {
+    const testing = std.testing;
+
+    const three_gib = 3 * 1024 * 1024 * 1024;
+
+    try testing.expectEqual(@as(u64, 320), datasetMb(.light, three_gib));
+    try testing.expectEqual(@as(u64, 2416), datasetMb(.fast, 512 * 1024 * 1024));
+    // auto: fast only on a box that can hold the 2 GiB dataset.
+    try testing.expectEqual(@as(u64, 2416), datasetMb(.auto, three_gib));
+    try testing.expectEqual(@as(u64, 320), datasetMb(.auto, 2 * 1024 * 1024 * 1024));
 }
