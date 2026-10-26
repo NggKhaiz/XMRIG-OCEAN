@@ -993,9 +993,24 @@ pub fn parseConfigFile(allocator: std.mem.Allocator, opts: *Options, path: []con
                     .bool => |enabled| {
                         if (!enabled) opts.threads = 0;
                     },
-                    // An array means "explicit affinity", which we translate to
-                    // "one thread per entry".
-                    .array => |arr| opts.threads = arr.items.len,
+                    // An array means "explicit per-thread affinity". Non
+                    // negative entries become a CPU bitmask; -1 means "any
+                    // core", exactly like XMRig's [-1, -1].
+                    .array => |arr| {
+                        opts.threads = arr.items.len;
+
+                        var mask: u64 = 0;
+                        var pinned = false;
+                        for (arr.items) |entry| {
+                            if (entry != .integer) continue;
+                            if (entry.integer < 0) continue;
+                            if (entry.integer > 63) continue;
+
+                            mask |= @as(u64, 1) << @intCast(entry.integer);
+                            pinned = true;
+                        }
+                        if (pinned) opts.affinity_mask = mask;
+                    },
                     else => {},
                 }
             }
@@ -1237,4 +1252,36 @@ test "proxy URLs: http and socks5, with credentials, defaults and junk" {
 
     try testing.expectError(error.InvalidPool, parseProxy(testing.allocator, "ftp://proxy.example:21", null));
     try testing.expectError(error.InvalidPool, parseProxy(testing.allocator, "socks5://", null));
+}
+
+test "an explicit thread array becomes a cpu mask, -1 means anywhere" {
+    const testing = std.testing;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{ .sub_path = "pinned.json", .data = 
+        \\{"cpu":{"threads":[0,2]},"pools":[{"url":"pool.example.com:3333","user":"w"}]}
+    });
+    try tmp.dir.writeFile(.{ .sub_path = "any.json", .data = 
+        \\{"cpu":{"threads":[-1,-1]},"pools":[{"url":"pool.example.com:3333","user":"w"}]}
+    });
+
+    var pinned = Options{};
+    defer pinned.deinit(testing.allocator);
+    const pinned_path = try tmp.dir.realpathAlloc(testing.allocator, "pinned.json");
+    defer testing.allocator.free(pinned_path);
+    try parseConfigFile(testing.allocator, &pinned, pinned_path);
+
+    try testing.expectEqual(@as(usize, 2), pinned.threads.?);
+    try testing.expectEqual(@as(?u64, 0x5), pinned.affinity_mask);
+
+    var any = Options{};
+    defer any.deinit(testing.allocator);
+    const any_path = try tmp.dir.realpathAlloc(testing.allocator, "any.json");
+    defer testing.allocator.free(any_path);
+    try parseConfigFile(testing.allocator, &any, any_path);
+
+    try testing.expectEqual(@as(usize, 2), any.threads.?);
+    try testing.expectEqual(@as(?u64, null), any.affinity_mask);
 }
