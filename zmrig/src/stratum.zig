@@ -14,6 +14,10 @@ const util = @import("util.zig");
 
 pub const agent = "zmrig/6.26.0-mo9";
 
+/// `--user-agent`: some pools and relays only accept a known miner string, and
+/// Cloudflare Workers can route on it. Null keeps the default.
+pub var user_agent: ?[]const u8 = null;
+
 pub const ConnectError = error{
     ConnectFailed,
     TlsInitFailed,
@@ -46,7 +50,7 @@ pub const Connection = struct {
             .connect_port = pool.connect_port,
             .tls_ca = pool.tls_ca,
             .proxy = pool.proxy(),
-            .user_agent = agent,
+            .user_agent = user_agent orelse agent,
         };
 
         const conn = transport.Conn.open(allocator, target, logger) catch |e| {
@@ -213,7 +217,7 @@ pub const Session = struct {
             const text = try self.conn.readLine(64 * 1024);
             if (text.len == 0) continue;
 
-            const message = parseMessage(arena.allocator(), text, self.logger) catch |e| {
+            const message = parseMessage(arena.allocator(), text, self.logger, self.pool.nicehash) catch |e| {
                 self.logger.debug("unparsable login reply ({s}): {s}", .{ @errorName(e), text });
                 continue;
             };
@@ -259,7 +263,7 @@ pub const Session = struct {
             const text = try self.conn.readLine(64 * 1024);
             if (text.len == 0) continue;
 
-            const message = parseMessage(arena, text, self.logger) catch |e| {
+            const message = parseMessage(arena, text, self.logger, self.pool.nicehash) catch |e| {
                 self.logger.debug("ignoring unparsable message ({s}): {s}", .{ @errorName(e), text });
                 continue;
             };
@@ -309,9 +313,10 @@ pub const Session = struct {
     }
 };
 
-fn parseJobObject(obj: std.json.ObjectMap, default_algo: api.Algo) !job.Job {
+fn parseJobObject(obj: std.json.ObjectMap, default_algo: api.Algo, pool_nicehash: bool) !job.Job {
     var result = job.Job.init();
     result.setAlgo(default_algo);
+    result.nicehash = pool_nicehash;
 
     if (obj.get("algo")) |algo_value| {
         if (algo_value == .string) {
@@ -322,6 +327,9 @@ fn parseJobObject(obj: std.json.ObjectMap, default_algo: api.Algo) !job.Job {
     const blob_value = obj.get("blob") orelse return error.MissingBlob;
     if (blob_value != .string) return error.MissingBlob;
     try result.setBlob(blob_value.string);
+    // Same auto-detection as XMRig: a blob that already has a nonce means the
+    // pool owns the top byte of it.
+    result.detectNicehash();
 
     const target_value = obj.get("target") orelse return error.MissingTarget;
     if (target_value != .string) return error.MissingTarget;
@@ -352,7 +360,7 @@ fn parseJobObject(obj: std.json.ObjectMap, default_algo: api.Algo) !job.Job {
     return result;
 }
 
-fn parseMessage(arena: std.mem.Allocator, text: []const u8, logger: *log.Logger) !Session.Message {
+fn parseMessage(arena: std.mem.Allocator, text: []const u8, logger: *log.Logger, pool_nicehash: bool) !Session.Message {
     var parsed = try std.json.parseFromSliceLeaky(std.json.Value, arena, text, .{});
     _ = &parsed;
 
@@ -376,7 +384,7 @@ fn parseMessage(arena: std.mem.Allocator, text: []const u8, logger: *log.Logger)
                     break :blk api.Algo.rx_0;
                 } else api.Algo.rx_0;
 
-                return .{ .job = try parseJobObject(params.object, default_algo) };
+                return .{ .job = try parseJobObject(params.object, default_algo, pool_nicehash) };
             }
 
             if (std.mem.eql(u8, method, "keepalived")) return .keepalive;
@@ -427,7 +435,7 @@ fn parseMessage(arena: std.mem.Allocator, text: []const u8, logger: *log.Logger)
 
             if (result.get("job")) |job_value| {
                 if (job_value == .object) {
-                    reply.job = parseJobObject(job_value.object, api.Algo.rx_0) catch null;
+                    reply.job = parseJobObject(job_value.object, api.Algo.rx_0, pool_nicehash) catch null;
                 }
             }
         }

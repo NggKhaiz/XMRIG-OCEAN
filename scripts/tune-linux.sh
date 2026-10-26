@@ -149,11 +149,30 @@ write_value() {
 }
 
 step "1. Huge pages"
+# The kernel clamps nr_hugepages to what it can actually carve out, so a write
+# that "succeeds" can still leave the miner on 4 KiB pages. Always read back.
+verify_huge_pages() {
+    local want="$1"
+    [ "$DRY_RUN" -eq 1 ] && return 0
+    local got
+    got=$(cat /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages 2>/dev/null || echo 0)
+    if [ "$got" -ge "$want" ]; then
+        ok "verified: ${got} x 2MB pages reserved ($((got * 2)) MB)"
+    elif [ "$got" -gt 0 ]; then
+        warn "only ${got} of ${want} pages could be reserved ($((got * 2)) MB); the miner will report a partial fallback"
+        warn "free memory or lower the reservation, then re-run"
+    else
+        warn "the kernel reserved 0 pages: the miner will fall back to 4 KiB pages and lose up to 25% hashrate"
+        warn "this is common inside containers (read-only /proc/sys) - reserve on the host instead"
+    fi
+}
+
 case "$HUGE_MODE" in
     2M)
         pages=$(( (required_mb + 1) / 2 ))
-        info "reserving ${pages} x 2MB pages (${pages}0MB > ${required_mb}MB needed)"
+        info "reserving ${pages} x 2MB pages ($((pages * 2))MB > ${required_mb}MB needed)"
         write_value /proc/sys/vm/nr_hugepages "$pages"
+        verify_huge_pages "$pages"
         ;;
     1G)
         if [ "$(read_meminfo Hugepagesize)" != "2048" ] && [ "$DRY_RUN" -eq 0 ]; then

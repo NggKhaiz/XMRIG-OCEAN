@@ -54,9 +54,20 @@ size_t xmo_engine_cache_size(const xmo_engine *engine);
 int  xmo_engine_seed(xmo_engine *engine, const uint8_t *seed, size_t seed_len,
                      int threads, char *err, size_t errlen);
 
-/* Telemetry: allocated huge page bytes and total bytes. */
+/* Telemetry: bytes actually backed by explicit huge pages, bytes that asked for
+ * them, and the total the engine mapped. When the kernel has no reserved pages
+ * the first is 0 while the second is non-zero: that is a fallback, and the
+ * miner reports it as one. */
 size_t xmo_engine_huge_pages(const xmo_engine *engine);
+size_t xmo_engine_huge_pages_total(const xmo_engine *engine);
 size_t xmo_engine_total_memory(const xmo_engine *engine);
+
+/* RandomX memory-latency fix. These return 0 on success, 1 when this machine
+ * cannot do it (VM without MSR passthrough, missing module, not root) and 2
+ * for a partial success; `report` always receives one human-readable line. */
+int xmo_msr_apply(int save, char *report, size_t report_len);
+int xmo_msr_restore(char *report, size_t report_len);
+int xmo_msr_probe(char *report, size_t report_len);
 
 xmo_vm *xmo_vm_new(xmo_engine *engine, int flags, uint32_t numa_node,
                    char *err, size_t errlen);

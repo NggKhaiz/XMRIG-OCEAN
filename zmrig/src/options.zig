@@ -14,6 +14,8 @@ pub const Pool = struct {
     port: u16 = 0,
     transport: transport.Kind = .tcp,
     user: []const u8 = "",
+    /// Static "x" until a `-p`/config value replaces it with an allocated
+    /// string; `freePool` knows about that one exception.
     password: []const u8 = "x",
     rig_id: ?[]const u8 = null,
     keepalive: bool = true,
@@ -48,7 +50,8 @@ pub const Pool = struct {
 pub fn freePool(allocator: std.mem.Allocator, pool: Pool) void {
     allocator.free(pool.host);
     allocator.free(pool.user);
-    allocator.free(pool.password);
+    // Pools that never saw a `-p` still point at the static default.
+    if (!std.mem.eql(u8, pool.password, "x")) allocator.free(pool.password);
     if (pool.rig_id) |v| allocator.free(v);
     if (pool.tls_ca) |v| allocator.free(v);
     if (pool.connect_host) |v| allocator.free(v);
@@ -110,6 +113,9 @@ pub const Seen = struct {
     huge_pages_jit: bool = false,
     jit: bool = false,
     affinity: bool = false,
+    affinity_mask: bool = false,
+    user_agent: bool = false,
+    init_threads: bool = false,
     priority: bool = false,
     print_time: bool = false,
     retries: bool = false,
@@ -118,6 +124,8 @@ pub const Seen = struct {
     keepalive_interval: bool = false,
     scratchpad_prefetch: bool = false,
     optimized_init: bool = false,
+    msr: bool = false,
+    msr_restore: bool = false,
     colors: bool = false,
     verbose: bool = false,
     background: bool = false,
@@ -140,6 +148,12 @@ pub const Options = struct {
     jit: bool = true,
     priority: i32 = -1,
     affinity: bool = true,
+    /// `--cpu-affinity=0x3`: only mine on these CPUs (bit per core).
+    affinity_mask: ?u64 = null,
+    /// `--user-agent`: what the pool sees in the WebSocket upgrade.
+    user_agent: ?[]const u8 = null,
+    /// `--randomx-init`: threads used to build the dataset (0 = hashing threads).
+    init_threads: usize = 0,
     colors: bool = true,
     verbose: bool = false,
     print_time: u32 = 60,
@@ -156,6 +170,14 @@ pub const Options = struct {
     scratchpad_prefetch: i32 = 1,
     /// Use the AVX2 dataset initialiser (faster seeding, identical hashes).
     optimized_init: bool = true,
+    /// Apply the RandomX MSR preset (prefetchers off). Needs root; off by
+    /// default because it writes to hardware registers.
+    msr: bool = false,
+    /// Put the old MSR values back on exit.
+    msr_restore: bool = true,
+    /// Set only so `--donate-level` can be accepted from old scripts; the fee
+    /// stays 0 % and `main` says so once.
+    donate_level_ignored: ?u32 = null,
     log_file: ?[]const u8 = null,
     api_port: u16 = 0,
     api_token: ?[]const u8 = null,
@@ -259,23 +281,32 @@ pub const usage =
     \\Mining:
     \\  -t, --threads=N          number of mining threads (default: cache aware)
     \\      --mode=MODE          auto | fast (2 GiB dataset) | light (256 MiB cache)
+    \\      --randomx-init=N     threads used to build the dataset (default: hashing threads)
     \\      --no-huge-pages      disable huge pages
     \\      --no-huge-pages-jit  disable huge pages for the JIT code
+    \\      --msr                apply the RandomX MSR preset (needs root and bare metal)
+    \\      --no-msr             do not touch MSR registers (default)
+    \\      --no-msr-restore     keep the MSR values after exit (default: restore)
+    \\      --randomx-wrmsr, --no-rdmsr   XMRig spellings of the two flags above
     \\      --no-jit             disable the JIT compiler (slow, ~6x lower hashrate)
     \\      --no-affinity        do not pin threads to cores
+    \\      --cpu-affinity=0x3   pin threads to these CPUs (bitmask, XMRig style)
     \\      --priority=N         1..5 (XMRig scale) or a raw nice value like -10
+    \\      --cpu-priority=N     same as --priority (XMRig spelling)
     \\
     \\Logging:
     \\      --no-color           disable colours
     \\      --verbose            verbose output
     \\      --print-time=N       hashrate report interval in seconds (default: 60, 0 = off)
     \\      --log-file=FILE      append the log to FILE
+    \\      --user-agent=UA      User-Agent for WebSocket pool connections
     \\
     \\Other:
     \\  -c, --config=FILE        JSON config file
     \\      --self-test[=light]  verify the hash engine against known vectors and exit
     \\                           (light skips the 2 GiB dataset check)
     \\      --check              validate the configuration and exit
+    \\      --dry-run            alias of --check (XMRig spelling)
     \\      --bench[=HASHES]     benchmark the hash rate and exit
     \\      --report             benchmark for --report-time seconds, print a
     \\                           machine report code for the web dashboard
@@ -344,6 +375,8 @@ pub fn parseUrl(allocator: std.mem.Allocator, url: []const u8) ParseError!Pool {
         const path = rest[pos..];
         if (path.len > 1) {
             pool.ws_path = allocator.dupe(u8, path) catch return error.OutOfMemory;
+            // A malformed URL must not leak the path we just took ownership of.
+            errdefer allocator.free(pool.ws_path.?);
         }
         rest = rest[0..pos];
     }
@@ -363,6 +396,8 @@ pub fn parseUrl(allocator: std.mem.Allocator, url: []const u8) ParseError!Pool {
     if (host.len == 0) return error.InvalidPool;
 
     pool.host = allocator.dupe(u8, std.mem.trim(u8, host, "[]")) catch return error.OutOfMemory;
+    // "pool:notaport" failed after the host was allocated: free it again.
+    errdefer allocator.free(pool.host);
 
     const kind = scheme_kind orelse .tcp;
     pool.transport = kind;
@@ -512,16 +547,55 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8) ParseEr
         } else if (std.mem.eql(u8, name, "--no-huge-pages")) {
             opts.huge_pages = false;
             opts.seen.huge_pages = true;
+        } else if (std.mem.eql(u8, name, "--msr")) {
+            opts.msr = true;
+            opts.seen.msr = true;
+        } else if (std.mem.eql(u8, name, "--no-msr")) {
+            opts.msr = false;
+            opts.seen.msr = true;
+        } else if (std.mem.eql(u8, name, "--no-msr-restore")) {
+            opts.msr_restore = false;
+            opts.seen.msr_restore = true;
         } else if (std.mem.eql(u8, name, "--no-huge-pages-jit")) {
             opts.huge_pages_jit = false;
             opts.seen.huge_pages_jit = true;
         } else if (std.mem.eql(u8, name, "--no-jit")) {
             opts.jit = false;
             opts.seen.jit = true;
+        } else if (std.mem.eql(u8, name, "--cpu-affinity")) {
+            // XMRig takes a CPU bitmask: 0x3 means cores 0 and 1.
+            const value = try needValue(args, &i, inline_value);
+            // Base 0 accepts both "0x3" (XMRig style) and "3".
+            opts.affinity_mask = std.fmt.parseInt(u64, value, 0) catch return error.InvalidNumber;
+            opts.seen.affinity_mask = true;
+        } else if (std.mem.eql(u8, name, "--user-agent")) {
+            opts.user_agent = try needValue(args, &i, inline_value);
+            opts.seen.user_agent = true;
+        } else if (std.mem.eql(u8, name, "--randomx-init")) {
+            opts.init_threads = try parseNumber(usize, try needValue(args, &i, inline_value));
+            opts.seen.init_threads = true;
+        } else if (std.mem.eql(u8, name, "--randomx-wrmsr") or std.mem.eql(u8, name, "--wrmsr")) {
+            // XMRig's spelling; `--msr` is ours. `=N` selects a preset, which we
+            // do not support, so only the bare form is accepted.
+            if (inline_value) |v| {
+                if (!std.mem.eql(u8, v, "1")) return error.UnknownOption;
+            }
+            opts.msr = true;
+        } else if (std.mem.eql(u8, name, "--randomx-no-rdmsr") or std.mem.eql(u8, name, "--no-rdmsr")) {
+            opts.msr_restore = false;
+        } else if (std.mem.eql(u8, name, "--no-wrmsr")) {
+            opts.msr = false;
+        } else if (std.mem.eql(u8, name, "--donate-level")) {
+            // Kept for scripts written for XMRig: this miner has no developer
+            // fee, so the value is validated and ignored.
+            const value = try needValue(args, &i, inline_value);
+            const level = parseNumber(u32, value) catch return error.InvalidNumber;
+            if (level > 100) return error.InvalidNumber;
+            opts.donate_level_ignored = level;
         } else if (std.mem.eql(u8, name, "--no-affinity")) {
             opts.affinity = false;
             opts.seen.affinity = true;
-        } else if (std.mem.eql(u8, name, "--priority")) {
+        } else if (std.mem.eql(u8, name, "--priority") or std.mem.eql(u8, name, "--cpu-priority")) {
             opts.priority = try parseNumber(i32, try needValue(args, &i, inline_value));
             opts.seen.priority = true;
         } else if (std.mem.eql(u8, name, "--no-color")) {
@@ -898,6 +972,15 @@ pub fn parseConfigFile(allocator: std.mem.Allocator, opts: *Options, path: []con
             if (jsonInt(i32, cpu, "priority")) |v| opts.priority = v;
             if (jsonBool(cpu, "yield")) |_| {}
 
+            // XMRig writes the mask as an integer, or null for "all cores".
+            if (cpu.get("affinity")) |aff| {
+                switch (aff) {
+                    .integer => |v| opts.affinity_mask = std.math.cast(u64, v),
+                    .null => opts.affinity_mask = null,
+                    else => {},
+                }
+            }
+
             if (cpu.get("huge-pages")) |hp| {
                 if (hp == .bool) opts.huge_pages = hp.bool;
             }
@@ -927,6 +1010,18 @@ pub fn parseConfigFile(allocator: std.mem.Allocator, opts: *Options, path: []con
                 if (std.mem.eql(u8, mode, "fast")) opts.mode = .fast;
                 if (std.mem.eql(u8, mode, "auto")) opts.mode = .auto;
             }
+            if (jsonInt(usize, rx, "init")) |v| opts.init_threads = v;
+            if (jsonBool(rx, "msr")) |v| opts.msr = v;
+            if (jsonBool(rx, "rdmsr")) |v| opts.msr_restore = v;
+            // `wrmsr` is a bool or an explicit register array in XMRig. We only
+            // support the built-in presets, so an array means "use the preset".
+            switch (rx.get("wrmsr") orelse .null) {
+                .bool => |v| opts.msr = v,
+                .array => opts.msr = true,
+                else => {},
+            }
+            if (jsonInt(i32, rx, "scratchpad_prefetch_mode")) |v| opts.scratchpad_prefetch = v;
+            if (jsonInt(i32, rx, "init-avx2")) |v| opts.optimized_init = v != 0;
         }
     }
 
@@ -951,4 +1046,166 @@ pub fn parseConfigFile(allocator: std.mem.Allocator, opts: *Options, path: []con
             }
         }
     }
+}
+
+// --- tests -----------------------------------------------------------------
+//
+// The command line is the part of the miner every user touches, and a silent
+// change here (a scheme that stops being recognised, a flag that stops being
+// applied to the next pool) only shows up as "it connects to the wrong port".
+
+test "pool URLs: schemes, paths and default ports" {
+    const testing = std.testing;
+
+    const pool = try parseUrl(testing.allocator, "pool.example.com:3333");
+    defer freePool(testing.allocator, pool);
+    try testing.expectEqualStrings("pool.example.com", pool.host);
+    try testing.expectEqual(@as(u16, 3333), pool.port);
+    try testing.expectEqual(transport.Kind.tcp, pool.transport);
+
+    // No port: the scheme decides.
+    const tls = try parseUrl(testing.allocator, "stratum+ssl://pool.example.com");
+    defer freePool(testing.allocator, tls);
+    try testing.expectEqual(transport.Kind.tls, tls.transport);
+    try testing.expectEqual(@as(u16, 443), tls.port);
+
+    const wss = try parseUrl(testing.allocator, "wss://pool.example.com/monero/TOKEN");
+    defer freePool(testing.allocator, wss);
+    try testing.expectEqual(transport.Kind.wss, wss.transport);
+    try testing.expectEqual(@as(u16, 443), wss.port);
+    try testing.expectEqualStrings("/monero/TOKEN", wss.ws_path.?);
+
+    const ws = try parseUrl(testing.allocator, "ws://relay.example:8080/stratum");
+    defer freePool(testing.allocator, ws);
+    try testing.expectEqual(transport.Kind.ws, ws.transport);
+    try testing.expectEqual(@as(u16, 8080), ws.port);
+    try testing.expectEqualStrings("/stratum", ws.ws_path.?);
+
+    // IPv6 literals keep their brackets out of the host, port still parses.
+    const v6 = try parseUrl(testing.allocator, "[2001:db8::1]:14444");
+    defer freePool(testing.allocator, v6);
+    try testing.expectEqualStrings("2001:db8::1", v6.host);
+    try testing.expectEqual(@as(u16, 14444), v6.port);
+
+    try testing.expectError(error.InvalidPool, parseUrl(testing.allocator, "gopher://pool"));
+    try testing.expectError(error.InvalidPool, parseUrl(testing.allocator, ""));
+    try testing.expectError(error.InvalidPool, parseUrl(testing.allocator, "pool:notaport"));
+}
+
+test "arguments: order independent, flags apply to the pool they belong to" {
+    const testing = std.testing;
+
+    // `-u` before `-o` is what everyone types first, and it used to create a
+    // placeholder pool.
+    const args = [_][]const u8{
+        "-u", "4AdUndXHHZ6cfufTMvppY6JwXNouMBzSkbLYfpAV5Usx3skxNgYeYTRj5UzqtReoS44qo9mtmXCqY45DJ852K5Jv2684Rge",
+        "--rig-id", "rig-1",
+        "-o", "pool.example.com:3333",
+        "-o", "backup.example.com:443",
+        "-t", "3",
+        "--retries", "2",
+        "--mode", "light",
+    };
+
+    var opts = try parseArgs(testing.allocator, &args);
+    defer opts.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 2), opts.pools.items.len);
+    try testing.expectEqualStrings("pool.example.com", opts.pools.items[0].host);
+    try testing.expectEqualStrings("backup.example.com", opts.pools.items[1].host);
+    // The wallet and the rig id apply to *both* pools.
+    try testing.expectEqualStrings(args[1], opts.pools.items[1].user);
+    try testing.expectEqualStrings("rig-1", opts.pools.items[1].rig_id.?);
+    try testing.expectEqual(@as(usize, 3), opts.threads.?);
+    try testing.expectEqual(@as(u32, 2), opts.retries);
+    try testing.expectEqual(Mode.light, opts.mode);
+}
+
+test "arguments: unknown flags and missing values are errors, not silence" {
+    const testing = std.testing;
+
+    try testing.expectError(error.UnknownOption, parseArgs(testing.allocator, &[_][]const u8{"--not-a-flag"}));
+    try testing.expectError(error.MissingValue, parseArgs(testing.allocator, &[_][]const u8{"-o"}));
+}
+
+test "nicehash is a pool flag and survives parsing" {
+    const testing = std.testing;
+
+    const args = [_][]const u8{ "-o", "pool.example.com:3333", "--nicehash", "-u", "wallet.rig" };
+    var opts = try parseArgs(testing.allocator, &args);
+    defer opts.deinit(testing.allocator);
+
+    try testing.expect(opts.pools.items[0].nicehash);
+}
+
+test "XMRig-compatible flags are accepted and reach options" {
+    const testing = std.testing;
+
+    const args = [_][]const u8{
+        "-o",         "pool.example.com:3333",
+        "-u",         "wallet",
+        "--cpu-priority", "2",
+        "--cpu-affinity", "0x3",
+        "--randomx-init", "1",
+        "--user-agent", "xmrig/6.26.0",
+        "--donate-level", "1",
+        "--randomx-wrmsr",
+        "--randomx-no-rdmsr",
+    };
+
+    var opts = try parseArgs(testing.allocator, &args);
+    defer opts.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(i32, 2), opts.priority);
+    try testing.expectEqual(@as(?u64, 0x3), opts.affinity_mask);
+    try testing.expectEqual(@as(usize, 1), opts.init_threads);
+    try testing.expectEqualStrings("xmrig/6.26.0", opts.user_agent.?);
+    // Accepted for compatibility, remembered so main can say the fee is 0 %.
+    try testing.expectEqual(@as(?u32, 1), opts.donate_level_ignored);
+    try testing.expect(opts.msr);
+    try testing.expect(!opts.msr_restore);
+
+    // `--donate-level=101` is a typo, not a 101 % fee.
+    try testing.expectError(error.InvalidNumber, parseArgs(testing.allocator, &[_][]const u8{ "--donate-level", "101" }));
+}
+
+test "affinity masks select the CPUs the threads are pinned to" {
+    const testing = std.testing;
+
+    // cpuFor lives in miner.zig, but the bit walk is what --check reports.
+    try testing.expectEqual(@as(usize, 2), @popCount(@as(u64, 0x3)));
+    try testing.expectEqual(@as(usize, 1), @popCount(@as(u64, 0x8)));
+}
+
+test "an xmrig config.json is read with the keys it uses" {
+    const testing = std.testing;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{ .sub_path = "config.json", .data = 
+        \\{"cpu":{"affinity":3,"priority":2,"huge-pages":true},
+        \\ "randomx":{"mode":"light","init":1,"wrmsr":false,"rdmsr":false,
+        \\            "scratchpad_prefetch_mode":2,"init-avx2":0},
+        \\ "pools":[{"url":"pool.example.com:3333","user":"wallet"}]}
+    });
+
+    const path = try tmp.dir.realpathAlloc(testing.allocator, "config.json");
+    defer testing.allocator.free(path);
+
+    var opts = Options{};
+    defer opts.deinit(testing.allocator);
+
+    try parseConfigFile(testing.allocator, &opts, path);
+
+    try testing.expectEqual(@as(?u64, 3), opts.affinity_mask);
+    try testing.expectEqual(@as(i32, 2), opts.priority);
+    try testing.expectEqual(Mode.light, opts.mode);
+    try testing.expectEqual(@as(usize, 1), opts.init_threads);
+    try testing.expectEqual(@as(i32, 2), opts.scratchpad_prefetch);
+    try testing.expect(!opts.optimized_init);
+    try testing.expect(!opts.msr);
+    try testing.expect(!opts.msr_restore);
+    try testing.expectEqual(@as(usize, 1), opts.pools.items.len);
+    try testing.expectEqualStrings("wallet", opts.pools.items[0].user);
 }

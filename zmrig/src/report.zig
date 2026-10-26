@@ -321,7 +321,9 @@ test "encode has the prefix and round trips through base64" {
 
     const payload = code[code_prefix.len..];
     var decoded: [1024]u8 = undefined;
-    const json = std.base64.url_safe_no_pad.Decoder.decode(&decoded, payload) catch unreachable;
+    const decoded_len = std.base64.url_safe_no_pad.Decoder.calcSizeForSlice(payload) catch unreachable;
+    std.base64.url_safe_no_pad.Decoder.decode(decoded[0..decoded_len], payload) catch unreachable;
+    const json = decoded[0..decoded_len];
 
     try testing.expect(std.mem.indexOf(u8, json, "\"id\":\"rig \\\"one\\\"\"") != null);
     try testing.expect(std.mem.indexOf(u8, json, "\"pw\":45.5") != null);

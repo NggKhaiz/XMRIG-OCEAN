@@ -25,6 +25,11 @@ pub const Job = struct {
     has_next_seed: bool = false,
     nonce_offset: usize = 39,
     nonce_size: usize = 4,
+    /// NiceHash-style job: the pool owns the top byte of the nonce (its
+    /// extranonce), so the miner may only count through the low 24 bits.
+    /// XMRig turns this on by itself when a blob arrives with a non-zero
+    /// nonce; `--nicehash` forces it from the start.
+    nicehash: bool = false,
     /// Bumped every time a new job is published, workers poll this.
     generation: u64 = 0,
 
@@ -115,8 +120,26 @@ pub const Job = struct {
         return util.readLe(u32, self.blobSlice(), self.nonce_offset);
     }
 
+    /// Bit mask of the nonce bits the miner is allowed to change.
+    pub fn nonceMask(self: *const Self) u32 {
+        return if (self.nicehash) 0x00FFFFFF else 0xFFFFFFFF;
+    }
+
+    /// Port of Job::setBlob()'s side effect: a blob that already carries a
+    /// nonce means the pool is using the top byte as an extranonce.
+    pub fn detectNicehash(self: *Self) void {
+        if (self.blob_len < self.nonce_offset + self.nonce_size) return;
+        if (self.nonce() != 0) self.nicehash = true;
+    }
+
+    /// Writes `value` into the blob, keeping the bits this miner does not own.
+    /// Overwriting a pool's extranonce produces valid-looking hashes that every
+    /// pool rejects, so the mask is not optional.
     pub fn setNonce(self: *Self, value: u32) void {
-        util.writeLe(u32, self.blob[0..self.blob_len], self.nonce_offset, value);
+        const mask = self.nonceMask();
+        const merged = (self.nonce() & ~mask) | (value & mask);
+
+        util.writeLe(u32, self.blob[0..self.blob_len], self.nonce_offset, merged);
     }
 
     /// Difficulty for display, mirroring Job::toDiff().
@@ -132,9 +155,36 @@ test "target parsing matches xmrig" {
     // value of 0x000000FF -> 0xFFFFFFFF / 0xFF.
     try job.setTarget("ff000000");
     const t32: u32 = 0x000000ff;
-    try std.testing.expectEqual(@as(u64, 0xFFFFFFFFFFFFFFFF / (0xFFFFFFFF / t32)), job.target);
+    const divisor: u64 = @as(u64, 0xFFFFFFFF) / @as(u64, t32);
+    try std.testing.expectEqual(@as(u64, 0xFFFFFFFFFFFFFFFF) / divisor, job.target);
 
     // 8 byte target: little endian read of ff ff ff ff ff ff ff 20.
     try job.setTarget("ffffffffffffff20");
     try std.testing.expectEqual(@as(u64, 0x20ffffffffffffff), job.target);
+}
+
+test "nicehash keeps the pool's extranonce byte" {
+    var job = Job.init();
+    // fake header: nonce at 39..43 with 0xAA as the pool's byte
+    @memset(job.blob[0..76], 0);
+    job.blob_len = 76;
+    job.nonce_offset = 39;
+    job.setNonce(0); // not nicehash yet: writes 0
+    job.blob[42] = 0xAA;
+    job.nicehash = true;
+
+    job.setNonce(0x123456);
+    try std.testing.expectEqual(@as(u32, 0xAA123456), job.nonce());
+    try std.testing.expectEqual(@as(u32, 0x00FFFFFF), job.nonceMask());
+}
+
+test "a blob with a non-zero nonce switches nicehash on by itself" {
+    var job = Job.init();
+    @memset(job.blob[0..76], 0);
+    job.blob_len = 76;
+    job.nonce_offset = 39;
+    job.blob[39] = 0x01; // extranonce in the low byte
+
+    job.detectNicehash();
+    try std.testing.expect(job.nicehash);
 }

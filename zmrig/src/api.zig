@@ -80,6 +80,7 @@ pub extern fn xmo_engine_dataset_size(engine: *const Engine) usize;
 pub extern fn xmo_engine_cache_size(engine: *const Engine) usize;
 pub extern fn xmo_engine_seed(engine: *Engine, seed: [*]const u8, seed_len: usize, threads: c_int, err: [*]u8, errlen: usize) c_int;
 pub extern fn xmo_engine_huge_pages(engine: *const Engine) usize;
+pub extern fn xmo_engine_huge_pages_total(engine: *const Engine) usize;
 pub extern fn xmo_engine_total_memory(engine: *const Engine) usize;
 pub extern fn xmo_vm_new(engine: *Engine, flags: c_int, numa_node: u32, err: [*]u8, errlen: usize) ?*Vm;
 pub extern fn xmo_vm_free(vm: ?*Vm) void;
@@ -89,6 +90,9 @@ pub extern fn xmo_hash_next(vm: *Vm, temp: *align(64) [8]u64, blob: [*]const u8,
 pub extern fn xmo_commitment(blob: [*]const u8, len: usize, hash_in: *const [32]u8, out: *[32]u8) void;
 pub extern fn xmo_set_scratchpad_prefetch(mode: c_int) void;
 pub extern fn xmo_set_huge_pages_jit(enabled: c_int) void;
+pub extern fn xmo_msr_apply(save: c_int, report: [*]u8, report_len: usize) c_int;
+pub extern fn xmo_msr_restore(report: [*]u8, report_len: usize) c_int;
+pub extern fn xmo_msr_probe(report: [*]u8, report_len: usize) c_int;
 pub extern fn xmo_set_optimized_dataset_init(value: c_int) void;
 pub extern fn xmo_engine_name() [*:0]const u8;
 
@@ -135,8 +139,15 @@ pub const Wrapped = struct {
         return xmo_engine_cache_size(self.handle);
     }
 
+    /// Bytes really backed by explicit huge pages (0 when the kernel had none
+    /// reserved and the engine fell back to ordinary pages).
     pub fn hugePageBytes(self: *const Wrapped) usize {
         return xmo_engine_huge_pages(self.handle);
+    }
+
+    /// Bytes that asked for huge pages, granted or not.
+    pub fn hugePageBytesTotal(self: *const Wrapped) usize {
+        return xmo_engine_huge_pages_total(self.handle);
     }
 
     pub fn totalMemory(self: *const Wrapped) usize {

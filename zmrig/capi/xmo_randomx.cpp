@@ -32,9 +32,11 @@ constexpr size_t kScratchpad   = RANDOMX_SCRATCHPAD_L3_MAX_SIZE;
 /* 2 MiB aligned, backed by explicit huge pages when the kernel reserved some.
  * Falls back to anonymous memory with THP hints, which is what a normal build
  * of XMRig ends up with on a host without reserved pages. */
-uint8_t *mapPages(size_t bytes, bool huge, size_t *mapped)
+uint8_t *mapPages(size_t bytes, bool huge, size_t *mapped, bool *explicit_huge)
 {
     const size_t aligned = (bytes + kHugePageSize - 1) & ~(kHugePageSize - 1);
+
+    *explicit_huge = false;
 
 #ifdef __linux__
     if (huge) {
@@ -42,9 +44,14 @@ uint8_t *mapPages(size_t bytes, bool huge, size_t *mapped)
                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0);
         if (p != MAP_FAILED) {
             *mapped = aligned;
+            *explicit_huge = true;
 
             return static_cast<uint8_t *>(p);
         }
+
+        /* ENOMEM means the pages are not reserved; EINVAL means MAP_HUGETLB is
+         * not available at all (some container runtimes). Either way the caller
+         * needs to know that this is a fallback, not a huge page mapping. */
     }
 #endif
 
@@ -120,6 +127,11 @@ struct xmo_engine {
     xmrig::Algorithm algorithm;
     int   algo_id       = XMO_RX_0;
     bool  huge          = false;
+    /* Bytes that really came from MAP_HUGETLB, and bytes that asked for it.
+     * Reporting the requested size as if it had been granted is how a miner
+     * ends up claiming "huge pages 2336 MB" while running on 4 KiB pages. */
+    size_t huge_explicit = 0;
+    size_t huge_requested = 0;
     bool  full_mem      = true;
     bool  jit           = true;
     uint8_t *cache_mem  = nullptr;
@@ -157,7 +169,12 @@ xmo_engine *xmo_engine_new(int algo, int flags, char *err, size_t errlen)
     const int cache_flags = engine->jit ? RANDOMX_FLAG_JIT : RANDOMX_FLAG_DEFAULT;
 
     engine->cache_bytes = RANDOMX_CACHE_MAX_SIZE;
-    engine->cache_mem   = mapPages(engine->cache_bytes, engine->huge, &engine->cache_bytes);
+    bool cache_explicit = false;
+    engine->cache_mem   = mapPages(engine->cache_bytes, engine->huge, &engine->cache_bytes, &cache_explicit);
+    if (engine->huge) {
+        engine->huge_requested += engine->cache_bytes;
+        if (cache_explicit) engine->huge_explicit += engine->cache_bytes;
+    }
     if (!engine->cache_mem) {
         setError(err, errlen, "cannot allocate the RandomX cache");
         delete engine;
@@ -180,7 +197,12 @@ xmo_engine *xmo_engine_new(int algo, int flags, char *err, size_t errlen)
 
     if (engine->full_mem) {
         engine->data_bytes = RANDOMX_DATASET_MAX_SIZE;
-        engine->data_mem   = mapPages(engine->data_bytes, engine->huge, &engine->data_bytes);
+        bool data_explicit = false;
+        engine->data_mem   = mapPages(engine->data_bytes, engine->huge, &engine->data_bytes, &data_explicit);
+        if (engine->huge) {
+            engine->huge_requested += engine->data_bytes;
+            if (data_explicit) engine->huge_explicit += engine->data_bytes;
+        }
         if (!engine->data_mem) {
             setError(err, errlen, "cannot allocate the RandomX dataset");
             randomx_release_cache(engine->cache);
@@ -232,11 +254,13 @@ size_t xmo_engine_cache_size(const xmo_engine *engine)   { return engine ? engin
 
 size_t xmo_engine_huge_pages(const xmo_engine *engine)
 {
-    if (!engine) {
-        return 0;
-    }
+    return engine ? engine->huge_explicit : 0;
+}
 
-    return engine->huge ? (engine->cache_bytes + engine->data_bytes) : 0;
+
+size_t xmo_engine_huge_pages_total(const xmo_engine *engine)
+{
+    return engine ? engine->huge_requested : 0;
 }
 
 
@@ -311,7 +335,8 @@ xmo_vm *xmo_vm_new(xmo_engine *engine, int flags, uint32_t numa_node,
     result->algorithm = engine->algorithm;
 
     const bool huge = (flags & 1) != 0;
-    result->scratchpad = mapPages(kScratchpad, huge, &result->scratch_bytes);
+    bool scratch_explicit = false;
+    result->scratchpad = mapPages(kScratchpad, huge, &result->scratch_bytes, &scratch_explicit);
     if (!result->scratchpad) {
         setError(err, errlen, "cannot allocate the scratchpad");
         delete result;

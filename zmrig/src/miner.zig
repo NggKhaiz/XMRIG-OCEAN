@@ -126,6 +126,8 @@ pub const Shared = struct {
         break :blk counters;
     },
     thread_count: usize = 0,
+    /// Threads used to build the dataset (`--randomx-init`), 0 = hashing threads.
+    init_threads: usize = 0,
     priority: i32 = -1,
 
     pub fn publish(self: *Shared, new_job: *const job_mod.Job) void {
@@ -135,6 +137,11 @@ pub const Shared = struct {
         self.job = new_job.*;
         self.next_nonce.store(randomNonceBase(), .release);
         _ = self.generation.fetchAdd(1, .monotonic);
+    }
+
+    /// Threads to hand to the dataset initialiser.
+    pub fn initThreads(self: *const Shared) usize {
+        return if (self.init_threads > 0) self.init_threads else self.thread_count;
     }
 
     pub fn pause(self: *Shared) void {
@@ -214,14 +221,39 @@ pub const Engine = struct {
 
         var cache_buf: [24]u8 = undefined;
         var dataset_buf: [24]u8 = undefined;
-        var huge_buf: [24]u8 = undefined;
+        var huge_buf: [32]u8 = undefined;
+
+        const huge_explicit = wrapped.hugePageBytes();
+        const huge_total = wrapped.hugePageBytesTotal();
+
+        // Say what the kernel actually gave us. "huge pages 2336 MB" while
+        // running on 4 KiB pages is worse than no report at all: it hides a
+        // measured 24% hashrate loss on the validation host.
+        const huge_text = if (huge_total == 0)
+            std.fmt.bufPrint(&huge_buf, "off", .{}) catch "off"
+        else if (huge_explicit == huge_total)
+            std.fmt.bufPrint(&huge_buf, "{d} MB (explicit)", .{huge_explicit / (1024 * 1024)}) catch "?"
+        else if (huge_explicit == 0)
+            std.fmt.bufPrint(&huge_buf, "0 MB (THP fallback)", .{}) catch "?"
+        else
+            std.fmt.bufPrint(&huge_buf, "{d}/{d} MB (partial)", .{ huge_explicit / (1024 * 1024), huge_total / (1024 * 1024) }) catch "?";
 
         self.logger.info("hash engine ready: {s}, cache {s}, dataset {s}, huge pages {s}", .{
             algo.label(),
             std.fmt.bufPrint(&cache_buf, "{d} MB", .{wrapped.cacheSize() / (1024 * 1024)}) catch "?",
             std.fmt.bufPrint(&dataset_buf, "{d} MB", .{wrapped.datasetSize() / (1024 * 1024)}) catch "?",
-            std.fmt.bufPrint(&huge_buf, "{d} MB", .{wrapped.hugePageBytes() / (1024 * 1024)}) catch "?",
+            huge_text,
         });
+
+        if (huge_total != 0 and huge_explicit != huge_total) {
+            // One actionable line, once per engine start. The exact command
+            // depends on how much memory this mode needs.
+            const need_pages = (huge_total + (2 * 1024 * 1024) - 1) / (2 * 1024 * 1024);
+            self.logger.warn("no reserved huge pages: using {s} pages instead costs up to ~25% hashrate (measured on a 2 vCPU host)", .{
+                if (huge_explicit == 0) "4 KiB" else "partly 4 KiB",
+            });
+            self.logger.warn("fix it once as root: echo {d} > /proc/sys/vm/nr_hugepages  (or: sudo xmrig-ocean-tune)", .{need_pages});
+        }
 
         self.wrapped = wrapped;
         self.algo = algo;
@@ -345,6 +377,8 @@ pub const Miner = struct {
     workers: [max_threads]Worker = undefined,
     hw_threads: usize = 1,
     affinity: bool = true,
+    /// `--cpu-affinity` bitmask: thread i is pinned to the i-th set bit.
+    affinity_mask: ?u64 = null,
     started: bool = false,
 
     const Self = @This();
@@ -385,9 +419,11 @@ pub const Miner = struct {
             .engine = Engine.init(logger, flags),
             .hw_threads = hw_threads,
             .affinity = opts.affinity,
+            .affinity_mask = opts.affinity_mask,
         };
 
         miner.shared.thread_count = threads;
+        miner.shared.init_threads = opts.init_threads;
         miner.shared.priority = opts.priority;
 
         return miner;
@@ -402,7 +438,8 @@ pub const Miner = struct {
         return self.shared.thread_count;
     }
 
-    /// Huge page usage as [allocated, required] in 2 MiB pages, for the API.
+    /// Huge page usage as [allocated, total] in 2 MiB pages, for the API.
+    /// `allocated` counts only pages the kernel really gave us.
     pub fn hugePages(self: *const Self) [2]usize {
         const page = 2 * 1024 * 1024;
 
@@ -411,6 +448,30 @@ pub const Miner = struct {
         }
 
         return .{ 0, 0 };
+    }
+
+    /// Which core a worker should be pinned to: the i-th bit of
+    /// `--cpu-affinity`, or thread i modulo the core count.
+    fn cpuFor(self: *const Self, index: usize) ?usize {
+        if (!self.affinity) return null;
+
+        if (self.affinity_mask) |mask| {
+            var seen: usize = 0;
+            for (0..64) |bit| {
+                if (mask & (@as(u64, 1) << @intCast(bit)) == 0) continue;
+                if (seen == index) return bit;
+                seen += 1;
+            }
+            // More threads than bits: wrap around the allowed cores.
+            return if (seen == 0) null else self.cpuFor(index % seen);
+        }
+
+        return if (self.hw_threads > 0) index % self.hw_threads else null;
+    }
+
+    /// CPUs listed in an affinity mask, for logging and `--check`.
+    pub fn affinityCpus(mask: u64) usize {
+        return @popCount(mask);
     }
 
     pub fn start(self: *Self) !void {
@@ -426,7 +487,7 @@ pub const Miner = struct {
                 .submitter = &self.submitter,
                 .logger = self.logger,
                 .index = i,
-                .cpu = if (self.affinity and self.hw_threads > 0) i % self.hw_threads else null,
+                .cpu = self.cpuFor(i),
             };
 
             self.workers[i].thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, workerMain, .{&self.workers[i]}) catch |e| {
@@ -469,7 +530,7 @@ pub const Miner = struct {
             self.stop();
 
             if (needs_algo) try self.engine.ensure(new_job.algo);
-            if (needs_seed) try self.engine.seedNow(new_job.seed, self.shared.thread_count);
+            if (needs_seed) try self.engine.seedNow(new_job.seed, self.shared.initThreads());
 
             try self.start();
 

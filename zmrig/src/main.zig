@@ -96,6 +96,12 @@ pub fn main() !void {
     }
 
     log.global = log.Logger.init(opts.colors, opts.verbose);
+    stratum.user_agent = opts.user_agent;
+    if (opts.donate_level_ignored) |level| {
+        // Do not silently accept `--donate-level=1` and then take 1 %: the fee
+        // is 0 % by construction (see doc/ZERO_FEE.md).
+        log.global.info("--donate-level={d} ignored: this miner has a 0% developer fee", .{level});
+    }
     if (opts.log_file) |path| {
         log.global.openFile(path) catch |e| {
             log.global.warn("cannot open log file {s}: {s}", .{ path, @errorName(e) });
@@ -227,6 +233,17 @@ pub fn main() !void {
 
     var miner = try miner_mod.Miner.init(logger, &opts);
     defer miner.deinit();
+
+    // The RandomX memory-latency fix, applied before the dataset is built.
+    // It is opt-in because it writes hardware registers, and it is allowed to
+    // fail: a VM without MSR passthrough is a normal place to run a miner.
+    const msr_applied = applyMsr(&opts, logger);
+    defer if (msr_applied and opts.msr_restore) {
+        var report_buf: [192]u8 = undefined;
+        @memset(&report_buf, 0);
+        _ = api.xmo_msr_restore(&report_buf, report_buf.len);
+        logger.debug("msr: {s}", .{report_buf[0..std.mem.indexOfScalar(u8, &report_buf, 0) orelse report_buf.len]});
+    };
 
     // "host:port" for the report, owned by main for the whole run.
     var pool_label_buf: [256]u8 = undefined;
@@ -673,6 +690,12 @@ fn mergeOptions(allocator: std.mem.Allocator, base: *options.Options, extra: *op
     if (extra.seen.colors) base.colors = extra.colors;
     if (extra.seen.verbose) base.verbose = extra.verbose;
     if (extra.seen.affinity) base.affinity = extra.affinity;
+    if (extra.seen.affinity_mask) base.affinity_mask = extra.affinity_mask;
+    if (extra.seen.user_agent) base.user_agent = extra.user_agent;
+    if (extra.seen.init_threads) base.init_threads = extra.init_threads;
+    // MSR is opt-in, and "opt-in on the command line" has to work too.
+    if (extra.seen.msr) base.msr = extra.msr;
+    if (extra.seen.msr_restore) base.msr_restore = extra.msr_restore;
     if (extra.seen.priority) base.priority = extra.priority;
     if (extra.seen.idle_timeout) base.idle_timeout = extra.idle_timeout;
     if (extra.seen.keepalive_interval) base.keepalive_interval = extra.keepalive_interval;
@@ -724,6 +747,35 @@ fn mergeOptions(allocator: std.mem.Allocator, base: *options.Options, extra: *op
 }
 
 /// --check: print what the miner would do, without touching the network.
+/// Applies the RandomX MSR preset when the user asked for it. Returns true when
+/// the values were written (so the caller knows there is something to restore).
+fn applyMsr(opts: *const options.Options, logger: *log.Logger) bool {
+    if (!opts.msr) return false;
+
+    var report_buf: [192]u8 = undefined;
+    @memset(&report_buf, 0);
+    const rc = api.xmo_msr_apply(@intFromBool(opts.msr_restore), &report_buf, report_buf.len);
+    const text = report_buf[0..std.mem.indexOfScalar(u8, &report_buf, 0) orelse report_buf.len];
+
+    switch (rc) {
+        0 => {
+            logger.info("msr: {s}", .{text});
+
+            return true;
+        },
+        2 => {
+            logger.warn("msr: {s}", .{text});
+
+            return true;
+        },
+        else => {
+            logger.warn("msr not applied: {s}", .{text});
+
+            return false;
+        },
+    }
+}
+
 fn printConfigSummary(opts: *const options.Options) !void {
     var out = std.io.getStdOut().writer();
 
@@ -755,12 +807,69 @@ fn printConfigSummary(opts: *const options.Options) !void {
     if (opts.priority != -1) {
         try out.print("  priority {d}\n", .{opts.priority});
     }
+    if (opts.affinity_mask) |mask| {
+        const cpus = miner_mod.Miner.affinityCpus(mask);
+        if (cpus == 0) {
+            // An empty mask silently means "no pinning" otherwise.
+            try out.print("  affinity 0x{x} selects no CPU; it will be ignored\n", .{mask});
+        } else {
+            try out.print("  affinity 0x{x} ({d} cpu(s))\n", .{ mask, cpus });
+        }
+    }
+    if (opts.init_threads > 0) {
+        try out.print("  dataset  built with {d} thread(s)\n", .{opts.init_threads});
+    }
+    if (opts.user_agent) |ua| {
+        try out.print("  agent   {s}\n", .{ua});
+    }
 
     try out.print("  mode    {s}, huge pages {s}, jit {s}\n", .{
         @tagName(opts.mode),
         if (opts.huge_pages) "on" else "off",
         if (opts.jit) "on" else "off",
     });
+
+    // The single most common reason a VPS mines 25% slower than it should is
+    // that nobody reserved huge pages. Say it during --check, before the user
+    // spends a night comparing screenshots of hashrate.
+    if (opts.huge_pages) {
+        try out.print("  memory  {s}\n", .{hugePageStatus(opts.mode)});
+    }
+
+    // MSR is read-only here: probe the first CPU, never write during --check.
+    var msr_buf: [192]u8 = undefined;
+    _ = api.xmo_msr_probe(&msr_buf, msr_buf.len);
+    try out.print("  msr     {s} ({s})\n", .{
+        msr_buf[0..std.mem.indexOfScalar(u8, &msr_buf, 0) orelse msr_buf.len],
+        if (opts.msr) "on" else "off, enable with --msr",
+    });
+}
+
+/// Reads the kernel's huge page pool and turns it into one sentence a human can
+/// act on. Kept separate so --check and the warning in miner.zig agree.
+fn hugePageStatus(mode: options.Mode) []const u8 {
+    const needed_mb: u64 = switch (mode) {
+        .light => 320,
+        .fast => 2416,
+        .auto => 2416,
+    };
+    const pages_needed = (needed_mb + 1) / 2;
+
+    var buf: [32]u8 = undefined;
+    const file = std.fs.openFileAbsolute("/proc/sys/vm/nr_hugepages", .{}) catch return "huge pages: not supported by this kernel";
+    defer file.close();
+
+    const n = file.readAll(&buf) catch return "huge pages: cannot read /proc/sys/vm/nr_hugepages";
+    const total = std.fmt.parseInt(u64, std.mem.trim(u8, buf[0..n], " \n\r"), 10) catch 0;
+
+    if (total >= pages_needed) return "huge pages reserved, RandomX will use 2 MiB pages";
+
+    // Returning a slice of a thread-local buffer is not possible here, so the
+    // caller gets one of two static messages and the command in the usage text.
+    return if (total == 0)
+        "huge pages: 0 reserved -> falling back to 4 KiB (up to 25% slower); see --help"
+    else
+        "huge pages: fewer reserved than this mode needs; see --help";
 }
 
 /// Detaches from the controlling terminal: the parent returns and the child
@@ -972,6 +1081,14 @@ const Measure = struct {
 
 fn benchmark(allocator: std.mem.Allocator, opts: *const options.Options, cap_seconds: u64, warmup_seconds: u64) !Measure {
     const logger = &log.global;
+    // A benchmark is where the MSR preset matters most: it is the number the
+    // user compares against another miner.
+    const msr_applied = applyMsr(opts, logger);
+    defer if (msr_applied and opts.msr_restore) {
+        var buf: [192]u8 = undefined;
+        @memset(&buf, 0);
+        _ = api.xmo_msr_restore(&buf, buf.len);
+    };
 
     // Deterministic seed so repeated runs are comparable.
     const seed_text = "zmrig benchmark seed 000000000000";
@@ -982,7 +1099,7 @@ fn benchmark(allocator: std.mem.Allocator, opts: *const options.Options, cap_sec
     defer miner.deinit();
 
     try miner.engine.ensure(opts.algo orelse .rx_0);
-    try miner.engine.seedNow(seed_bytes, miner.threadCount());
+    try miner.engine.seedNow(seed_bytes, miner.shared.initThreads());
 
     var bench_job = job_mod.Job.init();
     @memset(bench_job.blob[0..76], 0);

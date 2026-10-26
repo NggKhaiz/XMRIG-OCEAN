@@ -92,6 +92,39 @@ zmrig -o pool:3333 -u 4YourAddress.rig1 -t 4
 `oneclick.sh report` refuses to run when the machine cannot hold the dataset,
 instead of being killed by the OOM killer mid-measurement.
 
+## Tuning the miner
+
+Every knob below was measured with `zmrig/tests/ab.sh` (same binary, same
+machine, idle cores) — nothing here is a guess. The numbers are from a 2 vCPU
+Xeon at 2.6 GHz with 3.9 GiB of RAM, `--mode fast`, 4000 hashes per run.
+
+| Knob | Default | Measured effect |
+| --- | --- | --- |
+| `--huge-pages` / `--no-huge-pages` | on | **+24 %** with explicit 2 MiB pages (832 vs 624–644 H/s). Transparent huge pages alone are worth nothing (≈ 4 KiB). `--check` tells you whether pages are actually reserved. |
+| `--msr` | off | Prefetchers off through MSR. Needs root and bare metal; the read is refused inside a VM without MSR passthrough, and the miner says so instead of pretending. |
+| `--cpu-affinity=0x3` | all cores | XMRig-style bitmask. Pinning both threads to one core in the test box halves the rate (832 → 405 H/s), which is the expected, verifiable behaviour of a real pin. |
+| `--no-affinity` | pin | Lets the scheduler move threads; measured equal to pinning on an idle box, kept for hosts with noisy neighbours. |
+| `--priority=N` / `--cpu-priority=N` | off | 1..5 (XMRig scale) or a raw nice value; the worker sets it per thread. |
+| `--mode=fast\|light` | auto | `fast` builds the 2 GiB dataset; `light` hashes straight from the 256 MiB cache and is ~9x slower (819 → 91 H/s). Auto picks fast when the box has ≥ 3 GiB. |
+| `--randomx-init=N` | hashing threads | Threads used to build the dataset, and nothing else: one thread instead of two took 36 s instead of 16 s to seed. |
+| `--no-optimized-init` | off | Skips the AVX2 dataset initialiser. Measured within noise (16.1 s vs 16.4 s on this Xeon), identical hashes; useful as a fallback, never a speed-up. |
+| `--scratchpad-prefetch=0..3` | 1 | Prefetch hint baked into the JIT. All four modes landed in 795–832 H/s on this box: no measurable difference, so the documented default stays. |
+| `--no-jit` | off | Interpreter only, ~6x slower. Kept for CPUs without x86-64/ARM64, never for mining. |
+| `--nicehash` | auto | Masks the nonce to the 24 bits a NiceHash/rental pool owns, so the top extranonce byte survives. Off unless the pool's job carries a non-zero nonce. |
+| `--user-agent=UA` | `zmrig/6.26.0-mo9` | Sent in the WebSocket upgrade; some relays and Cloudflare routes only accept known miner strings. |
+| `--donate-level=N` | — | Accepted so XMRig scripts keep working, then ignored with a log line: the developer fee is 0 %, never 1 %. |
+
+Config file equivalents live where XMRig puts them, so an existing `config.json`
+keeps working: `randomx.mode`, `randomx.init`, `randomx.init-avx2`,
+`randomx.msr`, `randomx.wrmsr`, `randomx.rdmsr`,
+`randomx.scratchpad_prefetch_mode`, `cpu.affinity` (bitmask or `null`),
+`cpu.priority`, `cpu.huge-pages`, `cpu.huge-pages-jit`.
+
+Two levers are deliberately *not* shipped as flags because they cannot be
+justified here: 1 GiB pages (the kernel refuses to reserve one when the box is
+fragmented, and `--check` reports the reservation honestly) and MSR presets
+other than the Intel/AMD defaults in `src/crypto/rx/RxConfig.cpp`.
+
 ## Mining to Ocean Pool
 
 The pool in `pool/` is meant to be deployed by whoever runs it; there is no

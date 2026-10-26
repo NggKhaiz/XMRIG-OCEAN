@@ -114,6 +114,7 @@ CXX_SOURCES=(
     "${ROOT}/src/base/io/json/Json.cpp"
     "${ROOT}/src/3rdparty/fmt/format.cc"
     "${HERE}/capi/xmo_randomx.cpp"
+    "${HERE}/capi/xmo_msr.cpp"
     "${HERE}/capi/shim.cpp"
 )
 

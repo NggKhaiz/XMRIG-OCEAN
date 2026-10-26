@@ -51,6 +51,9 @@ CONFIGS=(
     "prefetch3|--scratchpad-prefetch=3"
     "no-jit-hugepages|--no-huge-pages-jit"
     "no-affinity|--no-affinity"
+    "affinity-1core|--cpu-affinity=0x1"
+    "init-1-thread|--randomx-init=1"
+    "plain-dataset-init|--no-optimized-init"
     "priority5|--priority=5"
     "light-mode|--mode=light"
 )
