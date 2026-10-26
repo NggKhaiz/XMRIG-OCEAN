@@ -200,7 +200,7 @@ void MoBenchmark::start() {
     m_time_start  = 0;          // init time of the first result (in ms) during the first onJobResult
     m_bench_start = 0;          // init time of measurements start (in ms) during the first onJobResult
     m_backends_started.clear();
-    m_controller->miner()->setJob(m_bench_job, false); // set job for workers to compute
+    m_controller->miner()->setJob(m_bench_job); // set job for workers to compute
 }
 
 // run next bench algo or finish benchmark for the last one
@@ -257,7 +257,7 @@ void MoBenchmark::onJobResult(const JobResult& result) {
         case Algorithm::GHOSTRIDER_RTM: {
             uint8_t* blob = m_bench_job.blob();
             ++ *reinterpret_cast<uint32_t*>(blob+4);
-            m_controller->miner()->setJob(m_bench_job, false);
+            m_controller->miner()->setJob(m_bench_job);
             break;
         }
         default:;

@@ -111,6 +111,15 @@ private:
         else {
             LOG_WARN(CLEAR "%s" YELLOW_BOLD_S "failed to allocate RandomX dataset, switching to slow mode" BLACK_BOLD(" (%" PRIu64 " ms)"), Tags::randomx(), Chrono::steadyMSecs() - ts);
         }
+
+        // Print the actionable hint once per process instead of on every seed change.
+        static bool hintPrinted = false;
+
+        if (!hintPrinted && !m_dataset->isOneGbPages() && !m_dataset->hugePages().isFullyAllocated()) {
+            hintPrinted = true;
+
+            LOG_WARN(CLEAR "%s" YELLOW_BOLD_S "huge pages are not fully allocated" BLACK_BOLD(", RandomX typically loses 10-20%% hashrate without them. See doc/PERFORMANCE.md section 2 (Linux: scripts/tune-linux.sh)."), Tags::randomx());
+        }
     }
 
 

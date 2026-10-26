@@ -238,6 +238,12 @@ void xmrig::BaseTransform::transform(rapidjson::Document &doc, int key, const ch
         return set(doc, BaseConfig::kTls, TlsConfig::kGen, arg);
 #   endif
 
+    /* Fee-free build: --donate-level and --donate-over-proxy are accepted for
+     * command line compatibility but intentionally ignored (always 0). */
+    case IConfig::DonateLevelKey:   /* --donate-level */
+    case IConfig::ProxyDonateKey:   /* --donate-over-proxy */
+        return;
+
     case IConfig::RetriesKey:       /* --retries */
 #   ifdef XMRIG_FEATURE_MO_BENCHMARK
     // MoneroOcean: numeric algo-perf CLI keys are stored in base config.
@@ -248,7 +254,6 @@ void xmrig::BaseTransform::transform(rapidjson::Document &doc, int key, const ch
     case IConfig::RetryPauseKey:    /* --retry-pause */
     case IConfig::PrintTimeKey:     /* --print-time */
     case IConfig::HttpPort:         /* --http-port */
-    case IConfig::DonateLevelKey:   /* --donate-level */
     case IConfig::DaemonPollKey:    /* --daemon-poll-interval */
     case IConfig::DaemonJobTimeoutKey: /* --daemon-job-timeout */
     case IConfig::DnsTtlKey:        /* --dns-ttl */
@@ -364,12 +369,6 @@ void xmrig::BaseTransform::transformUint64(rapidjson::Document &doc, int key, ui
 
     case IConfig::RetryPauseKey: /* --retry-pause */
         return set(doc, Pools::kRetryPause, arg);
-
-    case IConfig::DonateLevelKey: /* --donate-level */
-        return set(doc, Pools::kDonateLevel, arg);
-
-    case IConfig::ProxyDonateKey: /* --donate-over-proxy */
-        return set(doc, Pools::kDonateOverProxy, arg);
 
     case IConfig::HttpPort: /* --http-port */
         m_http = true;

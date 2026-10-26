@@ -104,8 +104,44 @@ bool xmrig::Platform::setThreadAffinity(uint64_t cpu_id)
 #endif // XMRIG_FEATURE_HWLOC
 
 
-void xmrig::Platform::setProcessPriority(int)
+void xmrig::Platform::setProcessPriority(int priority)
 {
+    if (priority == -1) {
+        return;
+    }
+
+    int prio = 19;
+    switch (priority)
+    {
+    case 1:
+        prio = 5;
+        break;
+
+    case 2:
+        prio = 0;
+        break;
+
+    case 3:
+        prio = -5;
+        break;
+
+    case 4:
+        prio = -10;
+        break;
+
+    case 5:
+        prio = -15;
+        break;
+
+    default:
+        break;
+    }
+
+    // Linux applies nice values per thread, so this only covers the main
+    // thread. Worker threads call setThreadPriority() from their own context.
+    // A negative nice value needs CAP_SYS_NICE; the error is intentionally
+    // ignored so that unprivileged miners keep working exactly as before.
+    setpriority(PRIO_PROCESS, getpid(), prio);
 }
 
 

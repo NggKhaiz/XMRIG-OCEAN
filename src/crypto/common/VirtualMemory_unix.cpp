@@ -100,7 +100,26 @@ bool xmrig::VirtualMemory::isHugepagesAvailable()
 bool xmrig::VirtualMemory::isOneGbPagesAvailable()
 {
 #   ifdef XMRIG_OS_LINUX
-    return Cpu::info()->hasOneGbPages();
+    if (!Cpu::info()->hasOneGbPages()) {
+        return false;
+    }
+
+    // The CPU can map 1GB pages, but they only help if the administrator
+    // actually reserved some. Reading the sysfs counter avoids the error path
+    // in RxDataset ("failed to allocate ... using 1GB pages") on stock hosts.
+    static const bool available = []() {
+        std::ifstream file("/sys/kernel/mm/hugepages/hugepages-1048576kB/nr_hugepages");
+        if (!file.is_open()) {
+            return false;
+        }
+
+        uint64_t count = 0;
+        file >> count;
+
+        return count > 0;
+    }();
+
+    return available;
 #   else
     return false;
 #   endif

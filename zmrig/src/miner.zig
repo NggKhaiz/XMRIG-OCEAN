@@ -1,0 +1,745 @@
+//! Mining core: hash engine lifetime, seed handling, worker threads, share
+//! detection and hashrate accounting.
+//!
+//! Threading model (same as XMRig):
+//!   * one engine owns the RandomX cache and (fast mode) the 2 GiB dataset,
+//!   * every worker thread owns one VM and hashes on its own,
+//!   * a job switch is a generation counter, workers pick it up between hashes,
+//!   * a seed change pauses the workers and re-initialises cache + dataset.
+
+const std = @import("std");
+const api = @import("api.zig");
+const job_mod = @import("job.zig");
+const log = @import("log.zig");
+const options = @import("options.zig");
+const stratum = @import("stratum.zig");
+
+pub const max_threads = 128;
+
+/// XMRig reserves nonce windows of 32768 per thread, we do the same.
+const nonce_chunk: u32 = 32768;
+
+fn nowMs() i64 {
+    return std.time.milliTimestamp();
+}
+
+pub const Share = struct {
+    job_id: [96]u8 = undefined,
+    job_id_len: usize = 0,
+    nonce: u32 = 0,
+    hash: [32]u8 = undefined,
+    height: u64 = 0,
+    /// Algorithm of the job the share belongs to: pools validate the name, and
+    /// a hardcoded "rx/0" is wrong the moment the pool switches algo.
+    algo: api.Algo = .rx_0,
+};
+
+/// Hands shares to the pool connection from worker threads.
+pub const Submitter = struct {
+    mutex: std.Thread.Mutex = .{},
+    session: ?*stratum.Session = null,
+    /// Timestamp of the last byte we sent, used to decide when a keepalive is
+    /// due. Shares count as traffic, so a busy rig never sends one.
+    last_write: std.atomic.Value(i64) = std.atomic.Value(i64).init(0),
+    last_drop_warn: std.atomic.Value(i64) = std.atomic.Value(i64).init(0),
+    accepted: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    rejected: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    failed: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+
+    pub fn attach(self: *Submitter, session: *stratum.Session) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.session = session;
+        self.last_write.store(std.time.milliTimestamp(), .monotonic);
+    }
+
+    /// Sends `keepalived` when nothing has gone out for `interval_ms`.
+    /// Runs on the monitor thread: the same mutex keeps it from interleaving
+    /// with a share submission, and `session == null` after detach makes it a
+    /// no-op while the connection is being replaced.
+    pub fn keepaliveIfIdle(self: *Submitter, interval_ms: i64, logger: *log.Logger) void {
+        const now = std.time.milliTimestamp();
+        if (now - self.last_write.load(.monotonic) < interval_ms) return;
+
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const session = self.session orelse return;
+        if (now - self.last_write.load(.monotonic) < interval_ms) return;
+
+        self.last_write.store(now, .monotonic);
+
+        session.keepalive() catch |e| {
+            logger.debug("cannot send keepalive: {s}", .{@errorName(e)});
+        };
+    }
+
+    pub fn detach(self: *Submitter) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.session = null;
+    }
+
+    pub fn submit(self: *Submitter, share: *const Share, logger: *log.Logger) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const session = self.session orelse {
+            _ = self.failed.fetchAdd(1, .monotonic);
+
+            // A disconnect can last minutes and a 1 kH/s rig finds a share
+            // every few seconds; log the first one and then at most every
+            // 30 s so the log stays readable.
+            const now = std.time.milliTimestamp();
+            if (now - self.last_drop_warn.load(.monotonic) > 30_000) {
+                self.last_drop_warn.store(now, .monotonic);
+                logger.warn("share found while disconnected, dropped (nonce {x}, {d} dropped so far)", .{ share.nonce, self.failed.load(.monotonic) });
+            }
+
+            return;
+        };
+
+        self.last_write.store(std.time.milliTimestamp(), .monotonic);
+
+        _ = session.submit(share.job_id[0..share.job_id_len], share.nonce, &share.hash, share.height, share.algo) catch |e| {
+            _ = self.failed.fetchAdd(1, .monotonic);
+            logger.warn("cannot send share: {s}", .{@errorName(e)});
+
+            return;
+        };
+
+        logger.debug("share submitted (nonce {x})", .{share.nonce});
+    }
+};
+
+pub const Shared = struct {
+    job_mutex: std.Thread.Mutex = .{},
+    job: job_mod.Job = .{},
+    generation: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    next_nonce: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    running: std.atomic.Value(bool) = std.atomic.Value(bool).init(true),
+    paused: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    bench_limit: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    hashes: [max_threads]std.atomic.Value(u64) = blk: {
+        var counters: [max_threads]std.atomic.Value(u64) = undefined;
+        for (&counters) |*counter| counter.* = std.atomic.Value(u64).init(0);
+        break :blk counters;
+    },
+    thread_count: usize = 0,
+    priority: i32 = -1,
+
+    pub fn publish(self: *Shared, new_job: *const job_mod.Job) void {
+        self.job_mutex.lock();
+        defer self.job_mutex.unlock();
+
+        self.job = new_job.*;
+        self.next_nonce.store(randomNonceBase(), .release);
+        _ = self.generation.fetchAdd(1, .monotonic);
+    }
+
+    pub fn pause(self: *Shared) void {
+        self.paused.store(true, .release);
+    }
+
+    pub fn unpause(self: *Shared) void {
+        self.paused.store(false, .release);
+    }
+
+    pub fn totalHashes(self: *Shared) u64 {
+        var total: u64 = 0;
+        for (self.hashes[0..self.thread_count]) |*counter| {
+            total += counter.load(.monotonic);
+        }
+
+        return total;
+    }
+};
+
+fn randomNonceBase() u32 {
+    var bytes: [4]u8 = undefined;
+    std.crypto.random.bytes(&bytes);
+
+    return std.mem.readInt(u32, &bytes, .little);
+}
+
+pub const Engine = struct {
+    logger: *log.Logger,
+    wrapped: ?api.Wrapped = null,
+    algo: ?api.Algo = null,
+    flags: api.EngineFlags = .{},
+    seed: [32]u8 = [_]u8{0} ** 32,
+    has_seed: bool = false,
+
+    const Self = @This();
+
+    pub fn init(logger: *log.Logger, flags: api.EngineFlags) Self {
+        return .{ .logger = logger, .flags = flags };
+    }
+
+    pub fn deinit(self: *Self) void {
+        if (self.wrapped) |*wrapped| wrapped.destroy();
+        self.wrapped = null;
+        self.algo = null;
+        self.has_seed = false;
+    }
+
+    /// Creates (or recreates) the engine when the algorithm changes. A pool can
+    /// switch us between RandomX forks at any time and each fork has its own
+    /// cache/dataset configuration.
+    pub fn ensure(self: *Self, algo: api.Algo) !void {
+        if (self.wrapped != null and self.algo != null and self.algo.? == algo) return;
+
+        if (self.wrapped != null) {
+            self.logger.info("switching algorithm to {s}, re-initialising the dataset", .{algo.label()});
+            self.deinit();
+        }
+
+        var flags = self.flags;
+        const wrapped = api.Wrapped.create(algo, flags) catch |e| blk: {
+            if (flags.full_memory) {
+                self.logger.warn("cannot allocate the {s} dataset ({s}), falling back to light mode", .{ algo.label(), @errorName(e) });
+                flags.full_memory = false;
+
+                break :blk api.Wrapped.create(algo, flags) catch |e2| {
+                    self.logger.err("cannot create the {s} hash engine: {s}", .{ algo.label(), @errorName(e2) });
+
+                    return error.EngineInitFailed;
+                };
+            }
+
+            self.logger.err("cannot create the {s} hash engine: {s}", .{ algo.label(), @errorName(e) });
+
+            return error.EngineInitFailed;
+        };
+
+        var cache_buf: [24]u8 = undefined;
+        var dataset_buf: [24]u8 = undefined;
+        var huge_buf: [24]u8 = undefined;
+
+        self.logger.info("hash engine ready: {s}, cache {s}, dataset {s}, huge pages {s}", .{
+            algo.label(),
+            std.fmt.bufPrint(&cache_buf, "{d} MB", .{wrapped.cacheSize() / (1024 * 1024)}) catch "?",
+            std.fmt.bufPrint(&dataset_buf, "{d} MB", .{wrapped.datasetSize() / (1024 * 1024)}) catch "?",
+            std.fmt.bufPrint(&huge_buf, "{d} MB", .{wrapped.hugePageBytes() / (1024 * 1024)}) catch "?",
+        });
+
+        self.wrapped = wrapped;
+        self.algo = algo;
+        self.has_seed = false;
+    }
+
+    /// True when `algo` would need a different engine (not created yet, or a
+    /// different RandomX variant). Rebuilding while workers hold VMs from the
+    /// old engine is a use-after-free, so callers stop the threads first.
+    pub fn needsAlgo(self: *const Self, algo_value: api.Algo) bool {
+        if (self.wrapped == null or self.algo == null) return true;
+
+        return self.algo.? != algo_value;
+    }
+
+    pub fn needsSeed(self: *Self, seed_value: [32]u8, has_seed: bool) bool {
+        if (!has_seed) return false;
+        if (!self.has_seed) return true;
+
+        return !std.mem.eql(u8, &self.seed, &seed_value);
+    }
+
+    pub fn seedNow(self: *Self, seed_value: [32]u8, threads: usize) !void {
+        if (self.wrapped) |*wrapped| {
+            const started = nowMs();
+
+            self.logger.info("initialising the dataset ({d} threads)", .{threads});
+            try wrapped.seed(&seed_value, threads);
+
+            self.seed = seed_value;
+            self.has_seed = true;
+
+            self.logger.info("dataset ready in {d} ms", .{nowMs() - started});
+        }
+    }
+
+    pub fn createVm(self: *Self) !*api.Vm {
+        const wrapped = if (self.wrapped) |*w| w else return error.EngineNotReady;
+
+        return wrapped.createVm(self.flags.huge_pages);
+    }
+};
+
+/// Samples the cumulative hash counter and reports 10s/60s/15m averages.
+pub const Stats = struct {
+    samples: [512]Sample = undefined,
+    count: usize = 0,
+    head: usize = 0,
+    max_rate: f64 = 0,
+
+    pub const Sample = struct {
+        time_ms: i64 = 0,
+        hashes: u64 = 0,
+    };
+
+    pub fn add(self: *Stats, hashes: u64) void {
+        const sample = Sample{ .time_ms = nowMs(), .hashes = hashes };
+
+        if (self.count < self.samples.len) {
+            self.samples[self.count] = sample;
+            self.count += 1;
+        } else {
+            self.samples[self.head % self.samples.len] = sample;
+        }
+
+        self.head += 1;
+    }
+
+    /// Average rate over the last `window_seconds`, using the closest sample
+    /// that is at least that old (or the oldest one we have).
+    /// Records the current 60 s rate as the session maximum.
+    pub fn updateMax(self: *Stats) void {
+        const current = self.rate(60);
+        if (current > self.max_rate) self.max_rate = current;
+    }
+
+    pub fn rate(self: *Stats, window_seconds: u64) f64 {
+        if (self.head < 2) return 0;
+
+        const newest_index = (self.head - 1) % self.samples.len;
+        const newest = self.samples[newest_index];
+        const target_ms = newest.time_ms - @as(i64, @intCast(window_seconds)) * 1000;
+
+        var best: Sample = newest;
+        var i: usize = 2;
+        const available = @min(self.head, self.samples.len);
+
+        while (i <= available) : (i += 1) {
+            const index = (self.head - i) % self.samples.len;
+            const sample = self.samples[index];
+
+            best = sample;
+            if (sample.time_ms <= target_ms) break;
+        }
+
+        const elapsed_ms = newest.time_ms - best.time_ms;
+        if (elapsed_ms <= 0) return 0;
+
+        const delta = newest.hashes -| best.hashes;
+
+        return @as(f64, @floatFromInt(delta)) * 1000.0 / @as(f64, @floatFromInt(elapsed_ms));
+    }
+};
+
+pub const Worker = struct {
+    shared: *Shared,
+    engine: *Engine,
+    submitter: *Submitter,
+    logger: *log.Logger,
+    index: usize,
+    cpu: ?usize = null,
+    thread: ?std.Thread = null,
+};
+
+pub const Miner = struct {
+    logger: *log.Logger,
+    shared: Shared = .{},
+    engine: Engine,
+    submitter: Submitter = .{},
+    stats: Stats = .{},
+    workers: [max_threads]Worker = undefined,
+    hw_threads: usize = 1,
+    affinity: bool = true,
+    started: bool = false,
+
+    const Self = @This();
+
+    pub fn init(logger: *log.Logger, opts: *const options.Options) !Self {
+        const hw_threads = cpuCount();
+
+        // These are process-wide engine settings and must be in place before
+        // the first cache is built (the JIT bakes them into the program).
+        api.xmo_set_scratchpad_prefetch(opts.scratchpad_prefetch);
+        api.xmo_set_huge_pages_jit(@intFromBool(opts.huge_pages_jit));
+        api.xmo_set_optimized_dataset_init(@intFromBool(opts.optimized_init));
+
+        var flags = api.EngineFlags{
+            .huge_pages = opts.huge_pages,
+            .huge_pages_jit = opts.huge_pages_jit,
+            .full_memory = opts.mode != .light,
+            .jit = opts.jit,
+        };
+
+        if (opts.mode == .auto) {
+            // Fast mode needs ~2.25 GiB of RAM; use it when the box can hold it.
+            flags.full_memory = totalMemory() >= 3 * 1024 * 1024 * 1024;
+            if (!flags.full_memory) {
+                logger.warn("less than 3 GiB of RAM, starting in light mode (256 MB cache)", .{});
+            }
+        }
+
+        const threads = opts.threads orelse defaultThreads(hw_threads);
+        if (threads == 0 or threads > max_threads) {
+            logger.err("invalid thread count {d} (1..{d})", .{ threads, max_threads });
+
+            return error.InvalidThreads;
+        }
+
+        var miner = Self{
+            .logger = logger,
+            .engine = Engine.init(logger, flags),
+            .hw_threads = hw_threads,
+            .affinity = opts.affinity,
+        };
+
+        miner.shared.thread_count = threads;
+        miner.shared.priority = opts.priority;
+
+        return miner;
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.stop();
+        self.engine.deinit();
+    }
+
+    pub fn threadCount(self: *const Self) usize {
+        return self.shared.thread_count;
+    }
+
+    /// Huge page usage as [allocated, required] in 2 MiB pages, for the API.
+    pub fn hugePages(self: *const Self) [2]usize {
+        const page = 2 * 1024 * 1024;
+
+        if (self.engine.wrapped) |wrapped| {
+            return .{ wrapped.hugePageBytes() / page, wrapped.totalMemory() / page };
+        }
+
+        return .{ 0, 0 };
+    }
+
+    pub fn start(self: *Self) !void {
+        if (self.started) return;
+
+        self.shared.running.store(true, .release);
+        self.started = true;
+
+        for (0..self.shared.thread_count) |i| {
+            self.workers[i] = .{
+                .shared = &self.shared,
+                .engine = &self.engine,
+                .submitter = &self.submitter,
+                .logger = self.logger,
+                .index = i,
+                .cpu = if (self.affinity and self.hw_threads > 0) i % self.hw_threads else null,
+            };
+
+            self.workers[i].thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, workerMain, .{&self.workers[i]}) catch |e| {
+                self.logger.err("cannot spawn thread {d}: {s}", .{ i, @errorName(e) });
+
+                return error.ThreadSpawnFailed;
+            };
+        }
+
+        self.logger.info("mining with {d} thread(s) out of {d} hardware threads", .{ self.shared.thread_count, self.hw_threads });
+    }
+
+    pub fn stop(self: *Self) void {
+        if (!self.started) return;
+
+        self.shared.running.store(false, .release);
+
+        for (self.workers[0..self.shared.thread_count]) |*worker| {
+            if (worker.thread) |thread| {
+                thread.join();
+                worker.thread = null;
+            }
+        }
+
+        self.started = false;
+    }
+
+    /// Applies a job from the pool: rebuilds the engine when the algorithm or
+    /// the seed changed, (re)starts the workers and publishes the job.
+    ///
+    /// Threads are *joined*, not paused, before the cache or the dataset is
+    /// touched: a worker holds a VM that points into that memory, so pausing it
+    /// and re-initialising underneath is a use-after-free (it segfaulted on the
+    /// first rx/0 -> rx/wow switch during the soak test).
+    pub fn applyJob(self: *Self, new_job: *job_mod.Job) !void {
+        const needs_algo = self.engine.needsAlgo(new_job.algo);
+        const needs_seed = new_job.has_seed and self.engine.needsSeed(new_job.seed, new_job.has_seed);
+
+        if (needs_algo or needs_seed) {
+            self.stop();
+
+            if (needs_algo) try self.engine.ensure(new_job.algo);
+            if (needs_seed) try self.engine.seedNow(new_job.seed, self.shared.thread_count);
+
+            try self.start();
+
+            return self.publishJob(new_job);
+        }
+
+        if (!self.started) try self.start();
+
+        return self.publishJob(new_job);
+    }
+
+    fn publishJob(self: *Self, new_job: *job_mod.Job) void {
+        // Always unpause: a previous applyJob may have left the workers paused,
+        // and a job whose seed did not change would never wake them up (the rig
+        // used to sit at 0 H/s after a reconnect because of exactly that).
+        self.shared.unpause();
+        self.shared.publish(new_job);
+    }
+
+    pub fn hashrate(self: *Self, window_seconds: u64) f64 {
+        return self.stats.rate(window_seconds);
+    }
+
+    /// Prints the periodic hashrate line and, when verbose, per-thread rates.
+    pub fn report(self: *Self) void {
+        const total = self.shared.totalHashes();
+        self.stats.add(total);
+        self.stats.updateMax();
+
+        var buf_10: [32]u8 = undefined;
+        var buf_60: [32]u8 = undefined;
+        var buf_15m: [32]u8 = undefined;
+        var buf_max: [32]u8 = undefined;
+
+        // Same shape as XMRig's line so existing log parsers keep working:
+        // speed 10s/60s/15m <a> <b> <c> H/s max <d> H/s
+        self.logger.info("speed 10s/60s/15m {s} {s} {s} H/s max {s} H/s", .{
+            formatRate(&buf_10, self.stats.rate(10)),
+            formatRate(&buf_60, self.stats.rate(60)),
+            formatRate(&buf_15m, self.stats.rate(900)),
+            formatRate(&buf_max, self.stats.max_rate),
+        });
+    }
+};
+
+fn formatRate(buf: []u8, rate: f64) []const u8 {
+    return std.fmt.bufPrint(buf, "{d:.1}", .{rate}) catch "?";
+}
+
+fn workerMain(worker: *Worker) void {
+    const shared = worker.shared;
+
+    // nice is per-thread on Linux, so the worker sets it for itself.
+    applyPriority(shared.priority);
+
+    if (worker.cpu) |cpu| pinToCpu(cpu);
+
+    const vm = worker.engine.createVm() catch |e| {
+        worker.logger.err("thread {d}: cannot create a VM: {s}", .{ worker.index, @errorName(e) });
+
+        return;
+    };
+    defer api.xmo_vm_free(vm);
+
+    var local_job = job_mod.Job{};
+    var last_generation: u64 = 0;
+    var nonce: u32 = 0;
+    var prev_nonce: u32 = 0;
+    var rounds: u32 = 0;
+    var temp: [8]u64 align(64) = undefined;
+    // RandomX writes the final digest with SIMD stores; keep the destination
+    // aligned so that never becomes an unaligned-access fault.
+    var hash: [32]u8 align(64) = undefined;
+
+    while (shared.running.load(.acquire)) {
+        const generation = shared.generation.load(.acquire);
+
+        if (shared.paused.load(.acquire)) {
+            std.time.sleep(5 * std.time.ns_per_ms);
+            continue;
+        }
+
+        if (generation != last_generation) {
+            shared.job_mutex.lock();
+            local_job = shared.job;
+            shared.job_mutex.unlock();
+
+            last_generation = generation;
+            rounds = 0;
+            nonce = shared.next_nonce.fetchAdd(nonce_chunk, .monotonic);
+            prev_nonce = nonce;
+
+            local_job.setNonce(nonce);
+            api.xmo_hash_first(vm, local_job.blobSlice().ptr, local_job.blob_len, &temp);
+            continue;
+        }
+
+        rounds +%= 1;
+
+        if ((rounds & (nonce_chunk - 1)) == 0) {
+            nonce = shared.next_nonce.fetchAdd(nonce_chunk, .monotonic);
+        } else {
+            nonce +%= 1;
+        }
+
+        local_job.setNonce(nonce);
+        api.xmo_hash_next(vm, &temp, local_job.blobSlice().ptr, local_job.blob_len, &hash);
+
+        _ = shared.hashes[worker.index].fetchAdd(1, .monotonic);
+
+        const limit = shared.bench_limit.load(.monotonic);
+        if (limit != 0 and shared.totalHashes() >= limit) {
+            shared.running.store(false, .release);
+
+            return;
+        }
+
+        if (local_job.hashMeetsTarget(&hash)) {
+            var share = Share{ .nonce = prev_nonce, .hash = hash, .height = local_job.height, .algo = local_job.algo };
+            const id = local_job.idSlice();
+            share.job_id_len = id.len;
+            @memcpy(share.job_id[0..id.len], id);
+
+            worker.submitter.submit(&share, worker.logger);
+        }
+
+        prev_nonce = nonce;
+    }
+}
+
+pub fn cpuCount() usize {
+    const count = std.Thread.getCpuCount() catch 1;
+
+    return @max(count, 1);
+}
+
+/// XMRig's RandomX default: one thread per 2 MiB of L3 cache, capped by the
+/// number of hardware threads.
+pub fn defaultThreads(hw_threads: usize) usize {
+    const l3 = l3CacheSize() orelse return hw_threads;
+    const by_cache = l3 / (2 * 1024 * 1024);
+
+    if (by_cache == 0) return 1;
+
+    return @max(@min(by_cache, hw_threads), 1);
+}
+
+pub fn l3CacheSize() ?usize {
+    const path = "/sys/devices/system/cpu/cpu0/cache/index3/size";
+    var buf: [32]u8 = undefined;
+
+    const file = std.fs.openFileAbsolute(path, .{}) catch return null;
+    defer file.close();
+
+    const n = file.readAll(&buf) catch return null;
+    const text = std.mem.trim(u8, buf[0..n], " \n\r");
+
+    if (text.len == 0) return null;
+
+    var multiplier: usize = 1;
+    var digits = text;
+
+    switch (text[text.len - 1]) {
+        'K', 'k' => {
+            multiplier = 1024;
+            digits = text[0 .. text.len - 1];
+        },
+        'M', 'm' => {
+            multiplier = 1024 * 1024;
+            digits = text[0 .. text.len - 1];
+        },
+        'G', 'g' => {
+            multiplier = 1024 * 1024 * 1024;
+            digits = text[0 .. text.len - 1];
+        },
+        else => {},
+    }
+
+    const value = std.fmt.parseInt(usize, digits, 10) catch return null;
+
+    return value * multiplier;
+}
+
+/// Total RAM in bytes, read from /proc/meminfo (no libc dependency).
+pub fn totalMemory() u64 {
+    return meminfoBytes("MemTotal:");
+}
+
+/// What a new 2 GiB dataset can actually use right now: MemAvailable plus the
+/// huge pages that are reserved but not yet handed out (the kernel does not
+/// count those as available for ordinary allocations, and the dataset is
+/// allocated from exactly those pages).
+pub fn memoryForDataset() u64 {
+    const available = meminfoBytes("MemAvailable:");
+    const free_pages = meminfoValue("HugePages_Free:");
+    const page_size = meminfoValue("Hugepagesize:");   // kB per huge page
+
+    return available + free_pages * page_size * 1024;
+}
+
+fn meminfoValue(comptime field: []const u8) u64 {
+    var buf: [4096]u8 = undefined;
+
+    const file = std.fs.openFileAbsolute("/proc/meminfo", .{}) catch return 0;
+    defer file.close();
+
+    const n = file.readAll(&buf) catch return 0;
+    var lines = std.mem.splitScalar(u8, buf[0..n], '\n');
+
+    while (lines.next()) |line| {
+        if (!std.mem.startsWith(u8, line, field)) continue;
+
+        var fields = std.mem.tokenizeAny(u8, line[field.len..], " \t");
+        const value = fields.next() orelse return 0;
+
+        return std.fmt.parseInt(u64, value, 10) catch 0;
+    }
+
+    return 0;
+}
+
+fn meminfoBytes(comptime field: []const u8) u64 {
+    var buf: [4096]u8 = undefined;
+
+    const file = std.fs.openFileAbsolute("/proc/meminfo", .{}) catch return 0;
+    defer file.close();
+
+    const n = file.readAll(&buf) catch return 0;
+    var lines = std.mem.splitScalar(u8, buf[0..n], '\n');
+
+    while (lines.next()) |line| {
+        if (!std.mem.startsWith(u8, line, field)) continue;
+
+        var fields = std.mem.tokenizeAny(u8, line[field.len..], " \t");
+        const value = fields.next() orelse return 0;
+
+        const kb = std.fmt.parseInt(u64, value, 10) catch return 0;
+
+        return kb * 1024;
+    }
+
+    return 0;
+}
+
+/// Same mapping oneclick/exmrig use: -1 leaves the thread alone, 0..5 follow
+/// XMRig's scale, anything else is a raw nice value.
+pub fn applyPriority(priority: i32) void {
+    if (priority == -1) return;
+
+    const nice_value: i32 = if (priority >= 0 and priority <= 5) switch (priority) {
+        1 => 5,
+        2 => 0,
+        3 => -5,
+        4 => -10,
+        5 => -15,
+        else => 19,
+    } else priority;
+
+    _ = std.os.linux.syscall3(.setpriority, 0, 0, @bitCast(@as(isize, nice_value)));
+}
+
+fn pinToCpu(cpu: usize) void {
+    var set: std.os.linux.cpu_set_t = std.mem.zeroes(std.os.linux.cpu_set_t);
+    const index = cpu / @bitSizeOf(usize);
+    const bit = cpu % @bitSizeOf(usize);
+
+    if (index >= set.len) return;
+
+    set[index] |= @as(usize, 1) << @intCast(bit);
+
+    const rc = std.os.linux.syscall3(.sched_setaffinity, 0, @sizeOf(std.os.linux.cpu_set_t), @intFromPtr(&set));
+    _ = rc;
+}
