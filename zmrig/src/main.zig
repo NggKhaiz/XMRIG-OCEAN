@@ -97,6 +97,16 @@ pub fn main() !void {
 
     log.global = log.Logger.init(opts.colors, opts.verbose);
     stratum.user_agent = opts.user_agent;
+    for (opts.pools.items) |pool| {
+        if (!pool.tls_insecure) continue;
+
+        // The bundled TLS client always verifies the chain, and there is no
+        // hook to skip it. Saying so is better than a handshake error that
+        // looks like the pool's fault.
+        log.global.warn("--tls-insecure is accepted for XMRig compatibility but cannot disable verification; use --tls-ca FILE for a private certificate", .{});
+        break;
+    }
+
     if (opts.donate_level_ignored) |level| {
         // Do not silently accept `--donate-level=1` and then take 1 %: the fee
         // is 0 % by construction (see doc/ZERO_FEE.md).
