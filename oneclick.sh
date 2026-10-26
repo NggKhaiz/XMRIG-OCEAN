@@ -10,6 +10,7 @@
 #                                          # mine through a CDN / HTTPS-only egress
 #   ./oneclick.sh status                   # is it mining? at what hashrate?
 #   ./oneclick.sh bench                    # reproducible hashrate measurement
+#   ./oneclick.sh report                   # machine report code for the web dashboard
 #   ./oneclick.sh verify                   # prove the 0% fee
 #
 # Subcommands
@@ -19,6 +20,7 @@
 #   config             (re)generate the config file
 #   start|stop|restart|status|logs
 #   bench              RandomX benchmark
+#   report             machine report code (hashrate + power + shares)
 #   verify             fee-free audit
 #   update             git pull + rebuild + restart
 #   uninstall          stop, remove service, binary and (optionally) the config
@@ -139,6 +141,7 @@ Options
   --tls-ca FILE          trust the certificates in FILE (private CA / pinning)
   --idle-timeout N       reconnect if the pool is silent for N seconds (0 = never)
   --power W              wall power of this machine, written into the report code
+                         (also used by the 'report' subcommand)
   --report-file PATH     where zmrig keeps its report code
                          (default: <state dir>/report.txt, zmrig only)
   --no-report            do not write a report file
@@ -170,7 +173,7 @@ COMMAND=""
 ARGS=()
 while [ $# -gt 0 ]; do
     case "$1" in
-        install|build|tune|config|start|stop|restart|status|logs|bench|verify|update|uninstall)
+        install|build|tune|config|start|stop|restart|status|logs|bench|report|verify|update|uninstall)
             COMMAND="$1" ;;
         --wallet)        WALLET="${2:?}"; shift ;;
         --wallet=*)      WALLET="${1#*=}" ;;
@@ -1528,6 +1531,39 @@ case "$COMMAND" in
         fi
         ;;
     update)    cmd_update ;;
+    report)
+        resolve_root
+        resolve_engine
+
+        if [ "${ENGINE:-xmrig}" != "zmrig" ]; then
+            die "the machine report needs the zmrig engine (this install uses '${ENGINE}')"
+        fi
+
+        binary=$(find_binary) || die "no binary found, run the installer first"
+        [ -f "$CONFIG_FILE" ] || die "no config at ${CONFIG_FILE}, run the installer first"
+
+        # The report needs the 2 GiB dataset, which the running service already
+        # holds in huge pages: pause it, measure, bring it back.
+        was_running=0
+        if [ "$(service_state)" = "active" ]; then
+            was_running=1
+            info "pausing the miner so the report can build its own dataset"
+            svc_ctl stop >/dev/null 2>&1 || true
+            sleep 2
+        fi
+
+        report_args=()
+        [ -n "$NET_POWER" ] && report_args+=("--power" "$NET_POWER")
+
+        rc=0
+        "$binary" -c "$CONFIG_FILE" --report --no-color "${report_args[@]}" || rc=$?
+
+        if [ "$was_running" = 1 ]; then
+            svc_ctl start >/dev/null 2>&1 || true
+            info "miner restarted"
+        fi
+        exit "$rc"
+        ;;
     uninstall) cmd_uninstall ;;
     *)         fail "unknown command: ${COMMAND}"; usage; exit 1 ;;
 esac

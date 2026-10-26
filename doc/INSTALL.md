@@ -42,6 +42,7 @@ End state:
 sudo ./oneclick.sh status     # service state, hashrate, accepted shares
 sudo ./oneclick.sh logs       # last 40 log lines (journal)
 sudo ./oneclick.sh bench      # 180 s RandomX measurement
+sudo ./oneclick.sh report     # machine report code for the web dashboard
 sudo ./oneclick.sh verify     # fee audit
 sudo ./oneclick.sh update     # git pull + rebuild + restart
 sudo ./oneclick.sh uninstall  # stop, disable, remove binaries
@@ -97,6 +98,7 @@ hash loop changes.
 sudo ./oneclick.sh install --yes --wallet 4YourAddress... --engine zmrig --algo rx/0
 sudo ./oneclick.sh status      # identical output, hashrate comes from the zmrig log
 sudo ./oneclick.sh bench       # runs zmrig --bench=N (default 20000 hashes)
+sudo ./oneclick.sh report      # zmrig --report: pauses the unit, prints ZMRIG1.<code>
 sudo ./oneclick.sh verify      # --self-test + strings|grep -c donat
 ```
 

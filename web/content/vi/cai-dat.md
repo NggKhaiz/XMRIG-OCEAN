@@ -70,6 +70,16 @@ sudo ./oneclick.sh install \
   --power 45 --rig-id vps-sg-02
 ```
 
+## Lấy mã báo cáo
+
+```bash
+sudo ./oneclick.sh report --power 95
+# tạm dừng service, đo 15 giây, in ZMRIG1.…, rồi bật lại
+```
+
+Lệnh này cần engine `zmrig`. Nếu service đang chạy, nó tự dừng trước khi đo — dataset 2 GiB không thể dựng
+hai lần cùng lúc. Mã in ra dán thẳng vào bảng tính trên trang chủ.
+
 ## Kiểm tra sau khi cài
 
 ```bash

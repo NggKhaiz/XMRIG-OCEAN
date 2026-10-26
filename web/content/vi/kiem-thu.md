@@ -24,8 +24,8 @@ Chạy self-test cộng thêm các case so sánh kết quả hash giữa cấu h
 Dựng pool giả, TLS shim, proxy HTTP/SOCKS5 và WebSocket ngay trên máy bạn, rồi bắt miner nói chuyện với chúng:
 
 ```bash
-./zmrig/tests/net.sh --quick     # nhóm nhanh, ~1 phút
-./zmrig/tests/net.sh             # đầy đủ, ~4 phút
+./zmrig/tests/net.sh --quick     # cửa sổ 10 s mỗi case
+./zmrig/tests/net.sh             # cửa sổ 18 s mỗi case
 ./zmrig/tests/net.sh --soak      # thêm 4 phút soak
 ./zmrig/tests/net.sh --only api,tcp
 ```
@@ -51,6 +51,10 @@ Danh sách case:
 | | `hostile pool request` | mọi request gửi đi vẫn là JSON hợp lệ |
 | Seed | `seed change` | dựng lại dataset 4 lần, vẫn đào tiếp |
 | Soak | `soak` | 4 phút: đổi seed, đổi algo, rớt mạng đột ngột, đổi seed |
+
+Thời gian thực tế phụ thuộc máy: bộ đầy đủ mất khoảng 12–15 phút trên 2 vCPU (mỗi case cần một share,
+ở chế độ light là 50–70 H/s). Case `seed change` cần dựng lại dataset 2 GiB mỗi lần đổi seed (~20 giây),
+nên trong chế độ `--quick` cửa sổ chạy là 90 giây chứ không phải 50.
 
 Kết quả lần chạy gần nhất trên VM 2 vCPU:
 

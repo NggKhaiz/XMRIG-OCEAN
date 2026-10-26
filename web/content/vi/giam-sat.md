@@ -66,7 +66,9 @@ $ ./zmrig/out/zmrig --report --power 45
 ZMRIG1.eyJ2IjoxLCJpZCI6InZwc...   # khoảng 380–520 ký tự
 ```
 
-Mất khoảng 25–30 giây: 15–20 giây dựng dataset, 10 giây warm-up, 15 giây đo, rồi lấy mẫu công suất. Hashrate trong mã là hashrate **ổn định** (cửa sổ 10 giây cuối), không phải trung bình cả lúc khởi động — nếu lấy trung bình, con số sẽ thấp hơn thực tế 20–25%.
+Mất khoảng 25–30 giây: 15–20 giây dựng dataset, 10 giây warm-up, 15 giây đo, rồi lấy mẫu công suất.
+Nếu service đang chạy, dùng `sudo ./oneclick.sh report` — lệnh này tự dừng miner (nó đang giữ huge pages),
+đo, rồi bật lại. Chạy tay khi service đang chạy thường bị OOM vì không còn đủ bộ nhớ cho dataset thứ hai. Hashrate trong mã là hashrate **ổn định** (cửa sổ 10 giây cuối), không phải trung bình cả lúc khởi động — nếu lấy trung bình, con số sẽ thấp hơn thực tế 20–25%.
 
 Tuỳ chọn:
 
@@ -87,6 +89,12 @@ Installer bật sẵn mục này cho engine `zmrig`, nên sau khi cài chỉ c�
 ```bash
 sudo cat /var/lib/xmrig-ocean/report.txt
 # ZMRIG1.eyJ2IjoxLCJpZCI6...
+```
+
+Hoặc một lệnh lấy mã có dừng/khởi động service tự động:
+
+```bash
+sudo ./oneclick.sh report --power 95
 ```
 
 Mã chứa gì:

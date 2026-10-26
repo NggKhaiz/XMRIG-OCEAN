@@ -334,3 +334,65 @@ test "cpuModel never returns an empty string" {
 
     try std.testing.expect(model.len > 0);
 }
+
+/// Cheap pre-flight for `--bench`/`--report`: the RandomX dataset needs either
+/// the huge page pool or the same amount of normal RAM. Without this check the
+/// process is killed by the OOM killer with no explanation, which is how a
+/// report ends up as "Killed" in the shell.
+pub const Memory = struct {
+    ok: bool,
+    huge_free_mb: u64 = 0,
+    available_mb: u64 = 0,
+};
+
+pub fn checkMemory(needed_mb: u64) Memory {
+    var result = Memory{ .ok = false };
+
+    var buf: [4096]u8 = undefined;
+    const text = readSmallFile("/proc/meminfo", &buf) orelse {
+        // No /proc: not Linux, let the allocator decide.
+        result.ok = true;
+
+        return result;
+    };
+
+    var huge_free_pages: u64 = 0;
+    var huge_page_kb: u64 = 2048;
+    var available_kb: u64 = 0;
+
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        const value = parseField(line) orelse continue;
+
+        if (std.mem.startsWith(u8, line, "HugePages_Free:")) {
+            huge_free_pages = value;
+        } else if (std.mem.startsWith(u8, line, "Hugepagesize:")) {
+            huge_page_kb = value;
+        } else if (std.mem.startsWith(u8, line, "MemAvailable:")) {
+            available_kb = value;
+        }
+    }
+
+    result.huge_free_mb = huge_free_pages * huge_page_kb / 1024;
+    result.available_mb = available_kb / 1024;
+    result.ok = result.huge_free_mb >= needed_mb or result.available_mb >= needed_mb;
+
+    return result;
+}
+
+fn parseField(line: []const u8) ?u64 {
+    const colon = std.mem.indexOfScalar(u8, line, ':') orelse return null;
+    const rest = std.mem.trim(u8, line[colon + 1 ..], " \t");
+
+    var end: usize = 0;
+    while (end < rest.len and std.ascii.isDigit(rest[end])) : (end += 1) {}
+    if (end == 0) return null;
+
+    return std.fmt.parseInt(u64, rest[0..end], 10) catch null;
+}
+
+test "parseField reads the first number of a meminfo line" {
+    try std.testing.expectEqual(@as(?u64, 1234), parseField("HugePages_Free:     1234"));
+    try std.testing.expectEqual(@as(?u64, 2048), parseField("Hugepagesize:       2048 kB"));
+    try std.testing.expectEqual(@as(?u64, null), parseField("no colon here"));
+}

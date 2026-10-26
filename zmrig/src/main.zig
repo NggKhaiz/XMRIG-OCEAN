@@ -119,7 +119,12 @@ pub fn main() !void {
         std.process.exit(if (ok) 0 else 1);
     }
 
+    // Both of these build their own dataset. If the machine cannot hold it
+    // (another miner owns the huge pages), say so instead of being OOM-killed.
+    const dataset_mb: u64 = if (opts.mode == .light) 400 else 2400;
+
     if (opts.benchmark) {
+        try requireMemory(dataset_mb);
         _ = try benchmark(allocator, &opts, 180, 0);
         return;
     }
@@ -128,6 +133,8 @@ pub fn main() !void {
         // stdout carries one line: the code. Everything else goes to stderr so
         // `zmrig --report > rig.txt` produces a file the dashboard accepts.
         log.global.stderr_sink = true;
+
+        try requireMemory(dataset_mb);
 
         // A report is a steady state number: the first seconds after the
         // dataset is built are slower (JIT warm-up, page faults), so measure a
@@ -924,6 +931,21 @@ fn selfTest(allocator: std.mem.Allocator, light_only: bool) !bool {
     }
 
     return failures == 0;
+}
+
+/// Exits with a readable message when the dataset cannot fit.
+fn requireMemory(needed_mb: u64) !void {
+    const memory = report.checkMemory(needed_mb);
+    if (memory.ok) return;
+
+    var stderr = std.io.getStdErr().writer();
+    try stderr.print(
+        "zmrig: not enough memory for the {d} MB dataset: {d} MB free in huge pages, {d} MB available\n" ++
+            "       stop other miners (or lower vm.nr_hugepages) and try again, or use --mode light\n",
+        .{ needed_mb, memory.huge_free_mb, memory.available_mb },
+    );
+
+    std.process.exit(2);
 }
 
 // --- benchmark -------------------------------------------------------------------
