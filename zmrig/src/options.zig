@@ -176,6 +176,8 @@ pub const Options = struct {
     report_id: ?[]const u8 = null,
     /// `--power W`: wall power of the machine, used by the report.
     power_watts: ?f64 = null,
+    /// `--verify-share`: JSON lines on stdin, hashes on stdout (pool mode).
+    verify_share: bool = false,
     // Transport defaults applied to every pool that did not specify them.
     transport_override: ?transport.Kind = null,
     ws_path: ?[]const u8 = null,
@@ -282,6 +284,8 @@ pub const usage =
     \\      --report-interval=N  seconds between report file updates (60)
     \\      --report-id=NAME     machine name in the report (default: rig-id)
     \\      --power=W            wall power in watts, used by the report
+    \\      --verify-share       read {"seed","blob","nonce"} JSON lines on stdin and
+    \\                           print the hashes: share verification for a pool
     \\  -h, --help               this help
     \\  -V, --version            print the version
     \\
@@ -602,6 +606,9 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8) ParseEr
         } else if (std.mem.eql(u8, name, "--background")) {
             opts.background = true;
             opts.seen.background = true;
+        } else if (std.mem.eql(u8, name, "--verify-share")) {
+            // A pool helper, not a miner: it never touches the network.
+            opts.verify_share = true;
         } else {
             return error.UnknownOption;
         }
@@ -622,7 +629,7 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8) ParseEr
 }
 
 pub fn validate(opts: *const Options) ParseError!void {
-    if (opts.help or opts.version or opts.self_test or opts.benchmark or opts.report) return;
+    if (opts.help or opts.version or opts.self_test or opts.benchmark or opts.report or opts.verify_share) return;
     _ = opts.check;
 
     if (opts.pools.items.len == 0) return error.NoPools;

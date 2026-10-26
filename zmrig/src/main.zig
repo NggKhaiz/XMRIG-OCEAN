@@ -11,6 +11,7 @@ const api_http = @import("api_http.zig");
 const options = @import("options.zig");
 const report = @import("report.zig");
 const stratum = @import("stratum.zig");
+const verify = @import("verify.zig");
 const util = @import("util.zig");
 
 pub const version = "6.26.0-mo9";
@@ -194,6 +195,14 @@ pub fn main() !void {
     if (opts.check) {
         // A closed pipe (`--check | head`) is not a failure.
         printConfigSummary(&opts) catch {};
+        return;
+    }
+
+    if (opts.verify_share) {
+        // stdout is a protocol here: one JSON line per share, nothing else.
+        log.global.stderr_sink = true;
+        try verify.run(allocator, &log.global);
+
         return;
     }
 
