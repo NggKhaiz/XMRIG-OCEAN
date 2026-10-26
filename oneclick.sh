@@ -71,6 +71,11 @@ NET_CONNECT_TO=""
 NET_TLS_CA=""
 NET_IDLE_TIMEOUT=""
 NET_KEEPALIVE_INTERVAL=""
+# MSR / NiceHash / affinity for the zmrig engine. "auto" keeps the XMRig
+# default (write the preset, restore on exit); "off" leaves the registers be.
+MSR_MODE="auto"
+CPU_AFFINITY=""
+NICEHASH=0
 # Machine report for the web dashboard (zmrig only): a small file the miner
 # keeps up to date, so `cat` gives a code to paste into the calculator.
 NET_REPORT=1
@@ -149,6 +154,10 @@ Options
   --http-token TOKEN     require "Authorization: Bearer TOKEN" on the API
   --no-http              disable the local monitoring API entirely
   --cpu-hint N           max-threads-hint percentage (default: 100)
+  --cpu-affinity MASK    mine only on these CPUs, XMRig bitmask (e.g. 0x3)
+  --msr                  write the RandomX MSR preset (root, bare metal)
+  --no-msr               never touch the MSR registers (containers, some VMs)
+  --nicehash             mask the nonce for a NiceHash/rental pool
   --build-dir DIR        where to compile        (default: PREFIX/src/xmrig-ocean-build)
   --all-backends         also build OpenCL/CUDA support
   --no-tune              skip huge pages/MSR/governor tuning
@@ -222,6 +231,11 @@ while [ $# -gt 0 ]; do
         --no-report)     NET_REPORT=0 ;;
         --cpu-hint)      CPU_HINT="${2:?}"; shift ;;
         --cpu-hint=*)    CPU_HINT="${1#*=}" ;;
+        --cpu-affinity)  CPU_AFFINITY="${2:?}"; shift ;;
+        --cpu-affinity=*) CPU_AFFINITY="${1#*=}" ;;
+        --msr)           MSR_MODE="on" ;;
+        --no-msr)        MSR_MODE="off" ;;
+        --nicehash)      NICEHASH=1 ;;
         --build-dir)     BUILD_DIR_DEFAULT="${2:?}"; shift ;;
         --build-dir=*)   BUILD_DIR_DEFAULT="${1#*=}" ;;
         --prefix)        PREFIX="${2:?}"; shift ;;
@@ -701,6 +715,24 @@ write_config() {
     local http_token="null"
     [ -n "$NET_HTTP_TOKEN" ] && http_token="\"${NET_HTTP_TOKEN}\""
 
+    # zmrig keys (the C++ engine ignores them). MSR is on by default here: the
+    # service runs as root and the miner restores the old values on exit.
+    local msr_flag="true"
+    [ "$MSR_MODE" = "off" ] && msr_flag="false"
+
+    local nicehash_flag="false"
+    [ "$NICEHASH" = 1 ] && nicehash_flag="true"
+
+    # JSON has no hex literals: convert the bitmask to a decimal number.
+    local affinity_json="null"
+    if [ -n "$CPU_AFFINITY" ]; then
+        case "$CPU_AFFINITY" in
+            ''|*[!0-9a-fA-FxX]*) die "--cpu-affinity needs a bitmask like 0x3" ;;
+            0x*|0X*) affinity_json=$((CPU_AFFINITY)) ;;
+            *)       affinity_json="$CPU_AFFINITY" ;;
+        esac
+    fi
+
     local extra_pool=""
     [ -n "$NET_TRANSPORT" ] && extra_pool="${extra_pool},
             \"transport\": \"${NET_TRANSPORT}\""
@@ -767,7 +799,7 @@ write_config() {
         "init-avx2": -1,
         "mode": "auto",
         "rdmsr": true,
-        "wrmsr": true,
+        "wrmsr": ${msr_flag},
         "cache_qos": false,
         "numa": true,
         "scratchpad_prefetch_mode": 1
@@ -778,6 +810,7 @@ write_config() {
         "huge-pages-jit": true,
         "hw-aes": null,
         "priority": 5,
+        "affinity": ${affinity_json},
         "memory-pool": true,
         "yield": false,
         "max-threads-hint": ${CPU_HINT},
@@ -808,7 +841,7 @@ write_config() {
             "user": "${WALLET}",
             "pass": "${POOL_PASS}",
             "rig-id": "${rig}",
-            "nicehash": false,
+            "nicehash": ${nicehash_flag},
             "keepalive": true,
             "enabled": true,
             "tls": ${tls_flag},

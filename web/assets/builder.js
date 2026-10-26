@@ -33,6 +33,8 @@
     cpu: el("b-cpu"),
     cloudflare: el("b-cloudflare"),
     proxy: el("b-proxy"),
+    msr: el("b-msr"),
+    nicehash: el("b-nicehash"),
     proxyUrl: el("b-proxy-url"),
     notune: el("b-notune"),
     force: el("b-force"),
@@ -110,6 +112,10 @@
     }
 
     if (proxy) args.push("--proxy", proxy);
+    // MSR is on by default for a root install; this switch exists for hosts
+    // that refuse the write (most VMs and containers).
+    if (nodes.msr && nodes.msr.checked) args.push("--no-msr");
+    if (nodes.nicehash && nodes.nicehash.checked) args.push("--nicehash");
     if (Number.isFinite(cpu) && cpu > 0 && cpu < 100) args.push("--cpu-hint", String(Math.round(cpu)));
     if (nodes.notune.checked) args.push("--no-tune");
     if (nodes.force.checked) args.push("--force");

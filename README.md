@@ -101,7 +101,7 @@ Xeon at 2.6 GHz with 3.9 GiB of RAM, `--mode fast`, 4000 hashes per run.
 | Knob | Default | Measured effect |
 | --- | --- | --- |
 | `--huge-pages` / `--no-huge-pages` | on | **+24 %** with explicit 2 MiB pages (832 vs 624–644 H/s). Transparent huge pages alone are worth nothing (≈ 4 KiB). `--check` tells you whether pages are actually reserved. |
-| `--msr` | off | Prefetchers off through MSR. Needs root and bare metal; the read is refused inside a VM without MSR passthrough, and the miner says so instead of pretending. |
+| `--msr` | off (on for `oneclick.sh` installs) | Prefetchers off through MSR. Needs root and bare metal; the read is refused inside a VM without MSR passthrough, and the miner says so instead of pretending. The installer writes `wrmsr`/`rdmsr` as XMRig does, so a root service gets it and restores the old values on exit; `--no-msr` turns it off for containers. |
 | `--cpu-affinity=0x3` | all cores | XMRig-style bitmask. Pinning both threads to one core in the test box halves the rate (832 → 405 H/s), which is the expected, verifiable behaviour of a real pin. |
 | `--no-affinity` | pin | Lets the scheduler move threads; measured equal to pinning on an idle box, kept for hosts with noisy neighbours. |
 | `--priority=N` / `--cpu-priority=N` | off | 1..5 (XMRig scale) or a raw nice value; the worker sets it per thread. |
