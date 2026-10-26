@@ -12,7 +12,7 @@ Script cần mạng để tải source (hoặc bạn clone sẵn repo). Không t
 ## Cài một lệnh
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NggKhaiz/XMRIG-OCEAN/master/oneclick.sh \
+curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/master/oneclick.sh \
   | sudo bash -s -- install \
       --wallet YOUR_WALLET \
       --pool gulf.moneroocean.stream:10001 \

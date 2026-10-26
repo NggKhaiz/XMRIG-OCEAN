@@ -2,7 +2,7 @@
 #
 # oneclick.sh - build, tune, install and supervise this miner with one command.
 #
-#   curl -fsSL https://raw.githubusercontent.com/NggKhaiz/XMRIG-OCEAN/arena/918a7f95-xmrig-ocean/oneclick.sh | sudo bash -s -- --wallet 4...
+#   curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/arena/918a7f95-xmrig-ocean/oneclick.sh | sudo bash -s -- --wallet 4...
 #
 #   sudo ./oneclick.sh                     # full install, asks for the wallet
 #   sudo ./oneclick.sh --wallet 4... --yes  # fully unattended
@@ -37,7 +37,7 @@ ONECLICK_VERSION="1.2"
 ZIG_VERSION="${MINER_ZIG_VERSION:-0.13.0}"
 
 SELF="${BASH_SOURCE[0]:-}"
-REPO_URL="${MINER_REPO_URL:-https://github.com/NggKhaiz/XMRIG-OCEAN.git}"
+REPO_URL="${MINER_REPO_URL:-https://github.com/NggKhaiz/ZMRIG.git}"
 REPO_BRANCH="${MINER_BRANCH:-arena/918a7f95-xmrig-ocean}"
 
 PREFIX="${MINER_PREFIX:-/usr/local}"

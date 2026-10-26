@@ -43,7 +43,7 @@ punished and a split rig is not paid twice.
 ## Install in one command
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NggKhaiz/XMRIG-OCEAN/arena/918a7f95-xmrig-ocean/oneclick.sh \
+curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/arena/918a7f95-xmrig-ocean/oneclick.sh \
   | sudo bash -s -- --wallet 4YourMoneroAddress...
 ```
 
@@ -66,7 +66,7 @@ sudo ./oneclick.sh install --wallet 4YourMoneroAddress... \
 ```
 
 Prefer to see the command before running it? The site builds it for you:
-**<https://nggkhaiz.github.io/XMRIG-OCEAN/#builder>** — tick the options you
+**<https://nggkhaiz.github.io/ZMRIG/#builder>** — tick the options you
 want, paste the one-liner, and the only thing left is your `sudo` password.
 
 ## Everyday commands

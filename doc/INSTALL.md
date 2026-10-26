@@ -5,7 +5,7 @@ RandomX miner. One command, no manual steps, safe to re-run.
 
 ```bash
 # on a fresh machine (clones the repository for you)
-curl -fsSL https://raw.githubusercontent.com/NggKhaiz/XMRIG-OCEAN/arena/918a7f95-xmrig-ocean/oneclick.sh \
+curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/arena/918a7f95-xmrig-ocean/oneclick.sh \
   | sudo bash -s -- --wallet 4YourMoneroAddress...
 
 # or inside a checkout
@@ -153,7 +153,7 @@ sudo /usr/local/bin/xmrig-ocean -c /etc/xmrig-ocean/config.json --rebench-algo
 
 ```bash
 for host in rig01 rig02 rig03; do
-  ssh "$host" "curl -fsSL https://raw.githubusercontent.com/NggKhaiz/XMRIG-OCEAN/arena/918a7f95-xmrig-ocean/oneclick.sh \
+  ssh "$host" "curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/arena/918a7f95-xmrig-ocean/oneclick.sh \
     | sudo bash -s -- --yes --wallet 4... --rig-id $host"
 done
 ```
