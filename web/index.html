@@ -21,6 +21,7 @@
       <a href="#builder">Tạo lệnh</a>
       <a href="#dashboard">Bảng tính</a>
       <a href="docs.html#benchmark" class="hide-sm">Hiệu năng</a>
+      <a href="#ung-ho" class="hide-sm">Ủng hộ</a>
       <a href="https://github.com/NggKhaiz/ZMRIG" class="hide-sm" target="_blank" rel="noreferrer">GitHub</a>
       <button class="icon-btn" type="button" data-theme-toggle aria-label="Đổi giao diện">☀</button>
     </nav>
@@ -143,7 +144,7 @@
     <section class="grid cols-3" aria-label="Điểm chính">
       <div class="card">
         <h3>0% phí developer</h3>
-        <p class="muted small">Không có ví donate trong source, không có chiến lược donate trong binary. <code>oneclick.sh verify</code> grep endpoint và ví, in ra bằng chứng; miner cũng in <code>0% developer fee</code> khi khởi động.</p>
+        <p class="muted small">Không có code donate trong source, không có chiến lược donate trong binary, không endpoint lạ. <code>oneclick.sh verify</code> grep endpoint và khoá ví rồi in bằng chứng; miner cũng in <code>0% developer fee</code> khi khởi động.</p>
       </div>
       <div class="card">
         <h3>Mạng kén chọn</h3>
@@ -380,6 +381,36 @@
       </div>
     </section>
 
+    <section id="ung-ho">
+      <h2>Ủng hộ dự án</h2>
+      <p class="muted">
+        Miner không lấy phí, nên không cần ủng hộ gì cả. Ai vẫn muốn gửi thì chỉ có một địa chỉ,
+        và nó nằm ngay dưới đây — không flag nào, khoá config nào hay service nào đọc tới nó.
+      </p>
+
+      <div class="card donate">
+        <div class="qr">
+          <img src="assets/donate-monero.png" width="168" height="168" alt="QR địa chỉ Monero 46SQLW7D…n6ysb5tJ">
+        </div>
+        <div class="body">
+          <pre><code>46SQLW7DXaq6GJaQbHUFMAhd1VYpfQFJQ2gfZo9TCB8bf9vnf1MUwAD2Fwj6KMsY4RU3oKA3x6hByg8BKg7FfMWn6ysb5tJ</code></pre>
+          <p class="hint">Monero (XMR) mạng chính · địa chỉ chuẩn 95 ký tự · network byte 18 · checksum base58 hợp lệ.</p>
+
+          <ul class="small muted">
+            <li><strong>Cùng ví với phí 1% của pool.</strong> <code>pool/src/operator.js</code> giải mã ra đúng địa chỉ này; một ví, một sổ cái.</li>
+            <li><strong>Donate không mua gì.</strong> Không bản build nhanh hơn, không ưu tiên hỗ trợ, không badge, không thuê bao.</li>
+            <li><strong>Chỉ chuỗi này là thật.</strong> Địa chỉ trong fork, issue, video hay tin nhắn riêng đều không phải của dự án. Kiểm tra: bắt đầu <code>46SQLW7D</code>, kết thúc <code>n6ysb5tJ</code>.</li>
+            <li><strong>Không muốn gửi tiền?</strong> Đào qua pool, gửi một phép đo trước/sau, hoặc mở issue kèm output đầy đủ — ba việc đó có giá trị hơn.</li>
+          </ul>
+
+          <p class="hint">
+            Công thức kiểm tra checksum, mã QR và chính sách đầy đủ:
+            <a href="https://github.com/NggKhaiz/ZMRIG/blob/arena/918a7f95-xmrig-ocean/doc/DONATE.md" target="_blank" rel="noreferrer">doc/DONATE.md</a>.
+          </p>
+        </div>
+      </div>
+    </section>
+
   </div>
 </main>
 
@@ -389,6 +420,7 @@
     <span>
       <a href="docs.html">Tài liệu</a> ·
       <a href="https://github.com/NggKhaiz/ZMRIG" target="_blank" rel="noreferrer">Mã nguồn</a> ·
+      <a href="#ung-ho">Ủng hộ</a> ·
       <a href="docs.html#loi-thuong-gap">Xử lý sự cố</a>
     </span>
   </div>

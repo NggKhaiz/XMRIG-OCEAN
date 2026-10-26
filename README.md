@@ -14,6 +14,11 @@ You can use the miner with any pool. If you point it at the pool included
 here, the 1 % fee is what keeps the project alive; nothing else is charged, and
 the miner takes nothing from you either way.
 
+If you would rather just say thank you, there is one optional Monero address
+at the bottom of this page — [Supporting the work](#supporting-the-work). It is
+never read by the miner, the installer or the pool, and sending to it changes
+no hashrate and no fee.
+
 ## The money model, stated plainly
 
 **The miner has no fee.** The donation strategy, its time slicing, its wallet
@@ -33,7 +38,9 @@ and it has to fund the thing those pools mostly skip: the pool re-hashes every
 submitted share with `zmrig --verify-share` before paying for it. That costs the
 operator real CPU, and it is the only reason a miner can trust that nobody else
 is being paid for work they did not do. There is no registration, no coin
-switching, no "donation" button and no second address.
+switching and no donation mechanism inside the miner. The one Monero address in
+this repository is printed at the bottom of this page, is entirely optional, and
+is never touched by the miner.
 
 **Long-term fairness.** A 1 % fee with honest share accounting keeps the best
 miners, and the best miners are the only reason a pool earns anything. The
@@ -136,11 +143,13 @@ zmrig -o wss://pool.example.com/stratum -u 4YourMoneroAddress.rig1 -t 4
 zmrig -o pool.example.com:3333 -u 4YourMoneroAddress.rig1 -t 4
 ```
 
-Fees from that pool go to `46SQLW7D…n6ysb5tJ` (the full address is published by
-the running pool at `/api/config` — deliberately not copy-pasteable out of the
-source tree). Point your own instance at your own wallet by setting
-`OPERATOR_ADDRESS`; the built-in address is obfuscated in
-`pool/src/operator.js`, and every payout is on-chain anyway.
+Fees from that pool go to `46SQLW7D…n6ysb5tJ`, the same wallet as the donation
+address below — the full string is published at `/api/config` by every running
+instance, and in [`doc/DONATE.md`](doc/DONATE.md). The source keeps it
+obfuscated in `pool/src/operator.js` so a repository scraper cannot harvest it,
+not because it is a secret: a pool that hides where its fee goes does not
+deserve miners. Point your own instance at your own wallet with
+`OPERATOR_ADDRESS`; every payout is on-chain either way.
 
 Running your own pool is documented in [`pool/README.md`](pool/README.md):
 five-minute start, PPLNS and audit log, wallet-rpc payouts, Docker, Render,
@@ -221,7 +230,8 @@ any rewrite. See [`doc/BENCHMARKS.md`](doc/BENCHMARKS.md).
 ./zmrig/tests/net.sh --soak          # 22 network cases: pools, proxies, WS/TLS
 ./tests/hash/check.sh                # C++ known-answer suite
 node run_tests.js --safe --build-dir build
-cd pool && npm test                  # pool unit + protocol + end-to-end
+npm run test:web                     # site builder, docs renderer, address guard
+npm run test:pool                    # pool unit + protocol + end-to-end (28 tests)
 ```
 
 ## Documentation
@@ -235,6 +245,8 @@ cd pool && npm test                  # pool unit + protocol + end-to-end
 * [`doc/ARCHITECTURE.md`](doc/ARCHITECTURE.md) — the code base, thread by thread.
 * [`doc/PERFORMANCE.md`](doc/PERFORMANCE.md) — every lever that affects hashrate.
 * [`doc/ZERO_FEE.md`](doc/ZERO_FEE.md) — what was removed and how to prove it.
+* [`doc/DONATE.md`](doc/DONATE.md) — the one donation address, how to check it,
+  and what a donation does and does not buy.
 * [`doc/NETWORK.md`](doc/NETWORK.md) — 443-only VPS, proxies, edge dialling.
 * [`doc/ALTERNATIVES.md`](doc/ALTERNATIVES.md) — measured comparison with
   Rust/Go miners, and why the C++ RandomX JIT stays.
@@ -247,6 +259,49 @@ cd pool && npm test                  # pool unit + protocol + end-to-end
 * **OpenCL** for AMD GPUs and **CUDA** for NVIDIA GPUs via the external
   [CUDA plugin](https://github.com/xmrig/xmrig-cuda) with `--all-backends`.
 
+## Supporting the work
+
+The miner costs nothing and has no fee, so the honest answer to "how do I
+support this?" is: you do not have to. Some people still want to send
+something, so there is exactly one address, and it is this one.
+
+<p align="center">
+  <img src="doc/donate/monero.png" width="190" alt="QR code for the Monero donation address 46SQLW7D…n6ysb5tJ">
+</p>
+
+```text
+46SQLW7DXaq6GJaQbHUFMAhd1VYpfQFJQ2gfZo9TCB8bf9vnf1MUwAD2Fwj6KMsY4RU3oKA3x6hByg8BKg7FfMWn6ysb5tJ
+```
+
+Monero (XMR), mainnet, standard address — 95 characters, network byte `18`,
+base58 checksum valid. It is the same wallet the pool's 1 % fee is paid to
+(`pool/src/operator.js`, and every running instance publishes it at
+`/api/config`), so a thank-you and a fee payment land in one place with one
+audit trail. The verification recipe is in [`doc/DONATE.md`](doc/DONATE.md).
+
+**What a donation does not buy.** Nothing in the miner reads this address: no
+flag, config key, build step or service points at it, and `sudo ./oneclick.sh
+verify` still reports a 0 % developer fee with it sitting in the README. There
+is no supporter build, no priority queue, no badge and no subscription. If you
+ever feel pushed to pay for better hashrate, you are being scammed — the same
+binary mines at full speed for free.
+
+**Worth more than money**, if you would rather spend time:
+
+1. **Mine through the pool.** The 1 % fee is what pays for the work, and it only
+   exists while somebody is mining.
+2. **Send a measurement.** A before/after with `zmrig/tests/ab.sh` has settled
+   more arguments here than any opinion; see [`doc/PERFORMANCE.md`](doc/PERFORMANCE.md).
+3. **Report a bug** in the tracker with the command, the output and the hardware.
+   Crashes in `--mode light` on small VPSes are especially welcome.
+
+**One address, and only this one.** `46SQLW7D…n6ysb5tJ` is the only wallet this
+project has ever published. Addresses in forks, issues, pull requests, videos or
+direct messages are not ours. Before you paste it into a wallet, check that it
+starts with `46SQLW7D`, ends with `n6ysb5tJ` and is 95 characters long; the QR
+above encodes the same string, so scanning it and comparing the text is a
+two-second check against a typo or a swap.
+
 ## License and funding
 
 XMRig is Copyright (C) 2016-2026 xmrig.com, Copyright (C) 2018-2026 SChernykh,
@@ -254,7 +309,8 @@ and the RandomX authors, licensed under **GPL-3.0**. The MoneroOcean additions
 are Copyright (C) MoneroOcean. This fork keeps every copyright header and the
 licence intact; see [`LICENSE`](LICENSE).
 
-This project is funded by the pool fee, not by donations. If you want to support
-it, mine through the pool (or run your own and keep the fee), report a bug with a
-measurement attached, or send a patch. There is no donation address in the
-miner, and nothing in this tree is wired to one.
+The work is funded by the pool fee, not by donations: donations are voluntary,
+go to the wallet above, and buy nothing but goodwill. If you would rather not
+spend money at all, mine through the pool, report a bug with a measurement
+attached, or send a patch — those are worth more here than a transfer.
+

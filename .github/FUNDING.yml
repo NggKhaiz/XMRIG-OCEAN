@@ -1,0 +1,6 @@
+# GitHub's Sponsor button only talks to fiat platforms (GitHub Sponsors,
+# Patreon, Ko-fi…), and this project takes Monero, so the button points at the
+# section of the README that carries the address and the QR. Nothing in the
+# miner is wired to it: see doc/DONATE.md.
+custom:
+  - "https://github.com/NggKhaiz/ZMRIG#supporting-the-work"

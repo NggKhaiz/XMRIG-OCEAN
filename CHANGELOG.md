@@ -166,6 +166,17 @@ needs only `g++` + `zig`.
 - `zmrig --bench=100000 -t 2`: 100001 hashes in 91 071 ms = 1.098 kH/s.
 
 ### Docs
+- **Donations, published once.** The project takes no fee, so the README, the
+  landing page and the Vietnamese guide now carry one optional Monero address
+  (`doc/DONATE.md`, QR in `doc/donate/monero.png`), next to an explicit list of
+  what a donation does not buy. Three guarantees are enforced, not promised:
+  the address is nowhere in `src/`, `zmrig/`, `pool/` or `oneclick.sh`, so the
+  fee audit still reports 0 %; `web/tests/donate.test.js` fails if any published
+  copy differs from the wallet the pool actually pays to; and the QR decodes
+  back to the same string.
+- **Markdown renderer**: images render, `javascript:` links and `src` values
+  are dropped instead of emitted, and a link whose label is itself a code span
+  no longer loses its anchor.
 - New section in `doc/ALTERNATIVES.md` answering the "rewrite it in Zig + NASM +
   CUDA" proposal with measurements: what the Zig host buys (latency, not
   hashrate), why the NASM core already exists as the RandomX JIT, and why a

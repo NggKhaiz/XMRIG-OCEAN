@@ -22,5 +22,8 @@
   "bugs": {
     "url": "https://github.com/xmrig/xmrig/issues"
   },
-  "homepage": "https://github.com/xmrig/xmrig#readme"
+  "homepage": "https://github.com/xmrig/xmrig#readme",
+  "devDependencies": {
+    "jsdom": "^30.1.3"
+  }
 }

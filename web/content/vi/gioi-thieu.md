@@ -40,6 +40,24 @@ Script grep binary để tìm endpoint và ví donate (`donate.v2.xmrig.com`, `x
 
 Phần còn lại của phí pool (thường 0–1%) do pool quy định, không liên quan đến repo này.
 
+## Ủng hộ dự án
+
+Miner không lấy phí, nên câu trả lời thật thà cho câu "ủng hộ thế nào?" là: không cần đâu. Ai vẫn muốn gửi thì chỉ có **một** địa chỉ, và nó nằm ở đây. Không có flag, khoá config hay service nào đọc địa chỉ này — `sudo ./oneclick.sh verify` vẫn ra `0% developer fee` dù địa chỉ có nằm trong repo.
+
+![QR địa chỉ Monero donate](assets/donate-monero.png)
+
+```text
+46SQLW7DXaq6GJaQbHUFMAhd1VYpfQFJQ2gfZo9TCB8bf9vnf1MUwAD2Fwj6KMsY4RU3oKA3x6hByg8BKg7FfMWn6ysb5tJ
+```
+
+- **Chỉ XMR**, mạng chính, địa chỉ chuẩn 95 ký tự (network byte `18`), checksum base58 hợp lệ. Gửi BTC/ETH/USDT là mất tiền.
+- **Cùng ví với phí 1% của pool.** `pool/src/operator.js` giải mã ra đúng địa chỉ này, và mỗi instance đang chạy công bố nó ở `/api/config`. Một ví, một sổ cái.
+- **Kiểm tra trước khi gửi:** bắt đầu bằng `46SQLW7D`, kết thúc bằng `n6ysb5tJ`, dài đúng 95 ký tự. Công thức kiểm tra checksum bằng Python nằm trong [`doc/DONATE.md`](https://github.com/NggKhaiz/ZMRIG/blob/arena/918a7f95-xmrig-ocean/doc/DONATE.md).
+- **Donate không mua gì cả:** không có bản "supporter" nhanh hơn, không ưu tiên hỗ trợ, không badge, không thuê bao. Nếu ai đó bán "bản build nhanh hơn" thì không phải dự án này.
+- **Địa chỉ khác đều không phải của dự án.** Chỉ chuỗi ở trên là thật; địa chỉ trong fork, issue, video hay tin nhắn riêng đều không phải.
+
+Nếu không muốn gửi tiền, ba việc sau có giá trị hơn: đào qua pool (phí 1% mới nuôi được công việc), gửi một phép đo trước/sau bằng `zmrig/tests/ab.sh`, hoặc mở issue kèm lệnh và output đầy đủ.
+
 ## Repo có gì
 
 ```

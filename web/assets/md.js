@@ -1,6 +1,6 @@
 // Minimal, dependency-free Markdown renderer for the documentation pages.
 // Supported: headings, fenced code, tables, lists, blockquotes, rules,
-// paragraphs and inline code / bold / emphasis / links.
+// paragraphs and inline code / bold / emphasis / links / images.
 // Everything is HTML-escaped before any markup is produced.
 
 (function () {
@@ -25,31 +25,51 @@
       .slice(0, 60);
   }
 
+  // Links may only point at something a documentation page can legitimately
+  // reach: another page, an anchor, http(s), or mail. Anything else (notably
+  // `javascript:`) is rendered as plain text rather than as a live link.
+  function safeHref(href) {
+    if (/^(https?:|mailto:|#|\.{0,2}\/)/i.test(href)) return true;
+    return /^[\w./-]+(#.*)?$/.test(href);
+  }
+
+  // Images are allowed from the same places, and only those: an `src` that
+  // could not be a static asset is left as text.
+  function safeSrc(src) {
+    if (/^(https?:|\.{0,2}\/)/i.test(src)) return true;
+    return /^[\w./-]+$/.test(src);
+  }
+
   function inline(text) {
-    // Split on code spans first so nothing inside them is reformatted.
-    var out = "";
-    var parts = text.split(/(`[^`]+`)/g);
-
-    parts.forEach(function (part) {
-      if (part.length > 1 && part[0] === "`" && part[part.length - 1] === "`") {
-        out += "<code>" + escapeHtml(part.slice(1, -1)) + "</code>";
-        return;
-      }
-
-      var escaped = escapeHtml(part);
-
-      escaped = escaped.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (_, label, href) {
-        var external = /^https?:/i.test(href);
-        return '<a href="' + href + '"' + (external ? ' target="_blank" rel="noreferrer"' : "") + ">" + label + "</a>";
-      });
-
-      escaped = escaped.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-      escaped = escaped.replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>");
-
-      out += escaped;
+    // Code spans are cut out first and put back last: nothing inside them may
+    // be reformatted, and a label like [`doc/DONATE.md`](…), where the label is
+    // itself a code span, still has to survive as a link.
+    var codes = [];
+    var masked = text.replace(/`([^`]+)`/g, function (_, code) {
+      codes.push("<code>" + escapeHtml(code) + "</code>");
+      return "\u0000" + (codes.length - 1) + "\u0000";
     });
 
-    return out;
+    var out = escapeHtml(masked);
+
+    // Images first: `![alt](src)` contains a link's shape.
+    out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, function (match, alt, src) {
+      if (!safeSrc(src)) return match;
+      return '<img src="' + src + '" alt="' + alt + '" loading="lazy">';
+    });
+
+    out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (_, label, href) {
+      if (!safeHref(href)) return label;
+      var external = /^https?:/i.test(href);
+      return '<a href="' + href + '"' + (external ? ' target="_blank" rel="noreferrer"' : "") + ">" + label + "</a>";
+    });
+
+    out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    out = out.replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+
+    return out.replace(/\u0000(\d+)\u0000/g, function (_, index) {
+      return codes[Number(index)];
+    });
   }
 
   function isTableSeparator(line) {

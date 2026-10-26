@@ -60,7 +60,8 @@ The script checks that:
 
 1. both donation constants are `0`;
 2. `DonateStrategy` is gone from the tree and from `CMakeLists.txt`;
-3. no wallet address and no donation hostname exists in `src/`;
+3. no wallet address and no donation hostname exists in `src/` (the one address
+   the project publishes lives in `doc/DONATE.md` and no code path reads it);
 4. `Network` has no donation plumbing;
 5. the built binary contains no developer wallet and no donation endpoint;
 6. the binary reports `DONATE 0%` even when started with `--donate-level=9`.
@@ -81,10 +82,17 @@ curl -s http://127.0.0.1:PORT/2/summary | jq .miner.donate_level
 At runtime the log never prints `dev donate started` and the API reports
 `"donate_level": 0`.
 
+The distinction that matters: a *published* address that a human may copy is not
+a *fee*. The address in [`DONATE.md`](DONATE.md) is documentation — it is absent
+from `src/`, `zmrig/`, `pool/` and `oneclick.sh`, so the audit above passes with
+it in the tree, and a donation can never be mistaken for a charge.
+
 ## Licensing note
 
 XMRig is GPL-3.0. Removing the donation code is an explicit, permitted
 modification of the source you received; the copyright headers and the license
-stay untouched. If you want to support upstream development, make a voluntary
-one-off donation using the address published in the upstream README — nothing in
-this tree is wired to it.
+stay untouched. Upstream XMRig and this fork are funded differently: upstream
+takes a 1 % dev donation inside the miner unless removed, and it publishes its
+own address in its README. This fork takes nothing, and publishes one optional
+address in [`DONATE.md`](DONATE.md) for people who insist. Neither address is
+wired to any code path in this tree.

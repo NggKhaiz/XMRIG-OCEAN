@@ -271,6 +271,22 @@ main { padding: 40px 0 80px; }
   margin-right: 8px;
 }
 
+/* --- donations ---------------------------------------------------------- */
+
+.donate { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+.donate .qr {
+  flex: 0 0 auto;
+  background: #fff;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+}
+.donate .qr img { display: block; width: 168px; height: 168px; }
+.donate .body { flex: 1 1 340px; min-width: 0; }
+.donate .body > :first-child { margin-top: 0; }
+.donate ul { margin: 10px 0 0 18px; padding: 0; }
+.donate li { margin-top: 7px; }
+
 /* --- tables ------------------------------------------------------------- */
 
 .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
