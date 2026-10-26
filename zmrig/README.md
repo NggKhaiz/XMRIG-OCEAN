@@ -73,6 +73,33 @@ real archive paths with `c++ -print-file-name=`.
 `--self-test` prints `PASS`/`FAIL` per check and exits 0 on success; it is what
 `oneclick.sh verify` runs.
 
+### Network test suite
+
+Every transport and every failure mode has a test that runs locally, without a
+real pool and without a real CDN:
+
+```sh
+./zmrig/tests/net.sh                 # the whole matrix, ~10 minutes
+./zmrig/tests/net.sh --quick         # short runs, for iterating
+./zmrig/tests/net.sh --only ws,wss   # a subset
+./zmrig/tests/net.sh --soak          # also the 4 minute soak
+```
+
+It starts a fake Stratum pool (`tests/net/pool.py`) and protocol shims
+(`tests/net/relay.py`: TLS, WebSocket, WebSocket+TLS, HTTP CONNECT, SOCKS5) and
+checks that the miner logs in, mines and submits over each one. Then it plays
+the awkward cases: a pool that rejects the login, a pool that goes silent (idle
+watchdog), a dead pool with a backup (failover), a hostile pool that floods
+malformed JSON and 100 KB lines, a seed change, an algorithm switch to `rx/wow`,
+an abrupt TCP reset, and the HTTP API. 19 checks, `PASS`/`FAIL` per line, exit
+code 1 on any failure.
+
+The Cloudflare case is tested as it is deployed: the pool URL keeps the public
+name (TLS SNI and `Host` header), the edge address is pinned with
+`--connect-to`, and the shim asserts that the request really arrived with the
+right `Host` and path. `tests/net/cert.sh` makes the throwaway CA the `tls` and
+`wss` shims need.
+
 ## Run
 
 ```sh
@@ -104,6 +131,23 @@ header while dialling another address, `--tls-ca FILE` pins a private CA,
 `--idle-timeout` and `--keepalive-interval` control how a silent socket is
 treated. See [`doc/NETWORK.md`](../doc/NETWORK.md) for the whole picture,
 including a Cloudflare Worker that turns any pool into a `wss` endpoint.
+
+## Monitoring API
+
+```sh
+zmrig -c /etc/xmrig-ocean/config.json --http-port 18080 --http-access-token SECRET
+curl -H "Authorization: Bearer SECRET" http://127.0.0.1:18080/1/summary
+```
+
+`/1/summary` returns the XMRig-shaped summary every dashboard already parses;
+`/2/summary` returns the same data pretty printed (that is what
+`oneclick.sh status` reads, so a zmrig install reports live hashrate, huge
+pages and accepted shares from the API instead of scraping the log). The API is
+read only, binds to `127.0.0.1` by default, and every number it serves comes
+from atomics the monitor already publishes — polling it costs nothing.
+
+The installer writes `"http": {"enabled": true, "port": 18080}` into the
+config, so `xmrig-ocean status` works out of the box.
 
 ## Measured performance
 

@@ -195,7 +195,31 @@ sudo journalctl -u xmrig-ocean -f
 
 A healthy `wss` session logs `connecting to wss://...`, `login ok`, and then
 shares. A stale hashrate is never reported: `status` ignores log lines older
-than 90 s, so a reconnect loop shows `no data yet` instead of an old number.
+than 90 s, so a reconnect loop shows `no data yet` instead of an old number,
+and a live one is read from the local API (`127.0.0.1:18080/2/summary`).
+
+### Test the exact path from the machine that has to mine
+
+```sh
+./zmrig/tests/net.sh                        # every transport, ~10 minutes
+./zmrig/tests/net.sh --only cloudflare,ws   # just the interesting ones
+./zmrig/tests/net.sh --soak                 # + 4 min of seed/algo/disconnect
+```
+
+The suite starts a fake pool and local shims for `tls`, `ws`, `wss`, HTTP
+`CONNECT` and SOCKS5, then asserts that shares are accepted over each of them.
+It is the fastest way to tell "this VPS blocks the pool" from "the miner is
+broken": if `tcp` passes and `wss` fails, the firewall or the CDN is the
+problem, not the engine.
+
+For a real endpoint, the same three commands work with your own pool and a
+`--connect-to` edge:
+
+```sh
+./zmrig/out/zmrig -o wss://pool.example.com:443/relay/TOKEN -u WALLET \
+    --connect-to 203.0.113.10:443 --tls-ca /etc/xmrig-ocean/tls-ca.pem \
+    --idle-timeout 120 --verbose
+```
 
 ## Limits
 

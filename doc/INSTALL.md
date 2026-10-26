@@ -36,7 +36,7 @@ End state:
 | `/etc/xmrig-ocean/config.json` | configuration (rewritten by autosave) |
 | `xmrig-ocean.service` | supervised miner, `Restart=always`, `Nice=-10` |
 | `xmrig-ocean-tune.service` | oneshot tuner, runs before the miner at boot |
-| `http://127.0.0.1:18080/2/summary` | live API used by `status` |
+| `http://127.0.0.1:18080/2/summary` | live read-only monitoring API (XMRig JSON; `"http"` in the config) |
 
 ```bash
 sudo ./oneclick.sh status     # service state, hashrate, accepted shares
@@ -68,6 +68,7 @@ sudo ./oneclick.sh uninstall  # stop, disable, remove binaries
 | `--connect-to HOST:PORT` | dial this address, keep the pool name for SNI/`Host` |
 | `--tls-ca FILE` | trust a private CA / pin a relay certificate |
 | `--idle-timeout N` | reconnect when the pool is silent for `N` s (`0` = never) |
+| `--no-http` | do not enable the local monitoring API (default: on, port 18080) |
 | `--cpu-hint N` | `max-threads-hint`, default `100` |
 | `--all-backends` | also build OpenCL/CUDA support |
 | `--no-tune` | do not touch huge pages / MSR / governor |

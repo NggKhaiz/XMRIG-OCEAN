@@ -57,7 +57,20 @@ pub fn main() !void {
     // A config file is loaded first, command line flags are applied on top.
     if (opts.config_path) |path| {
         var file_opts = options.Options{};
-        try options.parseConfigFile(allocator, &file_opts, path);
+        options.parseConfigFile(allocator, &file_opts, path) catch |e| {
+            var stderr = std.io.getStdErr().writer();
+
+            // Say what is wrong instead of leaking an error name: an
+            // unreadable config is by far the most common failure (the
+            // installer writes it root-only, so a plain user cannot read it).
+            switch (e) {
+                error.ConfigUnreadable => stderr.print("zmrig: cannot read {s}: check the path or run as root\n", .{path}) catch {},
+                error.ConfigInvalidJson => stderr.print("zmrig: {s} is not valid JSON\n", .{path}) catch {},
+                else => stderr.print("zmrig: cannot load {s}: {s}\n", .{ path, @errorName(e) }) catch {},
+            }
+
+            std.process.exit(1);
+        };
 
         var cli = try options.parseArgs(allocator, args[1..]);
         mergeOptions(allocator, &file_opts, &cli);

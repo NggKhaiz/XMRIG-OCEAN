@@ -26,8 +26,30 @@ firewall or a CDN needs. The C++ engine is untouched.
   sockets.
 - `doc/NETWORK.md`: the whole feature, plus a complete Cloudflare Worker relay
   that turns any plain pool into a `wss` endpoint.
+- **Local read-only monitoring API** (`--http-port`, `--http-host`,
+  `--http-access-token`, and `--http-port/--http-token/--no-http` in the
+  installer): `/1/summary` and a pretty printed `/2/summary` in the XMRig
+  shape, optional bearer token, 404/401 JSON. `oneclick.sh status` now reads
+  hashrate, huge pages and shares from it instead of scraping the journal.
+- **Network test suite** (`zmrig/tests/net.sh`): a fake Stratum pool with
+  `basic`/`soak`/`hostile`/`stall` modes plus TLS/WebSocket/WebSocket+TLS/
+  HTTP-CONNECT/SOCKS5 shims. 19 checks cover every transport, the Cloudflare
+  pinned-edge recipe, a rejected login, the idle watchdog, pool failover, a
+  pool that floods malformed JSON, a seed change, an `rx/wow` switch, an abrupt
+  reset and the API. ~10 minutes, exit code 1 on any failure.
 
 ### Fixes
+- **`-u WALLET -o pool` failed with `InvalidPool`.** Per-pool options seen
+  before the pool they belong to created an empty placeholder pool; they are
+  now defaults for the pools that follow (`-p`, `--rig-id`, `--keepalive`,
+  `--nicehash`, `--tls` too), and `-o a -o b -u W` gives both pools the wallet.
+- **Ctrl-C could hang for minutes** on a pool that never answers the login: the
+  monitor now owns the socket from the moment it is connected (not only after
+  a successful login), a 1 s receive timeout lets the read loop see the stop
+  flag, and a send timeout keeps thread joins bounded during a seed change.
+- **`--http-port` was documented but nothing listened on it** (see above).
+- **A pool sending one oversized line killed the session**; over-long lines are
+  now skipped instead of ending the connection.
 - **Reconnect left the rig at 0 H/s.** The disconnect path paused the workers
   and only a *seed change* unpaused them, so a dropped connection with an
   unchanged seed never resumed hashing. `applyJob` now always unpauses.
@@ -171,6 +193,17 @@ achievable CPU hashrate on the machine that compiles the binary.
   donation switch — see `doc/PERFORMANCE.md` §1 and §6.
 
 ### Fixes
+- **`-u WALLET -o pool` failed with `InvalidPool`.** Per-pool options seen
+  before the pool they belong to created an empty placeholder pool; they are
+  now defaults for the pools that follow (`-p`, `--rig-id`, `--keepalive`,
+  `--nicehash`, `--tls` too), and `-o a -o b -u W` gives both pools the wallet.
+- **Ctrl-C could hang for minutes** on a pool that never answers the login: the
+  monitor now owns the socket from the moment it is connected (not only after
+  a successful login), a 1 s receive timeout lets the read loop see the stop
+  flag, and a send timeout keeps thread joins bounded during a seed change.
+- **`--http-port` was documented but nothing listened on it** (see above).
+- **A pool sending one oversized line killed the session**; over-long lines are
+  now skipped instead of ending the connection.
 - Login now advertises the `mo-native` and `submit-result` extensions for every
   algorithm, not only when a KAWPOW GPU algorithm is enabled (CPU-only builds
   never negotiated them before).

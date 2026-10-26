@@ -178,6 +178,10 @@ pub const ParseError = error{
     NoWallet,
     OutOfMemory,
     InvalidConfig,
+    /// The config file exists but cannot be read (usually permissions).
+    ConfigUnreadable,
+    /// The config file was read but is not a JSON object.
+    ConfigInvalidJson,
     HelpRequested,
 };
 
@@ -668,6 +672,8 @@ fn jsonBool(obj: std.json.ObjectMap, key: []const u8) ?bool {
 
     return switch (value) {
         .bool => |b| b,
+        // Some hand written configs (and our own installer, once) use 1/0.
+        .integer => |i| i != 0,
         else => null,
     };
 }
@@ -737,10 +743,13 @@ fn applyPoolObject(allocator: std.mem.Allocator, opts: *Options, obj: std.json.O
 /// Reads an XMRig-style JSON config. Only the keys this miner implements are
 /// honoured; the rest is ignored so an existing xmrig config keeps working.
 pub fn parseConfigFile(allocator: std.mem.Allocator, opts: *Options, path: []const u8) ParseError!void {
-    const text = std.fs.cwd().readFileAlloc(allocator, path, 4 * 1024 * 1024) catch return error.InvalidConfig;
+    const text = std.fs.cwd().readFileAlloc(allocator, path, 4 * 1024 * 1024) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.ConfigUnreadable,
+    };
     defer allocator.free(text);
 
-    var parsed = std.json.parseFromSlice(std.json.Value, allocator, text, .{}) catch return error.InvalidConfig;
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, text, .{}) catch return error.ConfigInvalidJson;
     defer parsed.deinit();
 
     const root = switch (parsed.value) {

@@ -69,6 +69,11 @@ NET_CONNECT_TO=""
 NET_TLS_CA=""
 NET_IDLE_TIMEOUT=""
 NET_KEEPALIVE_INTERVAL=""
+# Local read-only monitoring API (XMRig-compatible JSON on 127.0.0.1:18080).
+# `status` reads it, so it is on by default; --no-http turns it off.
+NET_HTTP=1
+NET_HTTP_PORT=18080
+NET_HTTP_TOKEN=""
 CPU_HINT="100"
 ASSUME_YES=0
 FORCE_CONFIG=0
@@ -130,6 +135,9 @@ Options
   --connect-to HOST:PORT dial this address but keep the pool name for SNI/Host
   --tls-ca FILE          trust the certificates in FILE (private CA / pinning)
   --idle-timeout N       reconnect if the pool is silent for N seconds (0 = never)
+  --http-port PORT       local monitoring API port   (default: 18080)
+  --http-token TOKEN     require "Authorization: Bearer TOKEN" on the API
+  --no-http              disable the local monitoring API entirely
   --cpu-hint N           max-threads-hint percentage (default: 100)
   --build-dir DIR        where to compile        (default: PREFIX/src/xmrig-ocean-build)
   --all-backends         also build OpenCL/CUDA support
@@ -192,6 +200,11 @@ while [ $# -gt 0 ]; do
         --tls-ca=*)      NET_TLS_CA="${1#*=}" ;;
         --idle-timeout)  NET_IDLE_TIMEOUT="${2:?}"; shift ;;
         --idle-timeout=*) NET_IDLE_TIMEOUT="${1#*=}" ;;
+        --http-port)     NET_HTTP_PORT="${2:?}"; shift ;;
+        --http-port=*)   NET_HTTP_PORT="${1#*=}" ;;
+        --http-token)    NET_HTTP_TOKEN="${2:?}"; shift ;;
+        --http-token=*)  NET_HTTP_TOKEN="${1#*=}" ;;
+        --no-http)       NET_HTTP=0 ;;
         --cpu-hint)      CPU_HINT="${2:?}"; shift ;;
         --cpu-hint=*)    CPU_HINT="${1#*=}" ;;
         --build-dir)     BUILD_DIR_DEFAULT="${2:?}"; shift ;;
@@ -664,6 +677,15 @@ write_config() {
         [ -n "$tls_ca_path" ] || tls_ca_path="$NET_TLS_CA"
     fi
 
+    # JSON booleans, not shell integers: XMRig's parser (and ours) reads a
+    # boolean here, and `enabled: 1` would be silently ignored.
+    local http_enabled="true"
+    [ "$NET_HTTP" = "1" ] || http_enabled="false"
+
+    # `access-token` is a JSON string or null; quote it only when it is set.
+    local http_token="null"
+    [ -n "$NET_HTTP_TOKEN" ] && http_token="\"${NET_HTTP_TOKEN}\""
+
     local extra_pool=""
     [ -n "$NET_TRANSPORT" ] && extra_pool="${extra_pool},
             \"transport\": \"${NET_TRANSPORT}\""
@@ -693,10 +715,10 @@ write_config() {
         "worker-id": "${rig}"
     },
     "http": {
-        "enabled": true,
+        "enabled": ${http_enabled},
         "host": "127.0.0.1",
-        "port": 18080,
-        "access-token": null,
+        "port": ${NET_HTTP_PORT},
+        "access-token": ${http_token},
         "restricted": true
     },
     "autosave": true,
@@ -1457,9 +1479,14 @@ case "$COMMAND" in
             step "verifying zmrig"
             zmrig_self_test "$binary" || die "self-test failed"
             if have strings; then
-                zm_dev_fee=$(strings "$binary" | grep -ci "donat" || true)
-                [ "${zm_dev_fee:-0}" = 0 ] && ok "no donation code: 0% developer fee" \
-                                           || die "donation strings found in the binary"
+                # Look for the donation *endpoints and wallets*, not for the
+                # word "donate": the monitoring API legitimately reports
+                # "donate_level": 0 in its JSON, which is not donation code.
+                zm_dev_fee=$(strings "$binary" \
+                    | grep -Eci "donate\.v2\.xmrig\.com|xmrig\.com/donate|44tLjm|donate\.moneroocean" \
+                    || true)
+                [ "${zm_dev_fee:-0}" = 0 ] && ok "no donation endpoints or wallets: 0% developer fee" \
+                                           || die "${zm_dev_fee} donation endpoint/wallet string(s) found in the binary"
             fi
             ok "verified"
         else
