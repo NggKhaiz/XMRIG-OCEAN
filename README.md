@@ -216,6 +216,8 @@ any rewrite. See [`doc/BENCHMARKS.md`](doc/BENCHMARKS.md).
 
 ```bash
 ./zmrig/tests/run.sh                 # hash vectors and engine conformance
+./zmrig/tests/unit.sh                # 12 modules of unit tests (zig test)
+./zmrig/tests/cli.sh                 # flags, exit codes, --help parity
 ./zmrig/tests/net.sh --soak          # 22 network cases: pools, proxies, WS/TLS
 ./tests/hash/check.sh                # C++ known-answer suite
 node run_tests.js --safe --build-dir build
