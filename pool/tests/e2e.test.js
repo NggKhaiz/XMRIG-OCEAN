@@ -176,6 +176,9 @@ test('miner over TCP: login, shares accepted, ledger credited', { skip: !haveMin
     assert.strictEqual(stats.pool.rejected, 0);
     assert.ok(stats.pool.verifier.verified >= 1, 'the share was re-hashed by the pool');
     assert.strictEqual(stats.ledger.feePercent, 1);
+    // A light-mode miner does a few hundred H/s. Anything near 1e6 means the
+    // share weight was scaled twice.
+    assert.ok(stats.ledger.hashrate < 1e5, `hashrate is implausible: ${stats.ledger.hashrate}`);
 
     const worker = await getJson(pool.httpPort, `/api/worker/${MINER_ADDRESS}`);
     assert.strictEqual(worker.address, MINER_ADDRESS);

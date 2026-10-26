@@ -164,6 +164,21 @@ test('shares outside the PPLNS window do not earn', () => {
   assert.strictEqual(ledger.balanceOf(MINER_B).pending, '0');
 });
 
+test('the hashrate estimate is in hashes per second, not in difficulty units', () => {
+  const ledger = tempLedger();
+  const now = Math.floor(Date.now() / 1000);
+
+  // Three shares of difficulty 100 = 300 hashes of work at least. The estimate
+  // floors the span at 120 s so one lucky share cannot read as GH/s.
+  ledger.addShare(`${MINER}.h`, 100, now - 20);
+  ledger.addShare(`${MINER}.h`, 100, now - 10);
+  ledger.addShare(`${MINER}.h`, 100, now);
+
+  const rate = ledger.estimateHashrate(now);
+  assert.ok(rate > 0 && rate < 1000, `got ${rate}`);
+  assert.ok(Math.abs(rate - 300 / 120) < 0.001, `expected 2.5 H/s, got ${rate}`);
+});
+
 test('a payout can never exceed the pending balance', () => {
   const ledger = tempLedger();
   const now = Math.floor(Date.now() / 1000);

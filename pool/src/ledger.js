@@ -187,8 +187,10 @@ class Ledger {
     const { total } = this.windowWeights(ts);
     if (total === 0n) return 0;
 
-    // total is difficulty*1e-6; hashes = difficulty * 2^32.
-    const hashes = (Number(total) / 1e6) * 4294967296;
+    // In CryptoNote a share of difficulty d costs d hashes on average, and
+    // `total` carries difficulty with six decimals. Multiplying by 2^32 here
+    // reported a 100 H/s miner as 100 GH/s.
+    const hashes = Number(total) / 1e6;
     const oldest = this.shares[0]?.ts ?? ts;
     const span = Math.min(Math.max(ts - oldest, 120), Math.max(this.windowSeconds, 120));
 

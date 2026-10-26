@@ -7,7 +7,7 @@
 'use strict';
 
 const { clamp, hexToBytes, isHex, isHexOf, nowSeconds, splitLogin, looksLikeAddress } = require('./util');
-const { meetsTarget, nextDifficulty, parseDifficulty } = require('./target');
+const { meetsTarget, nextDifficulty } = require('./target');
 
 const MAX_LINE = 16 * 1024;
 const LOGIN_TIMEOUT = 30;
@@ -50,7 +50,7 @@ class StratumPool {
     conn.meta = meta;
     conn.authorised = false;
     conn.difficulty = Number(this.config.initial_difficulty || 2000);
-    conn.jobs = new Map();      // job id -> difficulty at announce time
+    conn.jobs = new Map();      // job id -> difficulty (plain number) at announce time
     conn.shareTimes = [];       // recent share timestamps, for vardiff
     conn.accepted = 0;
     conn.rejected = 0;
@@ -261,7 +261,9 @@ class StratumPool {
     if (!force && conn.lastJobId === job.id) return;
 
     conn.lastJobId = job.id;
-    conn.jobs.set(job.id, parseDifficulty(conn.difficulty));
+    // Plain difficulty, not the scaled BigInt: mixing the two made every
+    // recorded share weight 1e6 times too large.
+    conn.jobs.set(job.id, Number(conn.difficulty));
 
     // Keep the map small: jobs expiring anyway are useless.
     if (conn.jobs.size > 32) {
@@ -305,7 +307,7 @@ class StratumPool {
       return;
     }
 
-    const difficulty = conn.jobs.get(jobId) ?? parseDifficulty(conn.difficulty);
+    const difficulty = Number(conn.jobs.get(jobId) ?? conn.difficulty);
     let computed = null;
 
     // Recompute the hash ourselves. Without this the pool would be taking the
@@ -346,7 +348,7 @@ class StratumPool {
       return;
     }
 
-    if (!meetsTarget(hashBytes, Number(difficulty) / 1e6)) {
+    if (!meetsTarget(hashBytes, difficulty)) {
       this.stats.rejected += 1;
       conn.rejected += 1;
       this.reply(conn, id, null, { code: -1, message: 'low difficulty share' });
@@ -358,7 +360,7 @@ class StratumPool {
     this.stats.accepted += 1;
     conn.accepted += 1;
     conn.shareTimes.push(nowSeconds());
-    this.ledger.addShare(conn.login, Number(difficulty) / 1e6);
+    this.ledger.addShare(conn.login, difficulty);
 
     this.reply(conn, id, { status: 'OK' });
 
