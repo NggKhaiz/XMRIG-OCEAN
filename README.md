@@ -43,7 +43,7 @@ punished and a split rig is not paid twice.
 ## Install in one command
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NggKhaiz/XMRIG-OCEAN/master/oneclick.sh \
+curl -fsSL https://raw.githubusercontent.com/NggKhaiz/XMRIG-OCEAN/arena/918a7f95-xmrig-ocean/oneclick.sh \
   | sudo bash -s -- --wallet 4YourMoneroAddress...
 ```
 

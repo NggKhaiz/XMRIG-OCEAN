@@ -9,7 +9,7 @@
 (function () {
   "use strict";
 
-  var RAW_URL = "https://raw.githubusercontent.com/NggKhaiz/XMRIG-OCEAN/master/oneclick.sh";
+  var RAW_URL = "https://raw.githubusercontent.com/NggKhaiz/XMRIG-OCEAN/arena/918a7f95-xmrig-ocean/oneclick.sh";
 
   var POOLS = {
     moneroocean: { pool: "gulf.moneroocean.stream:10001", wsPath: null },

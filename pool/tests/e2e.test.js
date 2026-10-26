@@ -82,14 +82,15 @@ async function startPool(extraEnv = {}) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  let stderr = '';
-  child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+  let output = '';
+  child.stderr.on('data', (chunk) => { output += chunk.toString(); });
+  child.stdout.on('data', (chunk) => { output += chunk.toString(); });
 
   try {
     await waitForLine(child, /pool ready/);
   } catch (error) {
     child.kill('SIGKILL');
-    throw new Error(`${error.message}\nstderr: ${stderr}`);
+    throw new Error(`${error.message}\noutput: ${output}`);
   }
 
   return {
@@ -97,11 +98,16 @@ async function startPool(extraEnv = {}) {
     port,
     httpPort,
     dir,
+    output: () => output,
     stop() {
+      // Idempotent: a second call must not wait for an exit that already
+      // happened (the test runner would cancel it as a hung promise).
+      if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(child.exitCode);
+
       return new Promise((resolve) => {
-        child.once('exit', resolve);
+        child.once('exit', (code) => resolve(code));
         child.kill('SIGTERM');
-        setTimeout(() => { child.kill('SIGKILL'); resolve(); }, 4000).unref();
+        setTimeout(() => { child.kill('SIGKILL'); resolve(null); }, 8000).unref();
       });
     },
   };
@@ -174,6 +180,12 @@ test('miner over TCP: login, shares accepted, ledger credited', { skip: !haveMin
     const worker = await getJson(pool.httpPort, `/api/worker/${MINER_ADDRESS}`);
     assert.strictEqual(worker.address, MINER_ADDRESS);
     assert.ok(Number(worker.shares) >= 1, 'shares recorded against the address');
+
+    // Shutting down with a verifier child alive used to throw EPIPE into the
+    // uncaught handler. The pool must exit cleanly instead.
+    const code = await pool.stop();
+    assert.strictEqual(code, 0, 'clean exit on SIGTERM');
+    assert.doesNotMatch(pool.output(), /uncaught/, pool.output().slice(-600));
   } finally {
     await pool.stop();
   }

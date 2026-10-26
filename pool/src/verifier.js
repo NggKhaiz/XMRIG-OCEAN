@@ -43,6 +43,10 @@ class Verifier {
       stderr: '',
     };
 
+    // A verifier that dies while a share is queued must not take the pool down
+    // with an unhandled EPIPE on stdin.
+    child.stdin.on('error', () => { slot.alive = false; });
+
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
       slot.buffer += chunk;
@@ -146,6 +150,7 @@ class Verifier {
       });
 
       try {
+        if (!slot.child.stdin.writable) throw new Error('verifier input is closed');
         slot.child.stdin.write(`${line}\n`);
         this.stats.verified += 1;
       } catch (error) {
@@ -162,7 +167,10 @@ class Verifier {
 
     for (const slot of this.slots) {
       if (slot && slot.alive) {
-        try { slot.child.stdin.write('quit\n'); } catch (_) {}
+        // A polite quit lets zmrig free its cache; the kill is the fallback.
+        try {
+          if (slot.child.stdin.writable && !slot.child.stdin.destroyed) slot.child.stdin.write('quit\n');
+        } catch (_) {}
         try { slot.child.kill('SIGTERM'); } catch (_) {}
       }
     }
