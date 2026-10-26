@@ -650,7 +650,13 @@ const Monitor = struct {
         // create it instead of skipping the report for the whole run.
         if (std.fs.path.dirname(path)) |dir| std.fs.cwd().makePath(dir) catch {};
 
-        var file = std.fs.cwd().createFile(path, .{ .truncate = true }) catch |e| {
+        // Write a sibling file and rename it over the target. The dashboard
+        // polls this file; truncating it in place would hand out an empty read
+        // every time, and a rename is atomic on POSIX.
+        var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch path;
+
+        var file = std.fs.cwd().createFile(tmp, .{ .truncate = true }) catch |e| {
             if (!self.report_error_logged) {
                 self.report_error_logged = true;
                 self.logger.warn("cannot write the report file {s}: {s}", .{ path, @errorName(e) });
@@ -658,10 +664,27 @@ const Monitor = struct {
 
             return;
         };
-        defer file.close();
 
-        file.writeAll(code) catch {};
-        file.writeAll("\n") catch {};
+        var written = true;
+        file.writeAll(code) catch {
+            written = false;
+        };
+        file.writeAll("\n") catch {
+            written = false;
+        };
+        file.close();
+
+        if (written) {
+            std.fs.cwd().rename(tmp, path) catch |e| {
+                if (!self.report_error_logged) {
+                    self.report_error_logged = true;
+                    self.logger.warn("cannot replace the report file {s}: {s}", .{ path, @errorName(e) });
+                }
+                std.fs.cwd().deleteFile(tmp) catch {};
+            };
+        } else {
+            std.fs.cwd().deleteFile(tmp) catch {};
+        }
     }
 };
 
