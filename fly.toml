@@ -1,0 +1,61 @@
+# Fly.io configuration for Ocean Pool.
+#
+#   fly launch --no-deploy --copy-config --dockerfile deploy/Dockerfile
+#   fly volumes create pool_data --size 1
+#   fly secrets set DAEMON=https://node.example:18081
+#   fly deploy
+#
+# Fly gives a real public IP, so classic stratum works: port 3333/TCP. The
+# WebSocket path (8080) keeps working for miners behind restrictive networks.
+
+app = "ocean-pool"
+primary_region = "sin"
+
+[build]
+  dockerfile = "deploy/Dockerfile"
+
+[env]
+  PORT = "3333"
+  HTTP_PORT = "8080"
+  BIND = "0.0.0.0"
+  POOL_FEE_PERCENT = "1"
+  POOL_NAME = "Ocean Pool"
+  PAYOUT_MODE = "ledger"
+  VERIFY_SHARES = "true"
+  STATE_FILE = "/data/state.json"
+  AUDIT_FILE = "/data/audit.jsonl"
+
+[[mounts]]
+  source = "pool_data"
+  destination = "/data"
+
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "10s"
+
+# Raw stratum: a plain TCP service, no TLS handler.
+[[services]]
+  internal_port = 3333
+  protocol = "tcp"
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 3333

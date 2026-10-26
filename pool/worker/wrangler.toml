@@ -1,0 +1,20 @@
+# Cloudflare Worker: WebSocket ⇄ TCP bridge for the pool.
+#
+#   npx wrangler deploy
+#
+# Workers cannot open a TCP socket to an internal address on the free plan
+# unless the host is reachable from the public internet, so POOL_HOST must be a
+# hostname or IP the Worker can route to.
+
+name = "ocean-pool-bridge"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+POOL_HOST = "pool.example.com"
+POOL_PORT = 3333
+WS_PATH = "/stratum"
+
+# Free plan: 100 000 requests/day, no Durable Objects needed.
+# A stratum connection is one long-lived WebSocket, so the request count is
+# roughly "one per miner restart" -- nowhere near the limit.

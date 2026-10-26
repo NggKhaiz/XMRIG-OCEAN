@@ -1,0 +1,18 @@
+{
+  "name": "ocean-pool",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-hosted Monero (RandomX) pool with a published fee, WebSocket stratum for restrictive networks, and an auditable payout ledger.",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "start": "node src/index.js --config config.json",
+    "check": "node src/index.js --config config.json --check",
+    "test": "node --test --test-concurrency=1 'tests/*.test.js'"
+  },
+  "license": "GPL-3.0",
+  "dependencies": {}
+}
