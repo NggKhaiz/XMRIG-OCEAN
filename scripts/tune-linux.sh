@@ -82,7 +82,7 @@ show_status() {
     if [ "${hp_total:-0}" -gt 0 ] 2>/dev/null; then
         ok "2MB huge pages: ${hp_free}/${hp_total} free (${hp_size} kB each)"
     else
-        warn "2MB huge pages: none reserved (RandomX will run with 4KB pages -> up to 30% slower)"
+        warn "2MB huge pages: none reserved (RandomX will run with 4KB pages -> up to 25% slower)"
     fi
 
     local one_g
@@ -148,6 +148,17 @@ write_value() {
     fi
 }
 
+# Same as write_value, but without the "OK" line: for values the kernel accepts
+# and then silently clamps, the read-back below is the only honest report.
+write_value_quiet() {
+    local path="$1" value="$2"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        printf '   would write %s -> %s\n' "$value" "$path"
+        return 0
+    fi
+    printf '%s\n' "$value" > "$path" 2>/dev/null || warn "cannot write $path (read-only or unsupported)"
+}
+
 step "1. Huge pages"
 # The kernel clamps nr_hugepages to what it can actually carve out, so a write
 # that "succeeds" can still leave the miner on 4 KiB pages. Always read back.
@@ -179,7 +190,28 @@ case "$HUGE_MODE" in
             info "kernel default huge page size is not 2MB, continuing anyway"
         fi
         info "reserving 3 x 1GB pages (dataset + cache); needs ${DATASET_MB}MB+ free contiguous RAM"
-        write_value /sys/kernel/mm/hugepages/hugepages-1048576kB/nr_hugepages 3
+        write_value_quiet /sys/kernel/mm/hugepages/hugepages-1048576kB/nr_hugepages 3
+
+        # Same trap as the 2MB pool: the kernel accepts the write and keeps 0
+        # when it cannot find a contiguous gigabyte. Read back and fall back to
+        # the 2MB pool instead of leaving the miner without huge pages at all.
+        if [ "$DRY_RUN" -eq 0 ]; then
+            got_1g=$(cat /sys/kernel/mm/hugepages/hugepages-1048576kB/nr_hugepages 2>/dev/null || echo 0)
+            if [ "${got_1g:-0}" -ge 3 ]; then
+                ok "verified: ${got_1g} x 1GB pages reserved"
+            elif [ "${got_1g:-0}" -gt 0 ]; then
+                warn "only ${got_1g} of 3 1GB pages could be reserved; falling back to 2MB pages"
+                pages=$(( (required_mb + 1) / 2 ))
+                write_value /proc/sys/vm/nr_hugepages "$pages"
+                verify_huge_pages "$pages"
+            else
+                warn "the kernel reserved no 1GB pages (no contiguous 1GB block or 1GB pages unsupported)"
+                info "falling back to 2MB pages, which give the same RandomX speed"
+                pages=$(( (required_mb + 1) / 2 ))
+                write_value /proc/sys/vm/nr_hugepages "$pages"
+                verify_huge_pages "$pages"
+            fi
+        fi
         ;;
     off)
         info "skipping huge page reservation"
@@ -242,10 +274,15 @@ cat <<'EOF'
 Next steps:
   1. Run the miner as root (or with CAP_SYS_RAWIO + CAP_IPC_LOCK + CAP_SYS_NICE) so
      huge pages, MSR writes and thread priorities are applied:
-         sudo ./build/xmrig -c config.json
-  2. Verify the startup log:
-         "huge pages 100%"
-         "register values ... have been set successfully"
-  3. These settings are not persistent across reboots. To persist them, call this
+         sudo zmrig -c /etc/xmrig-ocean/config.json --msr
+  2. Verify what the miner actually got, without mining:
+         zmrig -o POOL:PORT -u WALLET --check
+     The memory line says "huge pages reserved" when the reservation worked,
+     and the msr line says whether the device is readable.
+  3. The startup log repeats it:
+         "hash engine ready: ..., huge pages 2336 MB (explicit)"
+     A "(THP fallback)" or "(partial)" suffix means the kernel did not hand out
+     the 2 MiB pages, and the hashrate drops ~24 %.
+  4. These settings are not persistent across reboots. To persist them, call this
      script from a systemd unit or /etc/rc.local.
 EOF
