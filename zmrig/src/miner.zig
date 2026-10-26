@@ -103,7 +103,14 @@ pub const Submitter = struct {
 
         _ = session.submit(share.job_id[0..share.job_id_len], share.nonce, &share.hash, share.height, share.algo) catch |e| {
             _ = self.failed.fetchAdd(1, .monotonic);
-            logger.warn("cannot send share: {s}", .{@errorName(e)});
+            logger.warn("cannot send share ({s}); dropping the connection so it can be replaced", .{@errorName(e)});
+
+            // A half-written line has already corrupted the stream, and a pool
+            // that cannot take 300 bytes is not mining for us anyway. Shut the
+            // socket down: the read loop wakes up, this mutex is released, and
+            // the reconnect path takes over. Without this every worker blocked
+            // on the same socket until the send timeout expired.
+            std.posix.shutdown(session.conn.handle(), .both) catch {};
 
             return;
         };

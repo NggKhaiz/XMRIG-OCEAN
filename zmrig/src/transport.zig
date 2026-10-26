@@ -664,7 +664,10 @@ fn connectAddress(address: std.net.Address, timeout_ms: u32) Error!std.net.Strea
 pub var stop_requested = std.atomic.Value(bool).init(false);
 
 const handshake_timeout_s = 20;
-const send_timeout_s = 30;
+/// A share is a few hundred bytes. If the socket cannot take that in five
+/// seconds the pool is gone (or its window is closed); waiting longer only
+/// stalls the worker that holds the submit mutex.
+const send_timeout_s = 5;
 
 fn setSendTimeout(stream: std.net.Stream, seconds: usize) void {
     const tv = std.posix.timeval{ .tv_sec = @intCast(seconds), .tv_usec = 0 };

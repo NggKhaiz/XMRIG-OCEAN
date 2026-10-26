@@ -159,6 +159,27 @@ class Pool:
 
             return
 
+        if self.args.mode == "close":
+            # Answer the login, let the miner submit for a moment, then drop the
+            # connection. The client's next submit hits a closed socket, which
+            # is the same recovery path as a send that never completes.
+            time.sleep(self.args.close_after)
+
+            try:
+                conn.close()
+            except OSError:
+                pass
+
+            return
+
+        if self.args.mode == "deaf":
+            # The job is out; never read the socket again. The client's send
+            # buffer fills up and it has to drop the connection instead of
+            # blocking every worker on the submit mutex.
+            self.stop.wait(self.args.duration)
+
+            return
+
         if self.args.mode == "hostile":
             threading.Thread(target=self.hostile_flood, args=(conn, state), daemon=True).start()
         else:
@@ -370,8 +391,8 @@ def main():
     ap = argparse.ArgumentParser(description="fake Stratum pool for the zmrig tests")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=4710)
-    ap.add_argument("--mode", default="basic", choices=["basic", "soak", "hostile", "stall"])
-    ap.add_argument("--diff", type=float, default=2000)
+    ap.add_argument("--mode", default="basic", choices=["basic", "soak", "hostile", "stall", "deaf", "close"])
+    ap.add_argument("--diff", type=float, default=2000, help="job difficulty; small values make shares frequent")
     ap.add_argument("--algo", default="rx/0")
     ap.add_argument("--seed", default="1" * 64)
     ap.add_argument("--next-seed", default=None)
@@ -379,6 +400,7 @@ def main():
     ap.add_argument("--reject-login", default=None, help="reply to login with this error message")
     ap.add_argument("--duration", type=float, default=600, help="seconds a single connection is served")
     ap.add_argument("--lifetime", type=float, default=0, help="stop listening after N seconds")
+    ap.add_argument("--close-after", type=float, default=5, help="close mode: seconds before the socket is closed")
     args = ap.parse_args()
 
     pool = Pool(args)

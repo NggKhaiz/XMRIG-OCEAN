@@ -6,8 +6,12 @@
 # (tests/net/relay.py) and checks that the miner logs in, mines and submits
 # shares over each one. Then runs the harder cases: a seed change, an algorithm
 # switch, an abrupt disconnect, a hostile pool that floods malformed JSON, an
-# idle pool that triggers the watchdog, a rejected login, and a fallback to the
-# second pool in the list.
+# idle pool that triggers the watchdog, a pool that closes the socket in the
+# middle of a share, a rejected login, and a fallback to the second pool.
+#
+# The fake pool also has a "deaf" mode (answers the login, never reads again)
+# for reproducing a send that blocks instead of failing:
+#   python3 zmrig/tests/net/pool.py --port 4710 --mode deaf --diff 0.000001
 #
 #   ./zmrig/tests/net.sh                 # everything (~3 minutes)
 #   ./zmrig/tests/net.sh --only tcp,wss  # a subset
@@ -340,6 +344,30 @@ if selected reject; then
         record PASS "login rejected" "error surfaced to the user"
     else
         record FAIL "login rejected" "message missing (see $log)"
+    fi
+fi
+
+if selected close; then
+    port_c=$((port++))
+    # Answers the login, lets the miner submit for a moment, then closes the
+    # socket. A submit that lands after the close is exactly the write error
+    # that used to leave every worker blocked on the submit mutex.
+    python3 "$NET/pool.py" --port "$port_c" --mode close --diff 0.000001 --close-after 6 --lifetime 90 \
+        >"${LOGDIR}/poolclose.log" 2>&1 &
+    PIDS+=($!)
+    wait_port "$port_c" 10
+    log="${LOGDIR}/close.log"
+    run_miner close 30 "$log" -o "127.0.0.1:${port_c}" -t 2 --mode light --retry-pause 1 --retries 8
+    rates=$(grep -oE 'speed 10s/60s/15m [0-9.]+' "$log" | awk '{print $3}')
+    first=$(printf '%s\n' "$rates" | head -1)
+    last=$(printf '%s\n' "$rates" | tail -1)
+    logins=$(grep -c 'login ok' "$log")
+    if [ -z "$last" ] || ! awk -v f="${first:-0}" -v l="$last" 'BEGIN { exit !(l > f * 0.5) }'; then
+        record FAIL "pool closes mid-share" "hashrate collapsed to ${last:-?} H/s - a failed submit blocked the workers"
+    elif [ "$logins" -lt 2 ]; then
+        record FAIL "pool closes mid-share" "never reconnected (${logins} login(s))"
+    else
+        record PASS "pool closes mid-share" "reconnected (${logins} logins), hashrate held at ${last} H/s"
     fi
 fi
 
