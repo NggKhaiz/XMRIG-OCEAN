@@ -288,6 +288,7 @@ pub const usage =
     \\      --no-msr             do not touch MSR registers (default)
     \\      --no-msr-restore     keep the MSR values after exit (default: restore)
     \\      --randomx-wrmsr, --no-rdmsr   XMRig spellings of the two flags above
+    \\      --no-wrmsr           XMRig spelling of --no-msr
     \\      --no-jit             disable the JIT compiler (slow, ~6x lower hashrate)
     \\      --no-affinity        do not pin threads to cores
     \\      --cpu-affinity=0x3   pin threads to these CPUs (bitmask, XMRig style)
@@ -301,10 +302,19 @@ pub const usage =
     \\      --log-file=FILE      append the log to FILE
     \\      --user-agent=UA      User-Agent for WebSocket pool connections
     \\
+    \\Monitoring:
+    \\      --http-host=HOST     local API bind address (default: 127.0.0.1)
+    \\      --http-port=PORT     local monitoring API port (0 = off)
+    \\      --http-access-token=T  require "Authorization: Bearer T"
+    \\      --host-header=NAME   Host: header for WebSocket upgrades
+    \\
     \\Other:
     \\  -c, --config=FILE        JSON config file
     \\      --self-test[=light]  verify the hash engine against known vectors and exit
     \\                           (light skips the 2 GiB dataset check)
+    \\      --background         detach from the terminal and keep mining
+    \\      --nicehash           mask the nonce for a NiceHash/rental pool
+    \\      --donate-level=N     accepted for XMRig compatibility, always 0%
     \\      --check              validate the configuration and exit
     \\      --dry-run            alias of --check (XMRig spelling)
     \\      --bench[=HASHES]     benchmark the hash rate and exit
