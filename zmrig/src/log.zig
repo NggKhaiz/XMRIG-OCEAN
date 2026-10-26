@@ -34,6 +34,9 @@ pub const Logger = struct {
     file: ?std.fs.File = null,
     colors: bool = true,
     verbose: bool = false,
+    /// Console lines go to stderr instead of stdout. Set by `--report`, where
+    /// stdout carries exactly one machine readable line.
+    stderr_sink: bool = false,
 
     const Self = @This();
 
@@ -88,7 +91,11 @@ pub const Logger = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        _ = std.io.getStdOut().write(line) catch {};
+        if (self.stderr_sink) {
+            _ = std.io.getStdErr().write(line) catch {};
+        } else {
+            _ = std.io.getStdOut().write(line) catch {};
+        }
 
         if (self.file) |f| {
             // The file gets a plain line: escape codes in a log file are noise

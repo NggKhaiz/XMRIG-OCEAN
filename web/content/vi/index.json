@@ -1,0 +1,15 @@
+{
+  "lang": "vi",
+  "title": "Tài liệu zmrig",
+  "pages": [
+    { "slug": "gioi-thieu", "title": "Giới thiệu", "file": "gioi-thieu.md", "group": "Bắt đầu" },
+    { "slug": "cai-dat", "title": "Cài đặt", "file": "cai-dat.md", "group": "Bắt đầu" },
+    { "slug": "cau-hinh", "title": "Cấu hình", "file": "cau-hinh.md", "group": "Vận hành" },
+    { "slug": "hieu-nang", "title": "Benchmark và tinh chỉnh", "file": "hieu-nang.md", "group": "Vận hành" },
+    { "slug": "mang", "title": "Mạng kén chọn", "file": "mang.md", "group": "Vận hành" },
+    { "slug": "giam-sat", "title": "Giám sát", "file": "giam-sat.md", "group": "Đo lường" },
+    { "slug": "loi-nhuan", "title": "Lợi nhuận và điện", "file": "loi-nhuan.md", "group": "Đo lường" },
+    { "slug": "kiem-thu", "title": "Kiểm thử", "file": "kiem-thu.md", "group": "Tham khảo" },
+    { "slug": "loi-thuong-gap", "title": "Lỗi thường gặp", "file": "loi-thuong-gap.md", "group": "Tham khảo" }
+  ]
+}

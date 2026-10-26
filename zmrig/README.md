@@ -156,6 +156,32 @@ from atomics the monitor already publishes — polling it costs nothing.
 The installer writes `"http": {"enabled": true, "port": 18080}` into the
 config, so `xmrig-ocean status` works out of the box.
 
+## Machine report (`--report`)
+
+A report is a one-line code that describes the machine: CPU, threads, algorithm,
+hashrate (10 s / 60 s / 15 min / peak), huge pages, shares, uptime, power and the
+source of that power reading. It is `ZMRIG1.` + base64url(JSON), roughly 400–500
+characters, and it carries no wallet address and no pool token.
+
+```sh
+zmrig --report --power 95            # 10 s warm-up + 15 s measurement, print the code
+zmrig --report --report-time 30      # measure longer on a noisy host
+zmrig ... --report-file /run/zmrig.report --report-interval 60   # keep a file fresh
+```
+
+`--power W` is wall power. Without it the miner samples RAPL
+(`/sys/class/powercap/intel-rapl:0/energy_uj`) or an hwmon energy counter once,
+30 s into the session — sampling at startup would report idle power — and
+records the source in the payload (`pwsrc`: `rapl`, `hwmon`, `user` or `none`).
+
+The installer enables the report file for the `zmrig` engine, so after an
+install `cat /var/lib/xmrig-ocean/report.txt` gives a code to paste into the
+dashboard in `web/` (`zmrig --report` also works with no pool configured).
+
+Power sampling is what makes the code useful: the web calculator turns
+hashrate + watts + electricity price into cost per day, profit per day and
+break-even price per kWh, for one machine or a whole fleet.
+
 ## Measured performance
 
 Validation host: 2 vCPU Xeon VM (AES, AVX2, AVX-512, VAES, SHA-NI), 3.9 GiB RAM,

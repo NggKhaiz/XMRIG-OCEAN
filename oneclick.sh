@@ -69,6 +69,11 @@ NET_CONNECT_TO=""
 NET_TLS_CA=""
 NET_IDLE_TIMEOUT=""
 NET_KEEPALIVE_INTERVAL=""
+# Machine report for the web dashboard (zmrig only): a small file the miner
+# keeps up to date, so `cat` gives a code to paste into the calculator.
+NET_REPORT=1
+NET_REPORT_FILE=""
+NET_POWER=""
 # Local read-only monitoring API (XMRig-compatible JSON on 127.0.0.1:18080).
 # `status` reads it, so it is on by default; --no-http turns it off.
 NET_HTTP=1
@@ -133,6 +138,10 @@ Options
   --connect-to HOST:PORT dial this address but keep the pool name for SNI/Host
   --tls-ca FILE          trust the certificates in FILE (private CA / pinning)
   --idle-timeout N       reconnect if the pool is silent for N seconds (0 = never)
+  --power W              wall power of this machine, written into the report code
+  --report-file PATH     where zmrig keeps its report code
+                         (default: <state dir>/report.txt, zmrig only)
+  --no-report            do not write a report file
   --http-port PORT       local monitoring API port   (default: 18080)
   --http-token TOKEN     require "Authorization: Bearer TOKEN" on the API
   --no-http              disable the local monitoring API entirely
@@ -203,6 +212,11 @@ while [ $# -gt 0 ]; do
         --http-token)    NET_HTTP_TOKEN="${2:?}"; shift ;;
         --http-token=*)  NET_HTTP_TOKEN="${1#*=}" ;;
         --no-http)       NET_HTTP=0 ;;
+        --power)         NET_POWER="${2:?}"; shift ;;
+        --power=*)       NET_POWER="${1#*=}" ;;
+        --report-file)   NET_REPORT_FILE="${2:?}"; shift ;;
+        --report-file=*) NET_REPORT_FILE="${1#*=}" ;;
+        --no-report)     NET_REPORT=0 ;;
         --cpu-hint)      CPU_HINT="${2:?}"; shift ;;
         --cpu-hint=*)    CPU_HINT="${1#*=}" ;;
         --build-dir)     BUILD_DIR_DEFAULT="${2:?}"; shift ;;
@@ -703,6 +717,28 @@ write_config() {
     \"idle-timeout\": ${NET_IDLE_TIMEOUT}"
     [ -n "$NET_KEEPALIVE_INTERVAL" ] && extra_root="${extra_root},
     \"keepalive-interval\": ${NET_KEEPALIVE_INTERVAL}"
+
+    # zmrig keeps a one-line report code in a file so the dashboard can price
+    # the machine without running anything else. The C++ engine has no such
+    # key, so it is only written for zmrig.
+    if [ "${ENGINE:-xmrig}" = "zmrig" ] && [ "$NET_REPORT" = 1 ]; then
+        local report_path="${NET_REPORT_FILE:-${STATE_DIR}/report.txt}"
+        extra_root="${extra_root},
+    \"report\": {
+        \"enabled\": true,
+        \"file\": \"${report_path}\",
+        \"interval\": 60
+    }"
+    fi
+
+    # Reject junk early: this value is pasted into JSON as a bare number.
+    if [ -n "$NET_POWER" ]; then
+        case "$NET_POWER" in
+            ''|*[!0-9.]*) die "--power needs a number of watts, got '${NET_POWER}'" ;;
+        esac
+        extra_root="${extra_root},
+    \"power\": ${NET_POWER}"
+    fi
 
     local tmp
     tmp=$(mktemp)

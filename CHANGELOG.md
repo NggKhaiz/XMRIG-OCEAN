@@ -5,6 +5,18 @@ The transport layer of `zmrig` was rewritten into a byte-stream layer
 firewall or a CDN needs. The C++ engine is untouched.
 
 ### New
+- **Machine report and web dashboard.** `zmrig --report` measures for 15 s and
+  prints one line — `ZMRIG1.` + base64url(JSON) — with CPU, threads, algorithm,
+  hashrate (10 s / 60 s / 15 min / peak), huge pages, shares, uptime and power
+  (RAPL, hwmon or `--power`). `--report-file`/`--report-interval` keep that code
+  in a file while mining, `--report-id` names the machine. The code contains no
+  wallet and no token.
+- **`web/`**: a static documentation site (9 pages, Vietnamese, no framework,
+  no tracking) and a fleet calculator that decodes report codes, prices
+  electricity and revenue per machine and in total, stores the fleet in
+  `localStorage`, exports/imports JSON and shares a link. Deployable to
+  Cloudflare Pages or Vercel with no build step; `_headers` and `vercel.json`
+  ship strict CSP and cache headers.
 - `--cloudflare[=HOST[:PORT]]` (installer and `zmrig`): pool over
   WebSocket inside TLS on 443, the one shape that passes CDN-only and
   HTTPS-only egress. The installer writes it into the pool section of
@@ -39,6 +51,30 @@ firewall or a CDN needs. The C++ engine is untouched.
   reset and the API. ~10 minutes, exit code 1 on any failure.
 
 ### Fixes
+- **Config values were silently replaced by CLI defaults.** `zmrig -c
+  config.json --verbose` reset `mode`, `huge-pages`, `huge-pages-jit`, `jit`,
+  `affinity`, `priority`, `print-time`, `retries`, `retry-pause`,
+  `idle-timeout`, `keepalive-interval`, `scratchpad-prefetch`,
+  `optimized-init`, `colors`, `verbose` and `background` to their defaults.
+  Options now carry a `seen` set: only flags actually given override the file.
+- **`report.enabled` in a config file used to switch on the standalone
+  `--report` benchmark**, so a service would measure and exit instead of
+  mining. The key now gates only the report file.
+- **`--tls` implicitly disabled certificate verification** (it set
+  `tls_insecure`). It now selects the transport only; `--tls-insecure` remains
+  a documented no-op because Zig 0.13's TLS client cannot skip verification.
+- **`--check` could be ignored when `-c` was used** because the config's report
+  block took the run down the benchmark path. `--check` is now decided before
+  any mining mode.
+- **A client that opened the HTTP API socket and stayed silent blocked the API
+  thread forever.** Every accepted socket now has a 5 s send/receive timeout.
+- **`--report` segfaulted when no pool was configured** (it read
+  `pools.items[0]`). It now measures the machine without a pool.
+- **The report file was never created if its directory did not exist.** The
+  writer creates the parent directory once.
+- **The usage text lost its indentation** around `--check`/`--bench` while the
+  report flags were added; fixed along with the new entries.
+
 - **`-u WALLET -o pool` failed with `InvalidPool`.** Per-pool options seen
   before the pool they belong to created an empty placeholder pool; they are
   now defaults for the pools that follow (`-p`, `--rig-id`, `--keepalive`,
@@ -201,6 +237,30 @@ achievable CPU hashrate on the machine that compiles the binary.
   donation switch — see `doc/PERFORMANCE.md` §1 and §6.
 
 ### Fixes
+- **Config values were silently replaced by CLI defaults.** `zmrig -c
+  config.json --verbose` reset `mode`, `huge-pages`, `huge-pages-jit`, `jit`,
+  `affinity`, `priority`, `print-time`, `retries`, `retry-pause`,
+  `idle-timeout`, `keepalive-interval`, `scratchpad-prefetch`,
+  `optimized-init`, `colors`, `verbose` and `background` to their defaults.
+  Options now carry a `seen` set: only flags actually given override the file.
+- **`report.enabled` in a config file used to switch on the standalone
+  `--report` benchmark**, so a service would measure and exit instead of
+  mining. The key now gates only the report file.
+- **`--tls` implicitly disabled certificate verification** (it set
+  `tls_insecure`). It now selects the transport only; `--tls-insecure` remains
+  a documented no-op because Zig 0.13's TLS client cannot skip verification.
+- **`--check` could be ignored when `-c` was used** because the config's report
+  block took the run down the benchmark path. `--check` is now decided before
+  any mining mode.
+- **A client that opened the HTTP API socket and stayed silent blocked the API
+  thread forever.** Every accepted socket now has a 5 s send/receive timeout.
+- **`--report` segfaulted when no pool was configured** (it read
+  `pools.items[0]`). It now measures the machine without a pool.
+- **The report file was never created if its directory did not exist.** The
+  writer creates the parent directory once.
+- **The usage text lost its indentation** around `--check`/`--bench` while the
+  report flags were added; fixed along with the new entries.
+
 - **`-u WALLET -o pool` failed with `InvalidPool`.** Per-pool options seen
   before the pool they belong to created an empty placeholder pool; they are
   now defaults for the pools that follow (`-p`, `--rig-id`, `--keepalive`,

@@ -100,8 +100,38 @@ const Pending = struct {
 
 pub const Mode = enum { auto, fast, light };
 
+/// Which options the command line actually set. The config file is read first
+/// and the command line is merged on top, so a flag that was *not* given must
+/// not overwrite the config with its default value (that is how a `mode` of
+/// "light" in config.json was silently replaced by "auto").
+pub const Seen = struct {
+    mode: bool = false,
+    huge_pages: bool = false,
+    huge_pages_jit: bool = false,
+    jit: bool = false,
+    affinity: bool = false,
+    priority: bool = false,
+    print_time: bool = false,
+    retries: bool = false,
+    retry_pause: bool = false,
+    idle_timeout: bool = false,
+    keepalive_interval: bool = false,
+    scratchpad_prefetch: bool = false,
+    optimized_init: bool = false,
+    colors: bool = false,
+    verbose: bool = false,
+    background: bool = false,
+    report: bool = false,
+    report_time: bool = false,
+    report_file: bool = false,
+    report_interval: bool = false,
+    report_id: bool = false,
+    power: bool = false,
+};
+
 pub const Options = struct {
     pools: std.ArrayListUnmanaged(Pool) = .{},
+    seen: Seen = .{},
     algo: ?api.Algo = null,
     threads: ?usize = null,
     mode: Mode = .auto,
@@ -137,6 +167,15 @@ pub const Options = struct {
     check: bool = false,
     benchmark: bool = false,
     bench_hashes: u64 = 1_000_000,
+    /// `--report`: short benchmark, then print a machine report code.
+    report: bool = false,
+    report_seconds: u32 = 15,
+    /// `--report-file`: keep this file updated while mining.
+    report_file: ?[]const u8 = null,
+    report_interval: u32 = 60,
+    report_id: ?[]const u8 = null,
+    /// `--power W`: wall power of the machine, used by the report.
+    power_watts: ?f64 = null,
     // Transport defaults applied to every pool that did not specify them.
     transport_override: ?transport.Kind = null,
     ws_path: ?[]const u8 = null,
@@ -153,6 +192,8 @@ pub const Options = struct {
         for (self.pools.items) |pool| freePool(allocator, pool);
         self.pools.deinit(allocator);
         if (self.log_file) |v| allocator.free(v);
+        if (self.report_file) |v| allocator.free(v);
+        if (self.report_id) |v| allocator.free(v);
         if (self.api_token) |v| allocator.free(v);
         if (self.config_path) |v| allocator.free(v);
         if (self.ws_path) |v| allocator.free(v);
@@ -230,10 +271,17 @@ pub const usage =
     \\
     \\Other:
     \\  -c, --config=FILE        JSON config file
-      \\      --self-test[=light]  verify the hash engine against known vectors and exit
-  \\                           (light skips the 2 GiB dataset check)
-  \\      --check              validate the configuration and exit
+    \\      --self-test[=light]  verify the hash engine against known vectors and exit
+    \\                           (light skips the 2 GiB dataset check)
+    \\      --check              validate the configuration and exit
     \\      --bench[=HASHES]     benchmark the hash rate and exit
+    \\      --report             benchmark for --report-time seconds, print a
+    \\                           machine report code for the web dashboard
+    \\      --report-time=N      seconds to measure with --report (default: 15)
+    \\      --report-file=FILE   keep FILE updated with the report code
+    \\      --report-interval=N  seconds between report file updates (60)
+    \\      --report-id=NAME     machine name in the report (default: rig-id)
+    \\      --power=W            wall power in watts, used by the report
     \\  -h, --help               this help
     \\  -V, --version            print the version
     \\
@@ -447,41 +495,58 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8) ParseEr
             const value = try needValue(args, &i, inline_value);
             if (std.mem.eql(u8, value, "auto")) {
                 opts.mode = .auto;
+            opts.seen.mode = true;
             } else if (std.mem.eql(u8, value, "fast")) {
                 opts.mode = .fast;
+            opts.seen.mode = true;
             } else if (std.mem.eql(u8, value, "light")) {
                 opts.mode = .light;
+            opts.seen.mode = true;
             } else {
                 return error.UnknownOption;
             }
         } else if (std.mem.eql(u8, name, "--no-huge-pages")) {
             opts.huge_pages = false;
+            opts.seen.huge_pages = true;
         } else if (std.mem.eql(u8, name, "--no-huge-pages-jit")) {
             opts.huge_pages_jit = false;
+            opts.seen.huge_pages_jit = true;
         } else if (std.mem.eql(u8, name, "--no-jit")) {
             opts.jit = false;
+            opts.seen.jit = true;
         } else if (std.mem.eql(u8, name, "--no-affinity")) {
             opts.affinity = false;
+            opts.seen.affinity = true;
         } else if (std.mem.eql(u8, name, "--priority")) {
             opts.priority = try parseNumber(i32, try needValue(args, &i, inline_value));
+            opts.seen.priority = true;
         } else if (std.mem.eql(u8, name, "--no-color")) {
             opts.colors = false;
+            opts.seen.colors = true;
         } else if (std.mem.eql(u8, name, "--verbose") or std.mem.eql(u8, name, "-v")) {
             opts.verbose = true;
+            opts.seen.verbose = true;
         } else if (std.mem.eql(u8, name, "--print-time")) {
             opts.print_time = try parseNumber(u32, try needValue(args, &i, inline_value));
+            opts.seen.print_time = true;
         } else if (std.mem.eql(u8, name, "--retries")) {
             opts.retries = try parseNumber(u32, try needValue(args, &i, inline_value));
+            opts.seen.retries = true;
         } else if (std.mem.eql(u8, name, "--scratchpad-prefetch")) {
             opts.scratchpad_prefetch = try parseNumber(i32, try needValue(args, &i, inline_value));
+            opts.seen.scratchpad_prefetch = true;
         } else if (std.mem.eql(u8, name, "--no-optimized-init")) {
             opts.optimized_init = false;
+            opts.seen.optimized_init = true;
         } else if (std.mem.eql(u8, name, "--idle-timeout")) {
             opts.idle_timeout = try parseNumber(u32, try needValue(args, &i, inline_value));
+            opts.seen.idle_timeout = true;
         } else if (std.mem.eql(u8, name, "--keepalive-interval")) {
             opts.keepalive_interval = try parseNumber(u32, try needValue(args, &i, inline_value));
+            opts.seen.keepalive_interval = true;
         } else if (std.mem.eql(u8, name, "--retry-pause")) {
             opts.retry_pause = try parseNumber(u32, try needValue(args, &i, inline_value));
+            opts.seen.retry_pause = true;
         } else if (std.mem.eql(u8, name, "--log-file")) {
             opts.log_file = allocator.dupe(u8, try needValue(args, &i, inline_value)) catch return error.OutOfMemory;
         } else if (std.mem.eql(u8, name, "--http-host")) {
@@ -510,8 +575,33 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8) ParseEr
         } else if (std.mem.eql(u8, name, "--bench")) {
             opts.benchmark = true;
             if (inline_value) |v| opts.bench_hashes = parseNumber(u64, v) catch return error.InvalidNumber;
+        } else if (std.mem.eql(u8, name, "--report")) {
+            opts.report = true;
+            opts.seen.report = true;
+            // `--report=SECONDS` is the shorthand for a custom measurement time.
+            if (inline_value) |v| {
+                opts.report_seconds = parseNumber(u32, v) catch return error.InvalidNumber;
+                opts.seen.report_time = true;
+            }
+        } else if (std.mem.eql(u8, name, "--report-time")) {
+            opts.report_seconds = try parseNumber(u32, try needValue(args, &i, inline_value));
+            opts.seen.report_time = true;
+        } else if (std.mem.eql(u8, name, "--report-file")) {
+            opts.report_file = allocator.dupe(u8, try needValue(args, &i, inline_value)) catch return error.OutOfMemory;
+            opts.seen.report_file = true;
+        } else if (std.mem.eql(u8, name, "--report-interval")) {
+            opts.report_interval = try parseNumber(u32, try needValue(args, &i, inline_value));
+            opts.seen.report_interval = true;
+        } else if (std.mem.eql(u8, name, "--report-id")) {
+            opts.report_id = allocator.dupe(u8, try needValue(args, &i, inline_value)) catch return error.OutOfMemory;
+            opts.seen.report_id = true;
+        } else if (std.mem.eql(u8, name, "--power")) {
+            const value = try needValue(args, &i, inline_value);
+            opts.power_watts = std.fmt.parseFloat(f64, value) catch return error.InvalidNumber;
+            opts.seen.power = true;
         } else if (std.mem.eql(u8, name, "--background")) {
             opts.background = true;
+            opts.seen.background = true;
         } else {
             return error.UnknownOption;
         }
@@ -532,7 +622,7 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8) ParseEr
 }
 
 pub fn validate(opts: *const Options) ParseError!void {
-    if (opts.help or opts.version or opts.self_test or opts.benchmark) return;
+    if (opts.help or opts.version or opts.self_test or opts.benchmark or opts.report) return;
     _ = opts.check;
 
     if (opts.pools.items.len == 0) return error.NoPools;
@@ -768,6 +858,31 @@ pub fn parseConfigFile(allocator: std.mem.Allocator, opts: *Options, path: []con
     if (jsonInt(u32, root, "keepalive-interval")) |v| opts.keepalive_interval = v;
     if (jsonBool(root, "colors")) |v| opts.colors = v;
     if (jsonBool(root, "background")) |v| opts.background = v;
+    if (root.get("power")) |value| {
+        switch (value) {
+            .float => |v| opts.power_watts = v,
+            .integer => |v| opts.power_watts = @floatFromInt(v),
+            else => {},
+        }
+    }
+    if (root.get("report")) |report_value| {
+        if (report_value == .object) {
+            const report = report_value.object;
+            if (jsonString(report, "file")) |v| opts.report_file = allocator.dupe(u8, v) catch return error.OutOfMemory;
+            if (jsonInt(u32, report, "interval")) |v| opts.report_interval = v;
+            if (jsonString(report, "id")) |v| opts.report_id = allocator.dupe(u8, v) catch return error.OutOfMemory;
+
+            // `enabled` only gates the report *file*: the standalone
+            // `--report` benchmark is a command line action and must never be
+            // switched on by a config file (a service would stop mining).
+            if (jsonBool(report, "enabled")) |enabled| {
+                if (!enabled) {
+                    if (opts.report_file) |file| allocator.free(file);
+                    opts.report_file = null;
+                }
+            }
+        }
+    }
     if (jsonString(root, "log-file")) |v| opts.log_file = allocator.dupe(u8, v) catch return error.OutOfMemory;
 
     if (root.get("cpu")) |cpu_value| {

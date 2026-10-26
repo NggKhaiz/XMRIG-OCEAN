@@ -9,6 +9,7 @@ const log = @import("log.zig");
 const miner_mod = @import("miner.zig");
 const api_http = @import("api_http.zig");
 const options = @import("options.zig");
+const report = @import("report.zig");
 const stratum = @import("stratum.zig");
 const util = @import("util.zig");
 
@@ -119,7 +120,59 @@ pub fn main() !void {
     }
 
     if (opts.benchmark) {
-        try benchmark(allocator, &opts);
+        _ = try benchmark(allocator, &opts, 180, 0);
+        return;
+    }
+
+    if (opts.report) {
+        // stdout carries one line: the code. Everything else goes to stderr so
+        // `zmrig --report > rig.txt` produces a file the dashboard accepts.
+        log.global.stderr_sink = true;
+
+        // A report is a steady state number: the first seconds after the
+        // dataset is built are slower (JIT warm-up, page faults), so measure a
+        // 10 s window after a 10 s warm-up instead of averaging the ramp in.
+        const measure = try benchmark(allocator, &opts, @max(opts.report_seconds, 5), 10);
+        const power = report.measurePower(opts.power_watts);
+
+        var cpu_buf: [256]u8 = undefined;
+        var code_buf: [1400]u8 = undefined;
+
+        const threads = if (opts.threads) |t| @max(t, 1) else miner_mod.defaultThreads(miner_mod.cpuCount());
+        // `--report` also works without a pool: it measures the machine, not a
+        // session, so there is nothing to validate against.
+        const rig_id: ?[]const u8 = if (opts.pools.items.len > 0) opts.pools.items[0].rig_id else null;
+
+        const code = report.encode(&code_buf, .{
+            .id = opts.report_id orelse (rig_id orelse "zmrig"),
+            .version = version,
+            .cpu = report.cpuModel(&cpu_buf),
+            .threads = threads,
+            .cores = report.physicalCores(miner_mod.cpuCount()),
+            .algo = if (opts.algo) |a| a.label() else "rx/0",
+            .mode = @tagName(opts.mode),
+            .rates = .{ measure.steady_rate, measure.steady_rate, measure.steady_rate, measure.steady_rate },
+            .huge_pages = .{ measure.huge_pages, measure.huge_pages },
+            .shares = .{ 0, 0, 0 },
+            .hashes = measure.hashes,
+            .uptime_s = 0,
+            .power_watts = power.watts,
+            .power_source = power.source,
+            .pool = "benchmark",
+            .timestamp = std.time.timestamp(),
+        }) catch |e| {
+            log.global.err("cannot build the report: {s}", .{@errorName(e)});
+
+            return;
+        };
+
+        log.global.info("measured {d} hashes in {d} ms, power source {s}", .{
+            measure.hashes,
+            measure.elapsed_ms,
+            power.source,
+        });
+        try std.io.getStdOut().writer().print("{s}\n", .{code});
+
         return;
     }
 
@@ -159,9 +212,23 @@ pub fn main() !void {
     var miner = try miner_mod.Miner.init(logger, &opts);
     defer miner.deinit();
 
+    // "host:port" for the report, owned by main for the whole run.
+    var pool_label_buf: [256]u8 = undefined;
+    const pool_label = std.fmt.bufPrint(&pool_label_buf, "{s}:{d}", .{
+        opts.pools.items[0].host,
+        opts.pools.items[0].port,
+    }) catch opts.pools.items[0].host;
+
     var monitor = Monitor{
         .miner = &miner,
         .logger = logger,
+        .report_file = opts.report_file,
+        .report_interval_ms = @as(i64, @intCast(@max(opts.report_interval, 1))) * 1000,
+        .report_id = opts.report_id orelse (opts.pools.items[0].rig_id orelse "zmrig"),
+        .report_pool = pool_label,
+        .report_user_power = opts.power_watts,
+        .report_mode = @tagName(opts.mode),
+        .report_started_ms = std.time.milliTimestamp(),
         .print_interval = @as(i64, @intCast(opts.print_time)) * 1000,
         .idle_timeout_ms = @as(i64, @intCast(opts.idle_timeout)) * 1000,
         .keepalive_ms = @as(i64, @intCast(opts.keepalive_interval)) * 1000,
@@ -287,8 +354,8 @@ pub fn main() !void {
         const result = runSession(allocator, &session, &miner, &opts, &monitor, algo, logger);
         monitor.view.markDisconnected();
 
-        if (session.skipped > 0) {
-            logger.warn("ignored {d} over-long line(s) from the pool", .{session.skipped});
+        if (session.conn.skipped > 0) {
+            logger.warn("ignored {d} over-long line(s) from the pool", .{session.conn.skipped});
         }
 
         miner.submitter.detach();
@@ -392,6 +459,22 @@ fn runSession(
 const Monitor = struct {
     miner: *miner_mod.Miner,
     logger: *log.Logger,
+    /// Live report file (`--report-file`), written from this thread so the
+    /// pool loop stays untouched.
+    report_file: ?[]const u8 = null,
+    report_interval_ms: i64 = 60_000,
+    report_id: []const u8 = "zmrig",
+    report_pool: []const u8 = "",
+    report_mode: []const u8 = "auto",
+    report_power: ?f64 = null,
+    report_power_source: []const u8 = "none",
+    /// Measurement is deferred until the CPU has been hashing for a while: a
+    /// RAPL reading taken at startup would be idle power, not mining power.
+    report_power_measured: bool = false,
+    report_user_power: ?f64 = null,
+    report_started_ms: i64 = 0,
+    last_report_write: i64 = 0,
+    report_error_logged: bool = false,
     print_interval: i64,
     idle_timeout_ms: i64 = 300_000,
     keepalive_ms: i64 = 60_000,
@@ -449,6 +532,13 @@ const Monitor = struct {
                 self.miner.shared.totalHashes(),
             );
 
+            if (self.report_file) |path| {
+                if (now - self.last_report_write >= self.report_interval_ms) {
+                    self.last_report_write = now;
+                    self.writeReport(path, now);
+                }
+            }
+
             // A SIGTERM must not wait for the pool to say something: the main
             // thread is parked in a blocking read, so nudge it here.
             if (!running.load(.acquire)) self.kick();
@@ -465,6 +555,76 @@ const Monitor = struct {
                 std.posix.shutdown(@intCast(fd), .both) catch {};
             }
         }
+    }
+
+    /// Writes `ZMRIG1.<...>` to the report file. A failure is logged once and
+    /// never stops the miner: a read-only /run must not kill a good session.
+    fn writeReport(self: *Monitor, path: []const u8, now_ms: i64) void {
+        if (self.report_file == null) return;
+
+        const uptime_ms = now_ms - self.report_started_ms;
+
+        if (!self.report_power_measured) {
+            // Give the workers time to reach full load first; a 250 ms sample
+            // of an idle package would understate the electricity badly.
+            if (uptime_ms < 30_000) return;
+
+            self.report_power_measured = true;
+            const power = report.measurePower(self.report_user_power);
+            self.report_power = power.watts;
+            self.report_power_source = power.source;
+        }
+
+        var cpu_buf: [256]u8 = undefined;
+        var code_buf: [1400]u8 = undefined;
+
+        const huge_pages = self.miner.hugePages();
+        const power = self.report_power;
+
+        const code = report.encode(&code_buf, .{
+            .id = self.report_id,
+            .version = version,
+            .cpu = report.cpuModel(&cpu_buf),
+            .threads = self.miner.threadCount(),
+            .cores = report.physicalCores(miner_mod.cpuCount()),
+            .algo = if (self.miner.engine.algo) |algo| algo.label() else "auto",
+            .mode = self.report_mode,
+            .rates = .{
+                self.miner.hashrate(10),
+                self.miner.hashrate(60),
+                self.miner.hashrate(900),
+                self.miner.stats.max_rate,
+            },
+            .huge_pages = huge_pages,
+            .shares = .{
+                self.miner.submitter.accepted.load(.monotonic),
+                self.miner.submitter.rejected.load(.monotonic),
+                self.miner.submitter.failed.load(.monotonic),
+            },
+            .hashes = self.miner.shared.totalHashes(),
+            .uptime_s = @divTrunc(uptime_ms, 1000),
+            .power_watts = power,
+            .power_source = self.report_power_source,
+            .pool = self.report_pool,
+            .timestamp = std.time.timestamp(),
+        }) catch return;
+
+        // The directory may not exist yet (a fresh unit, a custom --report-file):
+        // create it instead of skipping the report for the whole run.
+        if (std.fs.path.dirname(path)) |dir| std.fs.cwd().makePath(dir) catch {};
+
+        var file = std.fs.cwd().createFile(path, .{ .truncate = true }) catch |e| {
+            if (!self.report_error_logged) {
+                self.report_error_logged = true;
+                self.logger.warn("cannot write the report file {s}: {s}", .{ path, @errorName(e) });
+            }
+
+            return;
+        };
+        defer file.close();
+
+        file.writeAll(code) catch {};
+        file.writeAll("\n") catch {};
     }
 };
 
@@ -485,17 +645,23 @@ fn mergeOptions(allocator: std.mem.Allocator, base: *options.Options, extra: *op
         };
         extra.pools.clearRetainingCapacity();
     }
-    base.mode = extra.mode;
-    base.huge_pages = extra.huge_pages;
-    base.huge_pages_jit = extra.huge_pages_jit;
-    base.jit = extra.jit;
-    base.print_time = extra.print_time;
-    base.retries = extra.retries;
-    base.retry_pause = extra.retry_pause;
-    base.colors = extra.colors;
-    base.verbose = extra.verbose;
-    base.affinity = extra.affinity;
-    base.priority = extra.priority;
+    // Only what the command line set: a plain `-c config.json --verbose` must
+    // not reset mode, threads, retries or huge pages to their defaults.
+    if (extra.seen.mode) base.mode = extra.mode;
+    if (extra.seen.huge_pages) base.huge_pages = extra.huge_pages;
+    if (extra.seen.huge_pages_jit) base.huge_pages_jit = extra.huge_pages_jit;
+    if (extra.seen.jit) base.jit = extra.jit;
+    if (extra.seen.print_time) base.print_time = extra.print_time;
+    if (extra.seen.retries) base.retries = extra.retries;
+    if (extra.seen.retry_pause) base.retry_pause = extra.retry_pause;
+    if (extra.seen.colors) base.colors = extra.colors;
+    if (extra.seen.verbose) base.verbose = extra.verbose;
+    if (extra.seen.affinity) base.affinity = extra.affinity;
+    if (extra.seen.priority) base.priority = extra.priority;
+    if (extra.seen.idle_timeout) base.idle_timeout = extra.idle_timeout;
+    if (extra.seen.keepalive_interval) base.keepalive_interval = extra.keepalive_interval;
+    if (extra.seen.scratchpad_prefetch) base.scratchpad_prefetch = extra.scratchpad_prefetch;
+    if (extra.seen.optimized_init) base.optimized_init = extra.optimized_init;
     if (extra.log_file) |v| base.log_file = v;
     if (extra.api_port != 0) base.api_port = extra.api_port;
     if (extra.check) base.check = true;
@@ -513,7 +679,22 @@ fn mergeOptions(allocator: std.mem.Allocator, base: *options.Options, extra: *op
     if (extra.help) base.help = true;
     if (extra.version) base.version = true;
     if (extra.verbose) base.verbose = true;
-    if (extra.background) base.background = true;
+    if (extra.seen.background) base.background = extra.background;
+    // The report flags follow the same rule: a config file may already carry a
+    // report file, an interval, an id and a power figure, and a command line
+    // that does not mention them must leave those values alone.
+    if (extra.seen.report) base.report = true;
+    if (extra.seen.report_time) base.report_seconds = extra.report_seconds;
+    if (extra.seen.report_file) {
+        if (base.report_file) |old| allocator.free(old);
+        base.report_file = extra.report_file;
+    }
+    if (extra.seen.report_interval) base.report_interval = extra.report_interval;
+    if (extra.seen.report_id) {
+        if (base.report_id) |old| allocator.free(old);
+        base.report_id = extra.report_id;
+    }
+    if (extra.seen.power) base.power_watts = extra.power_watts;
     if (extra.http_host.len > 0) base.http_host = extra.http_host;
 
     if (extra.transport_override) |v| base.transport_override = v;
@@ -747,7 +928,18 @@ fn selfTest(allocator: std.mem.Allocator, light_only: bool) !bool {
 
 // --- benchmark -------------------------------------------------------------------
 
-fn benchmark(allocator: std.mem.Allocator, opts: *const options.Options) !void {
+const Measure = struct {
+    hashes: u64 = 0,
+    elapsed_ms: i64 = 0,
+    /// Hashes / wall time, the number XMRig prints for `--bench`.
+    rate: f64 = 0,
+    /// The last 10 s window: excludes the ramp after the dataset is built, so
+    /// it is the number a dashboard should use for profit estimates.
+    steady_rate: f64 = 0,
+    huge_pages: usize = 0,
+};
+
+fn benchmark(allocator: std.mem.Allocator, opts: *const options.Options, cap_seconds: u64, warmup_seconds: u64) !Measure {
     const logger = &log.global;
 
     // Deterministic seed so repeated runs are comparable.
@@ -786,7 +978,8 @@ fn benchmark(allocator: std.mem.Allocator, opts: *const options.Options) !void {
         std.time.sleep(200 * std.time.ns_per_ms);
 
         const now = std.time.milliTimestamp();
-        if (now - started >= 180_000) break;
+        const limit_s = @max(cap_seconds, 1) + warmup_seconds;
+        if (now - started >= @as(i64, @intCast(limit_s)) * 1000) break;
 
         // report() reads the samples, so the benchmark has to feed them too
         // (the Monitor thread only runs while mining against a pool).
@@ -803,6 +996,10 @@ fn benchmark(allocator: std.mem.Allocator, opts: *const options.Options) !void {
 
     const elapsed_ms = std.time.milliTimestamp() - started;
     const total = miner.shared.totalHashes();
+    // Read the counters that live in the engine *before* stopping it: after
+    // stop() the huge page bookkeeping is gone (and touching it crashed).
+    const huge_pages = miner.hugePages()[0];
+    const steady_rate = miner.hashrate(10);
 
     miner.stop();
 
@@ -815,4 +1012,12 @@ fn benchmark(allocator: std.mem.Allocator, opts: *const options.Options) !void {
         elapsed_ms,
         std.fmt.bufPrint(&buf, "{d:.3} {s}", .{ scaled.value, scaled.unit }) catch "?",
     });
+
+    return .{
+        .hashes = total,
+        .elapsed_ms = elapsed_ms,
+        .rate = rate,
+        .steady_rate = steady_rate,
+        .huge_pages = huge_pages,
+    };
 }

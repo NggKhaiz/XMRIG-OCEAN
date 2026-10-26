@@ -58,8 +58,31 @@ that passes HTTPS-only egress) and selects the engine that speaks it. Proxies,
 edge-IP dialling and certificate pinning are covered in
 [`doc/NETWORK.md`](doc/NETWORK.md).
 
+## Website: documentation and a fleet calculator
+
+`web/` is a static site (no build step, no framework) with the operator-facing
+documentation and a profitability/electricity calculator for one or many
+machines. The miner prints a one-line report code, you paste it in, and the page
+prices the machine without sending anything anywhere:
+
+```bash
+zmrig --report --power 95          # 15 s measurement, prints ZMRIG1.<base64>
+cat /var/lib/xmrig-ocean/report.txt # or the live file the service updates
+```
+
+```bash
+python3 -m http.server -d web 8080  # preview at http://localhost:8080
+```
+
+Deploy by pointing Cloudflare Pages (or Vercel) at the repository with **no
+build command** and `web` as the output directory; `_headers` / `vercel.json`
+carry the security and cache headers. See [`web/README.md`](web/README.md).
+
 ## Documentation
 
+* [`web/content/vi/`](web/content/vi/) — the same material as a browsable site,
+  in Vietnamese: install, configuration, benchmarks, restrictive networks,
+  monitoring, profitability, troubleshooting.
 * [`doc/INSTALL.md`](doc/INSTALL.md) — one-click installer, options, service
   layout, unattended fleet install, troubleshooting.
 * [`doc/ALTERNATIVES.md`](doc/ALTERNATIVES.md) — measured comparison against
