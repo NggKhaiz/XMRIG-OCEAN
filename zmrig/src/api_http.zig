@@ -130,11 +130,35 @@ pub const Server = struct {
             break :blk list.addrs[0];
         };
 
-        self.listener = address.listen(.{ .reuse_address = true }) catch |e| {
+        // Bind by hand instead of std's address.listen(): on POSIX that sets
+        // SO_REUSEPORT as well as SO_REUSEADDR, so two miners (or a miner and a
+        // leftover test process) silently share the port and /1/summary answers
+        // with whichever instance the kernel picks. Only SO_REUSEADDR is wanted
+        // here: it lets us restart immediately after a crash, nothing more.
+        const fd = std.posix.socket(address.any.family, std.posix.SOCK.STREAM | std.posix.SOCK.CLOEXEC, std.posix.IPPROTO.TCP) catch |e| {
+            self.logger.err("cannot create the api socket: {s}", .{@errorName(e)});
+
+            return error.HttpListenFailed;
+        };
+
+        var close_fd = true;
+        defer if (close_fd) std.posix.close(fd);
+
+        const on: c_int = 1;
+        std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.REUSEADDR, std.mem.asBytes(&on)) catch {};
+        std.posix.bind(fd, &address.any, address.getOsSockLen()) catch |e| {
             self.logger.err("cannot listen on {s}:{d}: {s}", .{ self.host, self.port, @errorName(e) });
 
             return error.HttpListenFailed;
         };
+        std.posix.listen(fd, 128) catch |e| {
+            self.logger.err("cannot listen on {s}:{d}: {s}", .{ self.host, self.port, @errorName(e) });
+
+            return error.HttpListenFailed;
+        };
+
+        close_fd = false;
+        self.listener = .{ .listen_address = address, .stream = .{ .handle = fd } };
 
         self.listener_fd.store(self.listener.?.stream.handle, .release);
         // The accept loop must not park forever, otherwise stop() would wait a
