@@ -172,6 +172,10 @@ pub const Session = struct {
     logger: *log.Logger,
     supports_algo_extension: bool = false,
 
+    /// Timestamp of the last "unsupported algorithm" warning, so a pool that
+    /// keeps offering a coin we do not mine cannot flood the log.
+    last_algo_warn: i64 = 0,
+
     const Self = @This();
 
     pub fn open(allocator: std.mem.Allocator, pool: options.Pool, logger: *log.Logger) !Self {
@@ -230,6 +234,11 @@ pub const Session = struct {
             if (text.len == 0) continue;
 
             const message = parseMessage(arena.allocator(), text, self.logger, self.pool.nicehash) catch |e| {
+                if (e == error.UnsupportedAlgo) {
+                    self.logger.err("the pool wants {s}; this miner only computes RandomX (rx/*)", .{unsupportedAlgoName(text)});
+                    return error.UnsupportedAlgo;
+                }
+
                 self.logger.debug("unparsable login reply ({s}): {s}", .{ @errorName(e), text });
                 continue;
             };
@@ -276,6 +285,15 @@ pub const Session = struct {
             if (text.len == 0) continue;
 
             const message = parseMessage(arena, text, self.logger, self.pool.nicehash) catch |e| {
+                if (e == error.UnsupportedAlgo) {
+                    const now = std.time.milliTimestamp();
+                    if (now - self.last_algo_warn > 60_000) {
+                        self.last_algo_warn = now;
+                        self.logger.warn("pool switched to {s}, which this miner cannot compute; keeping the previous job", .{unsupportedAlgoName(text)});
+                    }
+                    continue;
+                }
+
                 self.logger.debug("ignoring unparsable message ({s}): {s}", .{ @errorName(e), text });
                 continue;
             };
@@ -334,6 +352,22 @@ pub const Session = struct {
     }
 };
 
+/// Pulls the algorithm name out of a job message for the log line. Returns
+/// "that algorithm" when the message is shaped differently than expected.
+fn unsupportedAlgoName(text: []const u8) []const u8 {
+    const key = "\"algo\"";
+    const at = std.mem.indexOf(u8, text, key) orelse return "that algorithm";
+    const after = text[at + key.len ..];
+
+    // Pools emit both `"algo":"cn/1"` and `"algo": "cn/1"`.
+    const colon = std.mem.indexOfScalar(u8, after, ':') orelse return "that algorithm";
+    const open = std.mem.indexOfScalar(u8, after[colon + 1 ..], '"') orelse return "that algorithm";
+    const rest = after[colon + 1 + open + 1 ..];
+    const end = std.mem.indexOfScalar(u8, rest, '"') orelse return "that algorithm";
+
+    return rest[0..end];
+}
+
 fn parseJobObject(obj: std.json.ObjectMap, default_algo: api.Algo, pool_nicehash: bool) !job.Job {
     var result = job.Job.init();
     result.setAlgo(default_algo);
@@ -341,7 +375,11 @@ fn parseJobObject(obj: std.json.ObjectMap, default_algo: api.Algo, pool_nicehash
 
     if (obj.get("algo")) |algo_value| {
         if (algo_value == .string) {
-            if (api.Algo.fromName(algo_value.string)) |algo| result.setAlgo(algo);
+            // Never fall back to rx/0 for a job the pool labelled differently:
+            // every hash of a CryptoNight blob would be rejected and the user
+            // would see a wall of "rejected" with no reason.
+            const algo = api.Algo.fromName(algo_value.string) orelse return error.UnsupportedAlgo;
+            result.setAlgo(algo);
         }
     }
 
@@ -456,7 +494,13 @@ fn parseMessage(arena: std.mem.Allocator, text: []const u8, logger: *log.Logger,
 
             if (result.get("job")) |job_value| {
                 if (job_value == .object) {
-                    reply.job = parseJobObject(job_value.object, api.Algo.rx_0, pool_nicehash) catch null;
+                    // A malformed job is ignored (the pool may send a partial
+                    // one), but an algorithm we cannot compute is fatal: mining
+                    // rx/0 over a CryptoNight blob only produces rejects.
+                    reply.job = parseJobObject(job_value.object, api.Algo.rx_0, pool_nicehash) catch |e| switch (e) {
+                        error.UnsupportedAlgo => return error.UnsupportedAlgo,
+                        else => null,
+                    };
                 }
             }
         }
@@ -538,4 +582,29 @@ test "a job with a non-zero nonce switches the nonce mask on" {
     // The blob carries extranonce bytes; mining must not overwrite them.
     try testing.expect(job_value.nicehash);
     try testing.expectEqual(@as(u32, 0x00FFFFFF), job_value.nonceMask());
+}
+
+test "a job for a coin we cannot mine is refused, not mined as rx/0" {
+    const testing = std.testing;
+
+    const obj_text =
+        \\{"blob":"010101010101010101010101010101010101010101010101010101010101010101010101010101000000000202020202020202020202020202020202020202020202020202020202020202",
+        \\ "job_id":"j","target":"3b0a0000","height":1,"algo":"cn/1","seed_hash":"abababababababababababababababababababababababababababababababab"}
+    ;
+    var parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, obj_text, .{});
+    defer parsed.deinit();
+
+    try testing.expectError(error.UnsupportedAlgo, parseJobObject(parsed.value.object, api.Algo.rx_0, false));
+
+    // The name still reaches the log line.
+    try testing.expectEqualStrings("cn/1", unsupportedAlgoName(obj_text));
+    try testing.expectEqualStrings("that algorithm", unsupportedAlgoName("{\"method\":\"job\"}"));
+}
+
+test "the unsupported algorithm name is read with or without spaces" {
+    const testing = std.testing;
+
+    try testing.expectEqualStrings("cn/1", unsupportedAlgoName("{\"algo\":\"cn/1\"}"));
+    try testing.expectEqualStrings("cn/1", unsupportedAlgoName("{\"height\": 1, \"algo\": \"cn/1\", \"job_id\": \"j\"}"));
+    try testing.expectEqualStrings("that algorithm", unsupportedAlgoName("{\"job_id\":\"j\"}"));
 }
