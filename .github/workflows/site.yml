@@ -1,0 +1,32 @@
+name: Site tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  site:
+    name: Site tests and donation guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      # package-lock.json is not committed, so this is `npm install`, not `npm ci`.
+      # --no-save keeps package.json untouched inside the runner.
+      - name: Install jsdom
+        run: npm install --no-audit --no-fund --no-save jsdom
+
+      - name: Run site tests
+        run: npm run test:web
