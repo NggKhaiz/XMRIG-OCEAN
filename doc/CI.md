@@ -3,6 +3,11 @@
 The repository ships `.github/workflows/test.yml` for Linux and macOS. The Linux
 job builds the miner and runs the safe hash suite.
 
+> Pasting the two job definitions below into `.github/workflows/` needs the
+> `workflows` token scope, which a sandboxed token usually lacks. The
+> step-by-step for doing it by hand in the web editor is in
+> [`SETUP.md`](SETUP.md) §3 and §4a.
+
 Two extra checks are worth adding; they are not in the workflow file because a
 token needs the `workflows` scope to modify those files. Paste them into the
 Linux job after `Run safe test subset`:

@@ -174,6 +174,11 @@ needs only `g++` + `zig`.
   fee audit still reports 0 %; `web/tests/donate.test.js` fails if any published
   copy differs from the wallet the pool actually pays to; and the QR decodes
   back to the same string.
+- **`doc/SETUP.md`**: the manual half of the deployment, in one page — the branch
+  layout (`BETA` is the release branch), the repository settings that need the
+  Settings UI, the two workflow files to paste (site tests, GitHub Pages), the
+  three ways to publish `web/`, the pool on Render/Fly/Workers with the required
+  `DAEMON`, and a table of what a sandboxed session cannot do and why.
 - **Markdown renderer**: images render, `javascript:` links and `src` values
   are dropped instead of emitted, and a link whose label is itself a code span
   no longer loses its anchor.

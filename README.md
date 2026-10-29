@@ -248,6 +248,9 @@ npm run test:pool                    # pool unit + protocol + end-to-end (28 tes
   tests, measured hashrate.
 * [`doc/ARCHITECTURE.md`](doc/ARCHITECTURE.md) — the code base, thread by thread.
 * [`doc/PERFORMANCE.md`](doc/PERFORMANCE.md) — every lever that affects hashrate.
+* [`doc/SETUP.md`](doc/SETUP.md) — what has to be done by hand: repository
+  settings, the two workflow files, publishing the site, deploying the pool,
+  and why each of those cannot be automated.
 * [`doc/ZERO_FEE.md`](doc/ZERO_FEE.md) — what was removed and how to prove it.
 * [`doc/DONATE.md`](doc/DONATE.md) — the one donation address, how to check it,
   and what a donation does and does not buy.
