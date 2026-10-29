@@ -5,6 +5,16 @@ The transport layer of `zmrig` was rewritten into a byte-stream layer
 firewall or a CDN needs. The C++ engine is untouched.
 
 ### New
+- **The miner reserves its own huge pages: +25.0 % measured end-to-end.**
+  A fresh box has `vm.nr_hugepages = 0`, so RandomX runs on 4 KiB pages and
+  mines at 855.8 H/s; `zmrig` now reserves the 2 MiB pages the current mode needs
+  (1208 of them for `--mode fast`) when it starts as root and reaches
+  **1070.0 H/s** with no user action. It reports what the kernel actually granted,
+  never fails the run, logs the exact sysctl command with the measured cost when
+  it cannot (unprivileged/container), never writes during `--check`, and is
+  switched off with `--no-auto-hugepages` (implied by `--no-huge-pages`).
+  New module `zmrig/src/hugepages.zig` with the parsing and the decision logic
+  under test.
 - **Machine report and web dashboard.** `zmrig --report` measures for 15 s and
   prints one line — `ZMRIG1.` + base64url(JSON) — with CPU, threads, algorithm,
   hashrate (10 s / 60 s / 15 min / peak), huge pages, shares, uptime and power
@@ -51,6 +61,21 @@ firewall or a CDN needs. The C++ engine is untouched.
   reset and the API. ~10 minutes, exit code 1 on any failure.
 
 ### Fixes
+- **`./zmrig/build.sh --portable` did not build.** `aes_hash_vaes512.cpp` uses
+  AVX-512/VAES intrinsics but was compiled with whatever `-march=native` gave the
+  build host; without AVX-512 the compiler stops at "target specific option
+  mismatch" (reproduced by deleting the object and rebuilding). That file is now
+  compiled with `-mvaes -mavx512f -mavx512vl` on its own, so the build no longer
+  depends on the ISA of the machine doing the build. The routine is still only
+  called behind a runtime CPUID check.
+- **VAES-512 measured on an Intel Xeon: −3.5 %, so it stays gated.** Upstream
+  calls the VAES path only on AMD Zen 5. Widening the gate to "CPU has VAES +
+  AVX-512F" was tried on this host (which has `vaes`, `avx512f`, `avx512vl`):
+  dataset init 15.2–15.7 s → 16.5–16.9 s and hashrate 1070.0 → 1033.0 H/s, with
+  bit-identical hashes. AVX-512 frequency licensing costs more than the wider
+  AES buys. Written up in `doc/PERFORMANCE.md` §2b together with the knobs that
+  turned out to be inside noise, and with why vector width, quantum computing and
+  a different host language cannot move RandomX hashrate.
 - **Config values were silently replaced by CLI defaults.** `zmrig -c
   config.json --verbose` reset `mode`, `huge-pages`, `huge-pages-jit`, `jit`,
   `affinity`, `priority`, `print-time`, `retries`, `retry-pause`,

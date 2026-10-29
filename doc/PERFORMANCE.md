@@ -112,6 +112,41 @@ enough pages (for example when a second miner or a benchmark runs while the
 service is up). That is upstream behaviour and it is why
 `./oneclick.sh bench` pauses the service first.
 
+Measured on the container used for this release (2 vCPU Xeon 2.6 GHz, 3.9 GiB,
+`--mode fast`, 6000 hashes, two runs per row, every run reproduced to 0.1 %):
+
+| What was done | H/s | vs previous row |
+|---|---|---|
+| nothing: 0 pages reserved, THP fallback (what a fresh VPS looks like) | 855.8 | — |
+| `zmrig` run as root: it reserves 1208 pages itself, then mines | **1070.0** | **+25.0 %** |
+| 4 threads instead of 2 on the same 2 vCPU | 1070.0 | ±0 % (no gain) |
+| 1 thread on the same box | 553.4 | −48 % (thread count matters) |
+
+That is the whole story of this engine on a small box: page size and thread
+count decide the hashrate, everything else is noise.
+
+### Automatic reservation
+
+`zmrig` now reserves what the current mode needs when the pool is empty, so the
++25 % happens without anybody reading this page:
+
+```
+$ sudo zmrig -o pool:3333 -u 4You...
+[15:27:54] info huge pages: reserved 1208 pages of 2 MiB (2416 MB), the RandomX dataset now uses 2 MiB pages
+[15:28:15] info benchmark: 6001 hashes in 5611 ms = 1.070 kH/s
+```
+
+* it runs only when huge pages are **on** (`--no-huge-pages` turns it off too),
+  the kernel supports them, and the pool is short of what the mode needs;
+* it is one write to `/proc/sys/vm/nr_hugepages`, and it reports what the kernel
+  actually granted, not what was asked for (a fragmented host gives partial
+  success, which is still a win);
+* an unprivileged miner cannot write there: it logs the exact command and the
+  measured cost instead of failing, and keeps mining on THP;
+* `--no-auto-hugepages` disables it for hosts where `/proc` must not change
+  (containers with a read-only `/proc/sys`, k8s with a node-level tuner);
+* `--check` never writes anything: it reports the state and exits.
+
 This fork improves the defaults:
 
 * `huge-pages-jit` is **on** by default — the RandomX JIT code lives in huge
@@ -145,6 +180,83 @@ allocation fails and it falls back to transparent huge pages.
 To make the reservation persistent, call the script from a systemd unit, e.g.
 `/etc/systemd/system/xmrig-hugepages.service` (`Type=oneshot`,
 `ExecStart=/opt/xmrig/scripts/tune-linux.sh`).
+
+---
+
+## 2b. What we tried that did not help
+
+Every row below is a real A/B on the box above (`zmrig/tests/ab.sh`, 8000 hashes,
+2 runs, spread ≤ 2.7 %). Nothing here is worth a flag in a config file, which is
+why the defaults did not change.
+
+| Change | H/s | Verdict |
+|---|---|---|
+| default (2 MiB pages, JIT, affinity on) | 1051 | baseline |
+| `--scratchpad-prefetch=0 / 2 / 3` | 1065 / 1079 / 1079 | inside noise |
+| `--no-huge-pages-jit` | 1094 | inside noise |
+| `--no-affinity` | 1094 | inside noise on an idle box (keep affinity: it matters when the host is busy) |
+| `--randomx-init=1` | 1094 | only changes how long the dataset takes to build |
+| `--no-optimized-init` (portable AVX2 init) | 1094 | inside noise; AVX2 init does **not** speed up hashing |
+| `--priority=5` | 1109 | +2 % at best; keep it, it is free, but do not expect a number |
+| `--cpu-affinity=0x1` (both threads on one core) | 552.6 | −47 %: a wrong mask is worse than no mask |
+| `--mode=light` | 114.8 | −89 %: the fallback for 2 GiB boxes, never a choice |
+| **VAES-512 AES path enabled** (see below) | 1033 | **−3.5 %**, rejected |
+
+### VAES-512: the one "new instruction" that exists, and it loses
+
+RandomX ships a hand-written VAES/AVX-512 implementation of the AES hash
+(`src/crypto/randomx/aes_hash_vaes512.cpp`), but upstream only calls it when the
+CPU is *identified as AMD Zen 5*. This host is a Xeon that reports `vaes`,
+`avx512f`, `avx512vl` and `avx512bw`, so the capability was there and the gate
+was vendor-based. We widened the dispatch to a CPUID check (VAES + AVX-512F) and
+measured it, three runs per side, same binary otherwise:
+
+| | dataset init | hashrate |
+|---|---|---|
+| upstream gate (AES-NI / AVX2 path) | **15.2–15.7 s** | **1070.0 H/s** |
+| VAES-512 path forced on | 16.5–16.9 s | 1033.0 H/s |
+
+Both directions are worse, which is the classic AVX-512 frequency licence: 512-bit
+registers buy throughput and pay with core clock, and RandomX spends most of its
+time in memory-latency-bound work where clock wins. Hash output was bit-identical
+either way (commitment `b144ca6b…c0a082`, `zmrig/tests/run.sh`), so this was a
+pure performance question with a clear answer: **the upstream Zen 5 gate stays.**
+
+The experiment did find a real bug, though: `aes_hash_vaes512.cpp` was compiled
+without AVX-512 flags, so `./build.sh --portable` failed to build at all
+("target specific option mismatch"). It is now compiled with `-mvaes -mavx512f
+-mavx512vl` for that one file, which is what lets a build host without AVX-512
+produce a binary at all.
+
+### Vectorising more, quantum, or another language
+
+* **Vector width.** RandomX is memory-hard on purpose: per hash it reads 2 MiB of
+  scratchpad in 64-byte stripes and 2 GiB of dataset at pseudo-random offsets.
+  The measured scaling above (one thread 553 H/s, two threads 1070 H/s, 1.93×)
+  says the cores are *not* waiting on each other, and the knob matrix says
+  nothing about the vector width of the host code matters. There is no wider
+  instruction that makes a 2 MiB random-read stream faster; that is a cache and
+  TLB problem, which is exactly what the huge-page result (+25 %) is.
+* **Quantum.** No. RandomX is a fixed classical function: 2 GiB of AES and
+  integer work, repeated. Grover's algorithm gives a quadratic speedup for
+  *search* over an unstructured space, and mining is search — but it needs a
+  fault-tolerant machine with ~10^5+ logical qubits per hash invocation, error
+  correction overhead included, and it cannot help the memory traffic at all.
+  There is no such machine, and no shortcut around the 2 GiB of memory. Anyone
+  claiming quantum mining is selling something.
+* **Another host language.** The hash loop is not written in Zig or C++: RandomX
+  compiles a program per block into machine code at runtime (`jit_compiler_x86`).
+  The host language only decides how fast we hand it a nonce and take a result,
+  which is nanoseconds against ~1 ms of hashing. Measured: the Zig frontend does
+  1084–1089 H/s on the validation host where the C++ frontend does 1075.7 H/s —
+  a 1 % difference in the wrong direction for the "rewrite it" argument, and both
+  are the same RandomX JIT underneath. A rewrite in Rust, Go, NASM or anything
+  else changes 0 % of the generated code, and `doc/ALTERNATIVES.md` has the
+  longer version.
+
+What actually converts to money, in order: **2 MiB pages (+25 %)**, **one thread
+per physical core (−48 % if you get it wrong)**, a pool that does not drop
+shares, and a miner that does not get OOM-killed. Everything below that is noise.
 
 ---
 

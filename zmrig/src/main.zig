@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const api = @import("api.zig");
+const hugepages_mod = @import("hugepages.zig");
 const job_mod = @import("job.zig");
 const log = @import("log.zig");
 const miner_mod = @import("miner.zig");
@@ -245,7 +246,7 @@ pub fn main() !void {
     // The workers set their own nice value; this covers the main thread.
     miner_mod.applyPriority(opts.priority);
 
-    var miner = try miner_mod.Miner.init(logger, &opts);
+    var miner = try startMiner(logger, &opts);
     defer miner.deinit();
 
     // The RandomX memory-latency fix, applied before the dataset is built.
@@ -719,6 +720,7 @@ fn mergeOptions(allocator: std.mem.Allocator, base: *options.Options, extra: *op
     // not reset mode, threads, retries or huge pages to their defaults.
     if (extra.seen.mode) base.mode = extra.mode;
     if (extra.seen.huge_pages) base.huge_pages = extra.huge_pages;
+    if (extra.seen.auto_hugepages) base.auto_hugepages = extra.auto_hugepages;
     if (extra.seen.huge_pages_jit) base.huge_pages_jit = extra.huge_pages_jit;
     if (extra.seen.jit) base.jit = extra.jit;
     if (extra.seen.print_time) base.print_time = extra.print_time;
@@ -880,6 +882,51 @@ fn printConfigSummary(opts: *const options.Options) !void {
         msr_buf[0..std.mem.indexOfScalar(u8, &msr_buf, 0) orelse msr_buf.len],
         if (opts.msr) "on" else "off, enable with --msr",
     });
+}
+
+/// Every path that allocates RandomX memory goes through here, so the huge page
+/// reservation is never skipped because a caller forgot it (the benchmark path
+/// did exactly that: it mined for 26 s at 855 H/s while the pages sat unused).
+fn startMiner(logger: *@import("log.zig").Logger, opts: *const options.Options) !miner_mod.Miner {
+    autoReserveHugePages(opts, logger);
+
+    return miner_mod.Miner.init(logger, opts);
+}
+
+/// Reserve huge pages when the kernel has none, we are root and the user did
+/// not opt out. Never fatal: an unprivileged miner keeps mining on THP.
+fn autoReserveHugePages(opts: *const options.Options, logger: *@import("log.zig").Logger) void {
+    if (!opts.huge_pages or !opts.auto_hugepages) return;
+
+    const need_mb = datasetMb(opts.mode, miner_mod.totalMemory());
+    const before = hugepages_mod.read();
+
+    switch (hugepages_mod.shouldReserve(need_mb, true, before)) {
+        .enough => return,
+        .unsupported => return,
+        .reserve => {},
+    }
+
+    const want = hugepages_mod.pagesFor(need_mb, before.page_kb);
+    const after = hugepages_mod.reserve(want) orelse {
+        // Not root is the normal case here; say the cost once and move on.
+        logger.warn("huge pages: {d} reserved, {d} needed for {d} MB; run as root or set vm.nr_hugepages={d} for up to ~21% more hashrate", .{
+            before.reserved, want, need_mb, want,
+        });
+
+        return;
+    };
+
+    if (after >= want) {
+        logger.info("huge pages: reserved {d} pages of 2 MiB ({d} MB), the RandomX dataset now uses 2 MiB pages", .{
+            after, after * before.page_kb / 1024,
+        });
+
+        return;
+    }
+
+    // Partial success is still a win, but say what is still missing.
+    logger.warn("huge pages: only {d} of {d} pages could be reserved (fragmented memory?); mining continues on a mix of page sizes", .{ after, want });
 }
 
 /// How much RandomX memory a mode needs, in MiB. `auto` resolves exactly the
@@ -1141,7 +1188,7 @@ fn benchmark(allocator: std.mem.Allocator, opts: *const options.Options, cap_sec
     var seed_bytes: [32]u8 = undefined;
     _ = try util.hexToBytes(&seed_bytes, "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff");
 
-    var miner = try miner_mod.Miner.init(logger, opts);
+    var miner = try startMiner(logger, opts);
     defer miner.deinit();
 
     try miner.engine.ensure(opts.algo orelse .rx_0);
