@@ -24,6 +24,7 @@ What they cover:
 
 | Check | What it proves |
 |---|---|
+| `tests/oneclick/branch-switch.sh` | the installer's branch switching works in a `--depth 1` single-branch clone, and an unknown branch is a hard error instead of a silent no-op |
 | `verify-fee-free.sh` | no donation strategy in the source or the binary, no developer wallet, keeps the fee at 0 % even when `--donate-level=9` is passed (C++ prints `DONATE 0%`, zmrig says the flag is ignored) |
 | `miner-integration` | the built binary talks stratum, accepts a job and submits a share for all 34 CPU algorithms (`tests/common/miner_harness.js` runs a fake pool) |
 
@@ -46,7 +47,7 @@ enough to sit in front of the compilers:
 
 | Check | What it proves |
 |---|---|
-| `test:web` | the command builder assembles the flags it promises, every docs page renders, raw HTML stays escaped, `javascript:` links are dropped, and every copy of the donation address equals the wallet `pool/src/operator.js` decodes to |
+| `test:web` | the command builder assembles the flags it promises, every docs page renders, raw HTML stays escaped, `javascript:` links are dropped, every copy of the donation address equals the wallet `pool/src/operator.js` decodes to, and every install URL points at `ALPHA`, `BETA` or `master` — never at a session branch |
 
 For `zmrig`, the equivalent is the network suite (no CI privileges needed, it
 starts its own pools and TLS shims):

@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+#
+# branch-switch.sh - the installer must be able to move an existing checkout to
+# another branch, and must fail loudly when it cannot.
+#
+# A `git clone --depth 1 --branch X` clone only maps branch X: `git checkout Y`
+# fails there even after Y has been fetched, because the fetch refspec does not
+# cover it. The old installer hid both the fetch and the checkout behind
+# `|| true`, so `oneclick.sh update` silently did nothing and still printed a
+# commit hash. This test builds a local "remote" (no network), makes such a
+# shallow clone, and drives the real functions out of oneclick.sh.
+#
+#   ./tests/oneclick/branch-switch.sh
+#
+set -uo pipefail
+
+ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd)
+SCRIPT="${ROOT}/oneclick.sh"
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+FAILED=0
+pass() { printf ' PASS %s\n' "$*"; }
+fail() { printf ' FAIL %s\n' "$*"; FAILED=1; }
+
+git_() { git -c user.name=test -c user.email=test@example.invalid -c init.defaultBranch=BETA "$@"; }
+
+# --- a local repository with BETA and ALPHA, and nothing else ----------------
+mkdir -p "$WORK/src"
+(
+    cd "$WORK/src"
+    git_ init -q .
+    echo "release" > README.md
+    git_ add README.md
+    git_ commit -qm "first commit on BETA"
+    git_ branch -M BETA
+    git_ branch ALPHA
+) || { echo "cannot build the fixture"; exit 1; }
+
+# --- extract the two functions from the shipped script ----------------------
+#
+# Sourced, not copied: the test breaks if the real implementation changes shape.
+extract() {
+    sed -n "/^$1()/,/^}/p" "$SCRIPT"
+}
+
+HELPERS="$WORK/helpers.sh"
+{
+    echo 'REPO_URL="file://'"$WORK"'/src"'
+    echo 'REPO_BRANCH="BETA"'
+    echo 'as_root() { "$@"; }'          # the functions run as root in production
+    echo 'die() { echo "DIE: $*" >&2; exit 1; }'
+    extract fetch_branch
+    extract checkout_branch
+} > "$HELPERS"
+
+for fn in fetch_branch checkout_branch; do
+    if grep -q "^${fn}()" "$HELPERS"; then
+        pass "oneclick.sh still defines ${fn}()"
+    else
+        fail "oneclick.sh no longer defines ${fn}() - update this test"
+    fi
+done
+
+# --- a shallow, single-branch clone, exactly like the installer makes --------
+CLONE="$WORK/install"
+git clone -q --depth 1 --branch BETA "file://$WORK/src" "$CLONE" || { echo "clone failed"; exit 1; }
+[ "$(git -C "$CLONE" rev-parse --abbrev-ref HEAD)" = "BETA" ] \
+    && pass "fixture is a single-branch BETA clone" \
+    || fail "fixture is not on BETA"
+
+# What git does on its own, which is the bug the helpers exist to avoid.
+if git -C "$CLONE" checkout -q ALPHA 2>/dev/null; then
+    fail "plain 'git checkout ALPHA' unexpectedly works; the guard is untested"
+else
+    pass "plain 'git checkout ALPHA' fails in a single-branch clone (as expected)"
+fi
+
+# The helper file sets REPO_URL and a default REPO_BRANCH, so the branch is
+# chosen *after* sourcing it.
+switch_to() {
+    local branch="$1"
+    (
+        . "$HELPERS"
+        REPO_BRANCH="$branch"
+        cd "$CLONE" || exit 1
+        fetch_branch . && checkout_branch .
+    )
+}
+
+# --- 1. the helper succeeds where plain checkout fails ----------------------
+if switch_to ALPHA; then
+    head=$(git -C "$CLONE" rev-parse --abbrev-ref HEAD)
+    [ "$head" = "ALPHA" ] \
+        && pass "fetch_branch + checkout_branch switch the clone to ALPHA" \
+        || fail "helper ran but the clone is on ${head}, not ALPHA"
+else
+    fail "fetch_branch/checkout_branch could not switch to ALPHA"
+fi
+
+# --- 2. switching back is not a one-way trip -------------------------------
+if switch_to BETA; then
+    [ "$(git -C "$CLONE" rev-parse --abbrev-ref HEAD)" = "BETA" ] \
+        && pass "switching back to BETA works" \
+        || fail "switch back to BETA landed on the wrong branch"
+else
+    fail "could not switch back to BETA"
+fi
+
+# --- 3. a missing branch is a hard error, not a silent no-op ---------------
+out=$(
+    (
+        . "$HELPERS"
+        REPO_BRANCH=NO-SUCH-BRANCH
+        cd "$CLONE" || exit 1
+        fetch_branch .
+    ) 2>&1
+)
+status=$?
+if [ "$status" -ne 0 ] && printf '%s' "$out" | grep -q "cannot fetch branch NO-SUCH-BRANCH"; then
+    pass "an unknown branch fails with a message that names it"
+else
+    fail "an unknown branch was not refused (exit ${status})"
+fi
+
+# --- 4. no `|| true` swallowing left in the branch switching code ----------
+swallow=$( { extract fetch_branch; extract checkout_branch; } \
+    | grep -n 'checkout\|fetch' | grep -c '|| true' )
+[ "$swallow" -eq 0 ] \
+    && pass "no '|| true' hides a failed fetch or checkout" \
+    || fail "${swallow} silent failure(s) still swallowed in the branch helpers"
+
+echo
+if [ "$FAILED" -eq 0 ]; then
+    echo "branch switching: all checks passed"
+    exit 0
+fi
+
+echo "branch switching: FAILED"
+exit 1
