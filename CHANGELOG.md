@@ -166,6 +166,19 @@ needs only `g++` + `zig`.
 - `zmrig --bench=100000 -t 2`: 100001 hashes in 91 071 ms = 1.098 kH/s.
 
 ### Docs
+- **Branches are `ALPHA` → `BETA` → `master`, and the code now says so.**
+  `oneclick.sh` defaults to `BETA` (was a short-lived session branch), and so do
+  every install one-liner, the site's command builder and every documentation
+  link. Two silent failures were fixed on the way: `update` fetched the branch
+  without checking the result, then checked out without checking either, so a
+  renamed or deleted branch left the tree where it was while the command printed
+  a commit hash and "sources updated"; and switching branch inside a
+  `--depth 1` single-branch clone could never work, because the fetch refspec
+  does not cover the other branch. `fetch_branch`/`checkout_branch` now fetch by
+  name, create the local branch from the explicit remote ref, and die with the
+  branch name in the message. Both are pinned by `tests/oneclick/branch-switch.sh`
+  (local fixture, no network) and by `web/tests/branches.test.js`, which fails if
+  an install URL ever names a branch other than `ALPHA`, `BETA` or `master`.
 - **Donations, published once.** The project takes no fee, so the README, the
   landing page and the Vietnamese guide now carry one optional Monero address
   (`doc/DONATE.md`, QR in `doc/donate/monero.png`), next to an explicit list of

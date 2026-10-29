@@ -54,7 +54,7 @@ punished and a split rig is not paid twice.
 ## Install in one command
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/arena/918a7f95-xmrig-ocean/oneclick.sh \
+curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/BETA/oneclick.sh \
   | sudo bash -s -- --wallet 4YourMoneroAddress...
 ```
 
@@ -79,6 +79,11 @@ sudo ./oneclick.sh install --wallet 4YourMoneroAddress... \
 Prefer to see the command before running it? The site builds it for you:
 **<https://nggkhaiz.github.io/ZMRIG/#builder>** — tick the options you
 want, paste the one-liner, and the only thing left is your `sudo` password.
+
+Every command above installs from **`BETA`**, which is the default branch and the
+only one meant for users. `master` keeps the upstream history and receives `BETA`
+at release time; `ALPHA` carries work that is not released yet. See
+[Branches](#branches) for the rules and for how to run `ALPHA` instead.
 
 ## Everyday commands
 
@@ -190,6 +195,26 @@ supported, and [`worker/`](pool/worker/) is a ready-to-deploy Cloudflare bridge
 that turns a WebSocket into a TCP connection to your own pool. Details:
 [`doc/NETWORK.md`](doc/NETWORK.md).
 
+## Branches
+
+```
+ALPHA  ──►  BETA  ──►  master
+newest      default      upstream base
+work        (install)    (release tags)
+```
+
+| Branch | What it is | How to use it |
+| --- | --- | --- |
+| **`BETA`** | default branch, the release state | nothing to do — every install command in this README uses it |
+| `ALPHA` | the next release, may break | `MINER_BRANCH=ALPHA sudo -E ./oneclick.sh install --wallet …` |
+| `master` | upstream XMRig `6.26.0-mo5` plus merge commits | history only; a release is `BETA` → `master`, then a tag |
+
+Nothing hard-codes a branch name except `oneclick.sh`, which defaults to `BETA`
+and accepts `MINER_BRANCH`. `web/tests/branches.test.js` enforces that: a link, a
+one-liner or a script default pointing at anything else fails the build, because
+the installer once pointed at a short-lived branch and `update` failed silently
+(it fetched nothing, checked out nothing, and still printed a commit hash).
+
 ## Website
 
 `web/` is a static site — no framework, no build step, no analytics:
@@ -234,7 +259,8 @@ any rewrite. See [`doc/BENCHMARKS.md`](doc/BENCHMARKS.md).
 ./zmrig/tests/net.sh --soak          # 22 network cases: pools, proxies, WS/TLS
 ./tests/hash/check.sh                # C++ known-answer suite
 node run_tests.js --safe --build-dir build
-npm run test:web                     # site builder, docs renderer, address guard
+./tests/oneclick/branch-switch.sh    # installer can switch branch, and fails loudly if it cannot
+npm run test:web                     # site builder, docs renderer, address + branch guards
 npm run test:pool                    # pool unit + protocol + end-to-end (28 tests)
 ```
 

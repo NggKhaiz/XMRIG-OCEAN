@@ -2,7 +2,7 @@
 #
 # oneclick.sh - build, tune, install and supervise this miner with one command.
 #
-#   curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/arena/918a7f95-xmrig-ocean/oneclick.sh | sudo bash -s -- --wallet 4...
+#   curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/BETA/oneclick.sh | sudo bash -s -- --wallet 4...
 #
 #   sudo ./oneclick.sh                     # full install, asks for the wallet
 #   sudo ./oneclick.sh --wallet 4... --yes  # fully unattended
@@ -38,7 +38,7 @@ ZIG_VERSION="${MINER_ZIG_VERSION:-0.13.0}"
 
 SELF="${BASH_SOURCE[0]:-}"
 REPO_URL="${MINER_REPO_URL:-https://github.com/NggKhaiz/ZMRIG.git}"
-REPO_BRANCH="${MINER_BRANCH:-arena/918a7f95-xmrig-ocean}"
+REPO_BRANCH="${MINER_BRANCH:-BETA}"
 
 PREFIX="${MINER_PREFIX:-/usr/local}"
 CONFIG_DIR="${MINER_CONFIG_DIR:-/etc/xmrig-ocean}"
@@ -172,6 +172,7 @@ Options
 Environment
   UV_INCLUDE_DIR / UV_LIBRARY   use a locally built libuv instead of the system one
   MINER_REPO_URL / MINER_BRANCH  where to clone the sources from when piped
+                                (default branch: BETA; ALPHA has the newest work)
 EOF
 }
 
@@ -347,14 +348,53 @@ resolve_root() {
     have git || die "git is required to fetch the sources. Install git first."
     if [ -d "${dest}/.git" ]; then
         info "reusing ${dest}"
-        as_root git -C "$dest" fetch --depth 1 origin "$REPO_BRANCH" >/dev/null 2>&1 || true
-        as_root git -C "$dest" checkout -q "$REPO_BRANCH" 2>/dev/null || true
+        fetch_branch "$dest"
+
+        # A checkout that quietly fails leaves the tree on whatever branch it
+        # was on last time -- the installer would then build the wrong sources
+        # while reporting success. Say which branch is missing instead.
+        checkout_branch "$dest"
     else
         as_root mkdir -p "$(dirname "$dest")"
         as_root git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$dest" || die "clone failed"
     fi
     CONFIGURED_ROOT="$dest"
     ok "sources: ${dest} (branch ${REPO_BRANCH})"
+}
+
+# Fetch exactly the branch we are about to check out.
+#
+# `git fetch --all` on a single-branch --depth 1 clone does not update the refs
+# we need, and the old code hid the failure behind `|| true`, so `update` could
+# fast-forward nothing and still print a new commit hash from the stale tree.
+fetch_branch() {
+    local repo="$1"
+
+    # A branch named BETA is not necessarily tracked in a shallow clone made
+    # from a different branch: fetch it by name into a real ref.
+    as_root git -C "$repo" fetch --depth 1 origin "${REPO_BRANCH}:refs/remotes/origin/${REPO_BRANCH}" >/dev/null 2>&1 \
+        || as_root git -C "$repo" fetch origin "${REPO_BRANCH}" >/dev/null 2>&1 \
+        || die "cannot fetch branch ${REPO_BRANCH} from ${REPO_URL}; check the name and your network"
+}
+
+# Switch to REPO_BRANCH, creating the local branch if this clone does not have
+# it yet.
+#
+# A --depth 1 single-branch clone only maps the one branch it was made from, so
+# `git checkout ALPHA` fails there even after the ref has been fetched ("not a
+# branch": the fetch refspec does not cover it). The explicit start point is
+# what makes switching to another branch work, and --no-track keeps git from
+# failing on the upstream that the refspec cannot express.
+checkout_branch() {
+    local repo="$1"
+
+    if as_root git -C "$repo" rev-parse --verify --quiet "refs/heads/${REPO_BRANCH}" >/dev/null; then
+        as_root git -C "$repo" checkout -q "${REPO_BRANCH}" 2>/dev/null \
+            || die "cannot switch ${repo} to ${REPO_BRANCH}: uncommitted changes? (git -C ${repo} status)"
+    else
+        as_root git -C "$repo" checkout -q --no-track -b "${REPO_BRANCH}" "refs/remotes/origin/${REPO_BRANCH}" 2>/dev/null \
+            || die "cannot create local branch ${REPO_BRANCH} in ${repo}; is the remote ref there?"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1434,10 +1474,11 @@ cmd_update() {
     detect_os
     resolve_root
     step "updating sources"
-    as_root git -C "$CONFIGURED_ROOT" fetch --all --quiet || die "git fetch failed"
-    as_root git -C "$CONFIGURED_ROOT" checkout -q "$REPO_BRANCH" 2>/dev/null || true
-    as_root git -C "$CONFIGURED_ROOT" pull --ff-only --quiet || warn "could not fast-forward"
-    ok "sources at $(git -C "$CONFIGURED_ROOT" rev-parse --short HEAD)"
+    fetch_branch "$CONFIGURED_ROOT"
+    checkout_branch "$CONFIGURED_ROOT"
+    as_root git -C "$CONFIGURED_ROOT" pull --ff-only --quiet \
+        || warn "could not fast-forward: local changes in ${CONFIGURED_ROOT}? run git -C ${CONFIGURED_ROOT} status"
+    ok "sources at $(git -C "$CONFIGURED_ROOT" rev-parse --short HEAD) (branch ${REPO_BRANCH})"
 
     FORCE_REBUILD=1 build_miner
     install_binary

@@ -11,7 +11,7 @@ and you move on.
 
 | # | Task | Time | Needs |
 |---|---|---|---|
-| 1 | Branch layout and the open PR | 2 min | nothing — already done, verify only |
+| 1 | Branch layout (`ALPHA`/`BETA`/`master`) | 2 min | nothing — already done, verify only |
 | 2 | Repository description, topics, homepage | 2 min | GitHub **Settings** access |
 | 3 | CI for the site (`site.yml`) | 5 min | GitHub **Actions** write (token scope `workflows`) |
 | 4 | Publish the documentation site | 10 min | GitHub Pages, or Cloudflare/Vercel account |
@@ -23,41 +23,57 @@ and you move on.
 
 ## 1. Branch layout
 
-Two branches are meant to live on: `BETA` (the default) and `master`. The one
-other branch that exists today is a session artefact and can go:
+Three branches, one direction of travel:
 
-| Branch | What it is | Rule |
-|---|---|---|
-| `BETA` | **default branch**, the release state | what people clone; what the installer and the site point at |
-| `master` | the same release, keeping upstream history | target of the release PR; after the merge, `BETA` and `master` hold the same tree |
-| `arena/918a7f95-xmrig-ocean` | head branch of the open PR | a session artefact — delete it once the PR is merged and the session is over |
-
-The final state is two long-lived branches. `master` (upstream `6.26.0-mo5`) is
-an ancestor of `BETA`, so the release PR is a fast-forward and nothing is lost by
-merging it.
-
-Check:
-
-```bash
-gh api repos/NggKhaiz/ZMRIG --jq .default_branch       # BETA
-git ls-remote origin refs/heads                       # BETA and master at the same commit
-gh pr list --state merged | head -2                   # the release PR shows as merged
-git diff --stat origin/BETA origin/master             # empty
+```
+ALPHA  ──►  BETA  ──►  master
+newest      default,    upstream base,
+work        release     stable tags
 ```
 
-Cleanup after the merge — the only branch left over is the session branch:
+| Branch | Role | Who uses it | Rule |
+|---|---|---|---|
+| `ALPHA` | next-release work, may break | anyone who wants the newest thing | never the default; features arrive here first |
+| `BETA` | **default branch**, the release state | everyone: the one-liner installs from here, the site links here | only fast-forwards; what a release tag is cut from |
+| `master` | upstream `6.26.0-mo5` plus merge commits | nobody installs from it | receives `BETA` by PR; history is the audit trail of what shipped when |
+
+Practically:
+
+* `BETA` is the default branch, so `curl …/raw.githubusercontent.com/NggKhaiz/ZMRIG/BETA/oneclick.sh`
+  and a plain `git clone` both give the stable tree. Nothing in the repository
+  hard-codes any other branch name — `oneclick.sh` defaults to `BETA` and honours
+  `MINER_BRANCH` for everything else.
+* Trying `ALPHA` is one flag, no reinstall:
+
+  ```bash
+  MINER_BRANCH=ALPHA sudo -E ./oneclick.sh install --wallet 4YourAddress...
+  # back to stable
+  sudo ./oneclick.sh update
+  ```
+
+* A release is `BETA` → `master`, then a tag:
+
+  ```bash
+  gh pr create --base master --head BETA --title "Release 6.26.0-mo9"
+  gh pr merge --merge
+  git tag -a v6.26.0-mo9 -m "6.26.0-mo9" && git push origin v6.26.0-mo9
+  ```
+
+Check the invariants at any time:
 
 ```bash
-git push origin --delete arena/918a7f95-xmrig-ocean    # closes nothing; the PR is already merged
-# stale session tips, if any were left behind:
-git ls-remote --heads origin 'arena/*'
+gh api repos/NggKhaiz/ZMRIG --jq .default_branch        # BETA
+git ls-remote --heads origin                            # ALPHA, BETA, master
+git diff --stat origin/BETA origin/master               # empty after a release
+grep -rn "arena/" --include='*.md' --include='*.sh' --include='*.js' --include='*.html' . \
+  | grep -v node_modules                                # must be empty (no session branch names)
 ```
 
-**Do not rename** the session branch to `BETA`: it is assigned per session, the
-whole point of `BETA` is to be the stable default, and the two would fight over
-the same name on the next push.
-
----
+That last line is not a suggestion: `web/tests/branches.test.js` fails the build
+if a session branch name (or any branch other than `ALPHA`/`BETA`/`master`)
+reappears in an install command, a link or a script default. The installer used
+to point at a short-lived branch, and the failure mode was silent — `update`
+fetched nothing, checked out nothing and still printed a commit hash.
 
 ## 2. Repository settings
 
@@ -376,10 +392,16 @@ Check the first share lands: `sudo ./oneclick.sh logs | grep -m1 accepted`.
   command in §4 to update the sitemap.
 * **A tag** for a real release: `git tag v6.26.0-mo9 && git push origin v6.26.0-mo9`
   runs `deploy.yml` and publishes prebuilt binaries.
-* **Delete** the session branch when no more agent work is running:
-  `git push origin --delete arena/918a7f95-xmrig-ocean`. Nothing else is left:
-  the old `BETA` snapshot commit was deleted after its tree was compared
-  byte-for-byte with the release commit (`223ce60…`, identical).
+* **Delete merged PR branches.** Session and feature branches are temporary; the
+  three branches in §1 are the only ones that stay. Turn on *Settings → General
+  → Pull Requests → Automatically delete head branches* and GitHub removes them
+  for you, which also keeps the branch list free of names that a script could
+  accidentally start pointing at.
+
+  ```bash
+  git ls-remote --heads origin        # expect exactly ALPHA, BETA, master
+  git push origin --delete <stale-branch>
+  ```
 
 ---
 
