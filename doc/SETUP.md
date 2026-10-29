@@ -23,38 +23,39 @@ and you move on.
 
 ## 1. Branch layout
 
-The repository has three branches and they mean three different things:
+Two branches are meant to live on: `BETA` (the default) and `master`. The one
+other branch that exists today is a session artefact and can go:
 
 | Branch | What it is | Rule |
 |---|---|---|
-| `BETA` | **default branch**, the release state | what people clone; what the site and installer should point at |
-| `master` | upstream XMRig `6.26.0-mo5`, untouched | the base a release PR merges into |
-| `arena/918a7f95-xmrig-ocean` | the working branch of this session | where the PR comes from; not meant to be cloned |
+| `BETA` | **default branch**, the release state | what people clone; what the installer and the site point at |
+| `master` | the same release, keeping upstream history | target of the release PR; after the merge, `BETA` and `master` hold the same tree |
+| `arena/918a7f95-xmrig-ocean` | head branch of the open PR | a session artefact — delete it once the PR is merged and the session is over |
 
-`BETA` and the working branch currently point at the **same commit**
-(`3eac8ef`), so `git clone -b BETA` gives exactly the reviewed tree. The old
-`BETA` tip (a single snapshot commit with no history, same content) is kept as
-`backup/BETA-snapshot-4de446b` — delete it when you are happy.
+The final state is two long-lived branches. `master` (upstream `6.26.0-mo5`) is
+an ancestor of `BETA`, so the release PR is a fast-forward and nothing is lost by
+merging it.
 
 Check:
 
 ```bash
-gh api repos/NggKhaiz/ZMRIG --jq .default_branch          # BETA
-git ls-remote origin refs/heads/BETA refs/heads/master     # BETA ahead of master
-gh pr list                                                 # one open PR, base master
+gh api repos/NggKhaiz/ZMRIG --jq .default_branch       # BETA
+git ls-remote origin refs/heads                       # BETA and master at the same commit
+gh pr list --state merged | head -2                   # the release PR shows as merged
+git diff --stat origin/BETA origin/master             # empty
 ```
 
-Why not renamed: the working branch name is assigned per session and cannot be
-renamed, which is why the release lives on `BETA` instead and the PR is the
-thing that carries it into `master`.
-
-**Merging.** The PR is `master ← working branch` and the diff is 135 files. Merge
-it when CI on the PR is green, then bring `BETA` forward (it already contains
-the commit, nothing to do) or fast-forward `master` yourself:
+Cleanup after the merge — the only branch left over is the session branch:
 
 ```bash
-git checkout master && git merge --ff-only BETA && git push origin master
+git push origin --delete arena/918a7f95-xmrig-ocean    # closes nothing; the PR is already merged
+# stale session tips, if any were left behind:
+git ls-remote --heads origin 'arena/*'
 ```
+
+**Do not rename** the session branch to `BETA`: it is assigned per session, the
+whole point of `BETA` is to be the stable default, and the two would fight over
+the same name on the next push.
 
 ---
 
@@ -375,8 +376,10 @@ Check the first share lands: `sudo ./oneclick.sh logs | grep -m1 accepted`.
   command in §4 to update the sitemap.
 * **A tag** for a real release: `git tag v6.26.0-mo9 && git push origin v6.26.0-mo9`
   runs `deploy.yml` and publishes prebuilt binaries.
-* **Delete** `backup/BETA-snapshot-4de446b` once you trust the new `BETA`:
-  `git push origin --delete backup/BETA-snapshot-4de446b`.
+* **Delete** the session branch when no more agent work is running:
+  `git push origin --delete arena/918a7f95-xmrig-ocean`. Nothing else is left:
+  the old `BETA` snapshot commit was deleted after its tree was compared
+  byte-for-byte with the release commit (`223ce60…`, identical).
 
 ---
 
