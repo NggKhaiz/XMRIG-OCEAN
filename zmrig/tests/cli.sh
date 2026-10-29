@@ -87,5 +87,26 @@ for needle in "affinity 0x1" "priority 3" "dataset  built with 1 thread" "agent 
     fi
 done
 
+# -- huge page reservation: opt-out is real, and --check never writes -----
+# `--check` must report the huge page state without touching /proc: it is run by
+# oneclick.sh as a validation step, sometimes as root, and a probe that changes
+# the host is not a probe.
+before=$(cat /proc/sys/vm/nr_hugepages 2>/dev/null || echo "?")
+"$BIN" -o pool.example.com:3333 -u "$WALLET" --check >/dev/null 2>&1
+after=$(cat /proc/sys/vm/nr_hugepages 2>/dev/null || echo "?")
+
+if [ "$before" = "$after" ]; then
+    record PASS "--check does not touch nr_hugepages" "$before pages before and after"
+else
+    record FAIL "--check does not touch nr_hugepages" "$before -> $after"
+fi
+
+# The opt-out must be visible in --help (it is a safety valve, not a hidden knob)
+if "$BIN" --help | grep -qF -- "--no-auto-hugepages"; then
+    record PASS "--no-auto-hugepages is documented" ""
+else
+    record FAIL "--no-auto-hugepages is documented" "not in --help"
+fi
+
 printf '\n    %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
