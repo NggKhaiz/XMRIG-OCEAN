@@ -52,7 +52,7 @@ Miner không lấy phí, nên câu trả lời thật thà cho câu "ủng hộ 
 
 - **Chỉ XMR**, mạng chính, địa chỉ chuẩn 95 ký tự (network byte `18`), checksum base58 hợp lệ. Gửi BTC/ETH/USDT là mất tiền.
 - **Cùng ví với phí 1% của pool.** `pool/src/operator.js` giải mã ra đúng địa chỉ này, và mỗi instance đang chạy công bố nó ở `/api/config`. Một ví, một sổ cái.
-- **Kiểm tra trước khi gửi:** bắt đầu bằng `46SQLW7D`, kết thúc bằng `n6ysb5tJ`, dài đúng 95 ký tự. Công thức kiểm tra checksum bằng Python nằm trong [`doc/DONATE.md`](https://github.com/NggKhaiz/ZMRIG/blob/arena/918a7f95-xmrig-ocean/doc/DONATE.md).
+- **Kiểm tra trước khi gửi:** bắt đầu bằng `46SQLW7D`, kết thúc bằng `n6ysb5tJ`, dài đúng 95 ký tự. Công thức kiểm tra checksum bằng Python nằm trong [`doc/DONATE.md`](https://github.com/NggKhaiz/ZMRIG/blob/BETA/doc/DONATE.md).
 - **Donate không mua gì cả:** không có bản "supporter" nhanh hơn, không ưu tiên hỗ trợ, không badge, không thuê bao. Nếu ai đó bán "bản build nhanh hơn" thì không phải dự án này.
 - **Địa chỉ khác đều không phải của dự án.** Chỉ chuỗi ở trên là thật; địa chỉ trong fork, issue, video hay tin nhắn riêng đều không phải.
 

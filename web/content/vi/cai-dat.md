@@ -29,6 +29,33 @@ Script làm theo thứ tự: cài phụ thuộc (build-essential, cmake, libuv, 
 
 Toàn bộ idempotent: chạy lại không tạo service trùng, không ghi đè config trừ khi có `--force`, bỏ qua bước build nếu binary mới hơn source.
 
+## Chọn branch
+
+Ba branch, một chiều đi:
+
+```
+ALPHA  ──►  BETA  ──►  master
+mới nhất    mặc định    nền upstream
+```
+
+| Branch | Dùng khi nào |
+|---|---|
+| **`BETA`** | mặc định — mọi lệnh trong trang này đều lấy từ đây, ổn định |
+| `ALPHA` | muốn thử bản mới nhất, có thể lỗi |
+| `master` | chỉ để tra history và cắt tag release |
+
+Đổi branch bằng biến môi trường, không cần cài lại:
+
+```bash
+# thử bản ALPHA
+MINER_BRANCH=ALPHA sudo -E ./oneclick.sh install --wallet 4YourMoneroAddress...
+
+# quay lại bản ổn định
+sudo ./oneclick.sh update
+```
+
+`oneclick.sh update` tự fetch đúng branch rồi mới checkout; nếu branch không tồn tại nó **dừng và báo tên branch**, trước đây lỗi này bị nuốt và update im lặng không làm gì.
+
 ## Cờ thường dùng
 
 | Cờ | Ý nghĩa |
