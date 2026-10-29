@@ -1,0 +1,40 @@
+{
+  "name": "Ocean Pool",
+  "fee_percent": 1.0,
+  "operator_address": "",
+
+  "port": 3333,
+  "http_port": 8080,
+  "bind": "0.0.0.0",
+  "ws_path": "/stratum",
+  "trust_proxy": true,
+
+  "daemon": "http://127.0.0.1:18081",
+  "daemon_user": null,
+  "daemon_password": null,
+  "template_interval": 5,
+  "mode": "monerod",
+
+  "initial_difficulty": 2000,
+  "min_difficulty": 100,
+  "max_difficulty": 4000000,
+  "target_share_seconds": 15,
+  "vardiff": true,
+  "job_ttl": 600,
+
+  "verify_shares": true,
+  "verifier_binary": "zmrig",
+  "verifier_concurrency": 2,
+
+  "pplns_window": 3600,
+  "payout_min": "0.010000000000",
+  "payout_interval": 600,
+  "payout_mode": "ledger",
+  "wallet_rpc": "http://127.0.0.1:18083",
+  "reserve": "0.05",
+
+  "state_file": "./data/state.json",
+  "audit_file": "./data/audit.jsonl",
+  "log_level": "info",
+  "strict_address": true
+}

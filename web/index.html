@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zmrig — đào Monero trên VPS kén chọn, 0% phí dev</title>
+<meta name="description" content="Miner RandomX (XMRig Ocean) với engine Zig, 0% phí developer, chạy được qua WebSocket/TLS trên mạng chỉ mở 443. Kèm bảng tính điện năng và lợi nhuận cho nhiều máy.">
+<meta name="color-scheme" content="dark light">
+<meta property="og:title" content="zmrig — 0% phí dev, đào được trên mạng kén chọn">
+<meta property="og:description" content="Hướng dẫn cài đặt, cấu hình, benchmark và bảng tính lợi nhuận nhiều máy.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f2763f'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' text-anchor='middle' fill='%231a1008'%3Ez%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="mark">z</span> zmrig</a>
+    <nav class="nav" aria-label="Chính">
+      <a href="docs.html">Tài liệu</a>
+      <a href="#builder">Tạo lệnh</a>
+      <a href="#dashboard">Bảng tính</a>
+      <a href="docs.html#benchmark" class="hide-sm">Hiệu năng</a>
+      <a href="#ung-ho" class="hide-sm">Ủng hộ</a>
+      <a href="https://github.com/NggKhaiz/ZMRIG" class="hide-sm" target="_blank" rel="noreferrer">GitHub</a>
+      <button class="icon-btn" type="button" data-theme-toggle aria-label="Đổi giao diện">☀</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+
+    <section class="hero">
+      <p class="eyebrow">XMRig Ocean 6.26.0-mo9 · engine Zig</p>
+      <h1>Đào Monero trên VPS kén chọn, không chia hashrate cho ai.</h1>
+      <p class="lede">
+        0% phí developer — kiểm chứng được bằng script trong repo. Nói được WebSocket + TLS trên cổng 443,
+        HTTP CONNECT và SOCKS5, nên chạy được cả trên máy chỉ mở HTTPS. Có API giám sát và mã báo cáo
+        để tính điện, lợi nhuận cho từng máy.
+      </p>
+
+      <div class="btn-row">
+        <a class="btn primary" href="docs.html#cai-dat">Cài đặt</a>
+        <a class="btn" href="docs.html">Đọc tài liệu</a>
+        <a class="btn ghost" href="#dashboard">Tính lợi nhuận</a>
+      </div>
+
+      <pre><code>curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/arena/918a7f95-xmrig-ocean/oneclick.sh \
+  | sudo bash -s -- install --wallet YOUR_WALLET --pool gulf.moneroocean.stream:10001 --engine zmrig</code></pre>
+      <p class="hint">Không chạy script từ mạng? Tải repo rồi chạy <code>sudo ./oneclick.sh install …</code>. Toàn bộ mã nằm trong repo, không tải binary lạ.</p>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section id="builder" class="builder">
+      <h2>Tạo lệnh cài đặt</h2>
+      <p class="muted">
+        Chọn vài ô bên dưới. Lệnh được ghép đúng như installer sẽ nhận, không có bước ẩn nào thêm:
+        dán vào terminal, nhập mật khẩu <code>sudo</code> khi được hỏi, xong.
+      </p>
+
+      <div class="card">
+        <div class="row">
+          <div class="field" style="flex:2 1 420px">
+            <label for="b-wallet">Địa chỉ ví Monero</label>
+            <input id="b-wallet" type="text" spellcheck="false" autocomplete="off" placeholder="4… hoặc 8… (95 ký tự)">
+            <p class="hint" id="b-wallet-hint">Ví chính bắt đầu bằng <code>4</code>, subaddress bằng <code>8</code>. Không bao giờ nhập seed hay private key.</p>
+          </div>
+          <div class="field">
+            <label for="b-rig">Tên máy <span class="muted">(tuỳ chọn)</span></label>
+            <input id="b-rig" type="text" spellcheck="false" autocomplete="off" placeholder="vps-hn-01" maxlength="32">
+            <p class="hint">Chỉ để phân biệt các máy trên pool.</p>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:10px">
+          <div class="field">
+            <label for="b-engine">Engine</label>
+            <select id="b-engine">
+              <option value="zmrig">zmrig — RandomX, 0% phí dev</option>
+              <option value="xmrig">xmrig — C++, mọi thuật toán</option>
+            </select>
+          </div>
+          <div class="field" style="flex:1 1 260px">
+            <label for="b-pool">Pool</label>
+            <select id="b-pool">
+              <option value="moneroocean">MoneroOcean — gulf.moneroocean.stream:10001</option>
+              <option value="supportxmr">SupportXMR — pool.supportxmr.com:3333</option>
+              <option value="ocean">Ocean Pool (tự dựng, wss)</option>
+              <option value="custom">Khác — tôi tự nhập host</option>
+            </select>
+          </div>
+          <div class="field" id="b-host-field" hidden style="flex:1 1 260px">
+            <label for="b-host">host:port của pool</label>
+            <input id="b-host" type="text" spellcheck="false" autocomplete="off" placeholder="pool.example.com:3333">
+          </div>
+          <div class="field" id="b-wspath-field" hidden style="flex:0 1 170px">
+            <label for="b-wspath">Đường dẫn WebSocket</label>
+            <input id="b-wspath" type="text" spellcheck="false" autocomplete="off" value="/stratum">
+          </div>
+          <div class="field" style="flex:0 1 150px">
+            <label for="b-cpu">CPU tối đa (%)</label>
+            <input id="b-cpu" type="number" min="10" max="100" step="5" value="100" inputmode="numeric">
+          </div>
+        </div>
+
+        <fieldset class="checks" style="margin-top:6px">
+          <legend>Tuỳ chọn</legend>
+          <label><input type="checkbox" id="b-cloudflare"> <span>Mạng chỉ mở 443 / sau CDN</span> <code>--cloudflare</code></label>
+          <label><input type="checkbox" id="b-proxy"> <span>Đi qua proxy HTTP/SOCKS5</span> <input id="b-proxy-url" type="text" spellcheck="false" placeholder="socks5://127.0.0.1:9050" hidden></label>
+          <label><input type="checkbox" id="b-msr"> <span>Tắt MSR cho VPS/container không cho ghi</span> <code>--no-msr</code></label>
+          <label><input type="checkbox" id="b-nicehash"> <span>Pool thuê hash / NiceHash</span> <code>--nicehash</code></label>
+          <label><input type="checkbox" id="b-notune"> <span>Không chỉnh hệ thống, chỉ cài miner</span> <code>--no-tune</code></label>
+          <label><input type="checkbox" id="b-force"> <span>Ghi đè config đang có</span> <code>--force</code></label>
+          <label><input type="checkbox" id="b-clone"> <span>Tôi đã clone repo và chạy từ thư mục đó</span></label>
+        </fieldset>
+
+        <div class="row" style="align-items:center; margin-top:14px">
+          <button class="btn primary" type="button" id="b-copy">Copy lệnh</button>
+          <button class="btn small" type="button" id="b-reset">Về mặc định</button>
+          <span class="status" id="b-status" role="status" aria-live="polite"></span>
+        </div>
+
+        <pre style="margin-top:10px"><code id="b-output">…</code></pre>
+        <p class="hint" id="b-note">Địa chỉ ví chỉ được đưa vào lệnh và file cấu hình trên máy bạn.</p>
+
+        <details class="help" style="margin-top:14px">
+          <summary>Lệnh này làm gì, theo thứ tự</summary>
+          <ol class="small muted" style="margin:10px 0 0 18px; padding:0">
+            <li>Cài dependency (g++, make, git, curl) nếu thiếu.</li>
+            <li>Clone repo, build engine RandomX và miner cho đúng CPU của máy.</li>
+            <li>Bật huge pages, THP, governor và MSR (bỏ qua nếu bạn chọn <code>--no-tune</code>).</li>
+            <li>Ghi <code>/etc/xmrig-ocean/config.json</code> với ví và pool ở trên.</li>
+            <li>Tạo service systemd, bật chạy cùng máy, chờ share đầu tiên rồi in hashrate.</li>
+          </ol>
+          <p class="small muted" style="margin-top:10px">
+            Script giữ nguyên config cũ trừ khi bạn chọn <code>--force</code>, nên chạy lại nhiều lần là an toàn.
+            Toàn bộ mã nằm trong repo; không có binary tải sẵn.
+          </p>
+        </details>
+      </div>
+    </section>
+
+    <section class="grid cols-3" aria-label="Điểm chính">
+      <div class="card">
+        <h3>0% phí developer</h3>
+        <p class="muted small">Không có code donate trong source, không có chiến lược donate trong binary, không endpoint lạ. <code>oneclick.sh verify</code> grep endpoint và khoá ví rồi in bằng chứng; miner cũng in <code>0% developer fee</code> khi khởi động.</p>
+      </div>
+      <div class="card">
+        <h3>Mạng kén chọn</h3>
+        <p class="muted small">Pool qua <code>wss://</code> trên 443, proxy HTTP/SOCKS5, <code>--connect-to</code> để đi qua dải IP cho phép, <code>--tls-ca</code> để pin chứng chỉ relay. Một cờ <code>--cloudflare</code> là đủ cho cấu hình thường gặp.</p>
+      </div>
+      <div class="card">
+        <h3>Hiệu năng đo được</h3>
+        <p class="muted small">Trên 2 vCPU: <strong>814 H/s</strong> với huge pages, <strong>634 H/s</strong> khi tắt — huge pages nhanh hơn 28%. Chế độ light chỉ <strong>76 H/s</strong>. Số liệu và cách đo nằm trong mục <a href="docs.html#benchmark">Benchmark</a>.</p>
+      </div>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section class="dash" id="dashboard">
+      <h2 style="margin-top:2.4em">Bảng tính điện năng và lợi nhuận</h2>
+      <p class="muted">
+        Dán mã <code>ZMRIG1.…</code> của từng máy. Mọi phép tính chạy trong trình duyệt của bạn —
+        mã máy không được gửi lên server nào. Dữ liệu lưu trong <code>localStorage</code>, xuất/nhập được bằng JSON.
+      </p>
+
+      <div class="card" style="margin-top:16px">
+        <div class="row" style="align-items:flex-start">
+          <div class="field" style="flex:2 1 460px">
+            <label for="rig-input">Mã máy — dán một hoặc nhiều dòng</label>
+            <textarea id="rig-input" spellcheck="false" autocomplete="off" placeholder="ZMRIG1.eyJ2IjoxLCJpZCI6InZwcy1obi0wMSIsImNwdSI6..."></textarea>
+            <p class="hint">Lấy mã: <code>zmrig --report</code> (đo 10 s rồi in một dòng). Hoặc để miner tự cập nhật file: <code>--report-file /run/zmrig.report --report-interval 60</code>.</p>
+          </div>
+          <div style="flex:0 1 220px; display:flex; flex-direction:column; gap:8px">
+            <button class="btn primary" type="button" id="add-rigs">Thêm máy</button>
+            <button class="btn small" type="button" id="sample">Dùng dữ liệu mẫu</button>
+            <label class="btn small" for="import-rigs" style="justify-content:center">Nhập JSON</label>
+            <input type="file" id="import-rigs" accept="application/json,.json" hidden>
+          </div>
+        </div>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </div>
+
+      <details class="help" style="margin-top:12px">
+        <summary>Mã máy chứa gì, và số điện lấy từ đâu?</summary>
+        <p class="small muted" style="margin-top:10px">
+          Mã là base64url của một JSON gọn: tên máy, CPU, số thread, thuật toán, hashrate 10 s / 60 s / 15 phút / cao nhất,
+          số share, thời gian chạy, công suất và nguồn đo. Không có địa chỉ ví, không có token pool.
+        </p>
+        <p class="small muted">
+          Công suất đọc từ RAPL (<code>/sys/class/powercap/intel-rapl:0/energy_uj</code>) hoặc cảm biến hwmon là
+          công suất <em>package CPU</em>, chưa gồm mainboard/quạt/PSU — bảng tính quy đổi theo hiệu suất PSU và
+          cộng điện nền. Còn số bạn truyền bằng <code>--power</code> được coi là công suất <em>đo ở ổ cắm</em>:
+          dùng nguyên giá trị, không quy đổi. Cắm ổ đo điện rồi nhập thẳng W vào cột điện là cách chính xác nhất.
+        </p>
+      </details>
+
+      <div class="card" style="margin-top:12px">
+        <div class="settings">
+          <div class="field">
+            <label for="set-price">Giá điện ($/kWh)</label>
+            <input id="set-price" type="number" min="0" step="0.001" inputmode="decimal">
+          </div>
+          <div class="field">
+            <label for="set-psu">Hiệu suất PSU (%)</label>
+            <input id="set-psu" type="number" min="1" max="100" step="1" inputmode="numeric">
+          </div>
+          <div class="field">
+            <label for="set-base">Điện nền hệ thống (W)</label>
+            <input id="set-base" type="number" min="0" step="1" inputmode="numeric">
+          </div>
+          <div class="field">
+            <label for="set-window">Cửa sổ hashrate</label>
+            <select id="set-window">
+              <option value="0">10 giây</option>
+              <option value="1">60 giây</option>
+              <option value="2">15 phút</option>
+              <option value="3">Cao nhất phiên</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="set-xmr-price">Giá XMR ($)</label>
+            <div style="display:flex; gap:6px">
+              <input id="set-xmr-price" type="number" min="0" step="0.01" inputmode="decimal">
+              <button class="btn small" type="button" id="fetch-price" title="Lấy giá XMR/USD từ CoinGecko">Lấy giá</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="set-mode">Nguồn doanh thu</label>
+            <select id="set-mode">
+              <option value="pool">Theo tỉ lệ pool (XMR/kH/s/ngày)</option>
+              <option value="network">Theo mạng Monero (hashrate mạng)</option>
+            </select>
+          </div>
+          <div class="field" id="pool-fields">
+            <label for="set-xmr-khs">XMR mỗi kH/s mỗi ngày</label>
+            <input id="set-xmr-khs" type="number" min="0" step="0.000001" inputmode="decimal">
+          </div>
+          <div id="network-fields" hidden style="display:contents">
+            <div class="field">
+              <label for="set-net-hash">Hashrate mạng (GH/s)</label>
+              <input id="set-net-hash" type="number" min="0" step="0.1" inputmode="decimal">
+            </div>
+            <div class="field">
+              <label for="set-reward">Thưởng mỗi block (XMR)</label>
+              <input id="set-reward" type="number" min="0" step="0.01" inputmode="decimal">
+            </div>
+            <div class="field">
+              <label for="set-fee">Phí pool (%)</label>
+              <input id="set-fee" type="number" min="0" max="100" step="0.1" inputmode="decimal">
+            </div>
+          </div>
+        </div>
+
+        <div class="row" style="align-items:center; gap:8px">
+          <button class="btn small" type="button" id="export-rigs">Xuất JSON</button>
+          <button class="btn small" type="button" id="share-link">Copy liên kết chia sẻ</button>
+          <button class="btn small" type="button" id="clear-rigs">Xoá tất cả</button>
+          <span class="hint" style="margin:0 0 0 auto">Dữ liệu chỉ nằm trên máy bạn.</span>
+        </div>
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat">
+          <div class="k">Tổng hashrate</div>
+          <div class="v" id="stat-hashrate">0 H/s</div>
+          <div class="u"><span id="stat-count">0</span> máy</div>
+        </div>
+        <div class="stat">
+          <div class="k">Công suất (wall)</div>
+          <div class="v" id="stat-power">0 W</div>
+          <div class="u">đã quy đổi PSU</div>
+        </div>
+        <div class="stat">
+          <div class="k">Điện mỗi ngày</div>
+          <div class="v" id="stat-kwh">0</div>
+          <div class="u">kWh</div>
+        </div>
+        <div class="stat">
+          <div class="k">Tiền điện / ngày</div>
+          <div class="v" id="stat-cost">$0</div>
+          <div class="u">theo giá đã nhập</div>
+        </div>
+        <div class="stat">
+          <div class="k">Doanh thu / ngày</div>
+          <div class="v" id="stat-revenue">$0</div>
+          <div class="u">trước điện</div>
+        </div>
+        <div class="stat" id="stat-profit-card">
+          <div class="k">Lợi nhuận / ngày</div>
+          <div class="v" id="stat-profit">$0</div>
+          <div class="u"><span id="stat-profit-month">$0</span> / tháng</div>
+        </div>
+        <div class="stat">
+          <div class="k">Hiệu suất</div>
+          <div class="v" id="stat-eff">—</div>
+          <div class="u">H/s trên mỗi W</div>
+        </div>
+      </div>
+
+      <p id="unknown-note" class="hint warnate" hidden></p>
+      <p id="break-even" class="hint"></p>
+
+      <div id="rig-empty" class="empty">
+        Chưa có máy nào. Dán mã ở trên, hoặc bấm <strong>Dùng dữ liệu mẫu</strong> để xem bảng hoạt động thế nào.
+      </div>
+
+      <div class="table-wrap" id="rig-table" hidden>
+        <table>
+          <thead>
+            <tr>
+              <th data-sort="name">Máy</th>
+              <th>Algo / chế độ</th>
+              <th class="num" data-sort="hashrate">Hashrate</th>
+              <th class="num" data-sort="power">Điện (W)</th>
+              <th class="num" data-sort="eff">H/W</th>
+              <th class="num">kWh/ngày</th>
+              <th class="num" data-sort="cost">Điện $/ngày</th>
+              <th class="num" data-sort="xmr">XMR/ngày</th>
+              <th class="num" data-sort="revenue">Doanh thu $/ngày</th>
+              <th class="num" data-sort="profit">Lợi nhuận $/ngày</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="rig-body"></tbody>
+          <tfoot id="rig-totals"><tr id="total-row"></tr></tfoot>
+        </table>
+      </div>
+
+      <p class="hint">
+        Bấm vào tiêu đề cột để sắp xếp. Ô điện ghi đè bằng số đo ổ điện; để trống thì lấy công suất trong mã.
+        Con số là ước lượng: độ khó mạng, giá coin và tỉ lệ share thay đổi liên tục.
+      </p>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section id="benchmark">
+      <h2>Số đo, không phải khẩu hiệu</h2>
+      <p class="muted">
+        Đo bằng <code>zmrig --bench</code> trên VM 2 vCPU (Xeon 2.6 GHz, 1234 huge page 2 MiB), thuật toán <code>rx/0</code>,
+        mỗi cấu hình một lần chạy. Hashrate tuyệt đối phụ thuộc host; các tỉ lệ bên dưới thì lặp lại được.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Cấu hình</th><th class="num">Hashrate</th><th class="num">So với mặc định</th><th>Ghi chú</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Mặc định (2 thread, huge pages)</td><td class="num">814 H/s</td><td class="num">100%</td><td>Chế độ fast, dataset 2 GiB</td></tr>
+            <tr><td><code>--no-huge-pages</code></td><td class="num">634 H/s</td><td class="num">78%</td><td>Mất 22–36% tuỳ host — luôn bật huge pages nếu được</td></tr>
+            <tr><td><code>--mode light</code></td><td class="num">76 H/s</td><td class="num">9%</td><td>Chỉ dùng khi VPS không đủ RAM cho 2 GiB</td></tr>
+            <tr><td><code>-t 1</code></td><td class="num">408 H/s</td><td class="num">50%</td><td>Scale tuyến tính theo thread trên máy này</td></tr>
+            <tr><td><code>--scratchpad-prefetch=0|2</code></td><td class="num">823 H/s</td><td class="num">101%</td><td>Chênh trong nhiễu đo; để mặc định</td></tr>
+            <tr><td><code>--no-affinity</code></td><td class="num">814 H/s</td><td class="num">100%</td><td>Không khác biệt trên 2 vCPU</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">
+        Cùng máy đó ở phiên đo khác (host ít tải hơn) đạt 1008–1103 H/s với cùng binary — vì vậy hãy so sánh
+        <em>tương đối</em> giữa các cấu hình trên chính máy bạn, đừng so số tuyệt đối với bảng này.
+        Chi tiết cách đo: <a href="docs.html#benchmark">tài liệu / Benchmark</a>.
+      </p>
+    </section>
+
+    <section>
+      <h2>Ba bước để có số thật</h2>
+      <div class="grid cols-3">
+        <div class="card">
+          <h3><span class="step-num">1</span>Cài</h3>
+          <p class="small muted">Chạy <code>oneclick.sh install</code> với ví và pool. Script kiểm tra huge pages, viết <code>config.json</code>, tạo systemd unit và bật dịch vụ.</p>
+        </div>
+        <div class="card">
+          <h3><span class="step-num">2</span>Đo</h3>
+          <p class="small muted"><code>zmrig --report --power 120</code> trả về một dòng mã: hashrate ổn định, CPU, công suất, số share. Thêm <code>--report-file</code> để miner tự cập nhật mỗi phút.</p>
+        </div>
+        <div class="card">
+          <h3><span class="step-num">3</span>Tính</h3>
+          <p class="small muted">Dán mã vào bảng tính phía trên, nhập giá điện thật. Xem cột lợi nhuận và H/W để biết máy nào nên giữ, máy nào nên tắt.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="ung-ho">
+      <h2>Ủng hộ dự án</h2>
+      <p class="muted">
+        Miner không lấy phí, nên không cần ủng hộ gì cả. Ai vẫn muốn gửi thì chỉ có một địa chỉ,
+        và nó nằm ngay dưới đây — không flag nào, khoá config nào hay service nào đọc tới nó.
+      </p>
+
+      <div class="card donate">
+        <div class="qr">
+          <img src="assets/donate-monero.png" width="168" height="168" alt="QR địa chỉ Monero 46SQLW7D…n6ysb5tJ">
+        </div>
+        <div class="body">
+          <pre><code>46SQLW7DXaq6GJaQbHUFMAhd1VYpfQFJQ2gfZo9TCB8bf9vnf1MUwAD2Fwj6KMsY4RU3oKA3x6hByg8BKg7FfMWn6ysb5tJ</code></pre>
+          <p class="hint">Monero (XMR) mạng chính · địa chỉ chuẩn 95 ký tự · network byte 18 · checksum base58 hợp lệ.</p>
+
+          <ul class="small muted">
+            <li><strong>Cùng ví với phí 1% của pool.</strong> <code>pool/src/operator.js</code> giải mã ra đúng địa chỉ này; một ví, một sổ cái.</li>
+            <li><strong>Donate không mua gì.</strong> Không bản build nhanh hơn, không ưu tiên hỗ trợ, không badge, không thuê bao.</li>
+            <li><strong>Chỉ chuỗi này là thật.</strong> Địa chỉ trong fork, issue, video hay tin nhắn riêng đều không phải của dự án. Kiểm tra: bắt đầu <code>46SQLW7D</code>, kết thúc <code>n6ysb5tJ</code>.</li>
+            <li><strong>Không muốn gửi tiền?</strong> Đào qua pool, gửi một phép đo trước/sau, hoặc mở issue kèm output đầy đủ — ba việc đó có giá trị hơn.</li>
+          </ul>
+
+          <p class="hint">
+            Công thức kiểm tra checksum, mã QR và chính sách đầy đủ:
+            <a href="https://github.com/NggKhaiz/ZMRIG/blob/arena/918a7f95-xmrig-ocean/doc/DONATE.md" target="_blank" rel="noreferrer">doc/DONATE.md</a>.
+          </p>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>zmrig · XMRig Ocean 6.26.0-mo9 · 0% phí developer</span>
+    <span>
+      <a href="docs.html">Tài liệu</a> ·
+      <a href="https://github.com/NggKhaiz/ZMRIG" target="_blank" rel="noreferrer">Mã nguồn</a> ·
+      <a href="#ung-ho">Ủng hộ</a> ·
+      <a href="docs.html#loi-thuong-gap">Xử lý sự cố</a>
+    </span>
+  </div>
+</footer>
+
+<script src="assets/site.js"></script>
+<script src="assets/builder.js"></script>
+<script src="assets/rig.js"></script>
+<script src="assets/dash.js"></script>
+</body>
+</html>

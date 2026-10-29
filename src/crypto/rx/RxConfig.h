@@ -79,7 +79,7 @@ public:
     uint32_t threads(uint32_t limit = 100) const;
 
     inline int initDatasetAVX2() const  { return m_initDatasetAVX2; }
-    inline bool isOneGbPages() const    { return m_oneGbPages; }
+    bool isOneGbPages() const;
     inline bool rdmsr() const           { return m_rdmsr; }
     inline bool wrmsr() const           { return m_wrmsr; }
     inline bool cacheQoS() const        { return m_cacheQoS; }
@@ -107,7 +107,7 @@ private:
 
     static Mode readMode(const rapidjson::Value &value);
 
-    bool m_oneGbPages     = false;
+    int m_oneGbPages      = -1;   // -1 = auto (use when reserved by the OS), 0 = off, 1 = on
     bool m_rdmsr          = true;
     int m_threads         = -1;
     int m_initDatasetAVX2 = -1;
