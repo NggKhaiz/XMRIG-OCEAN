@@ -50,7 +50,7 @@ mkdir -p "$OBJ"
 printf '%s\n' "$FLAGS_SIG" > "$OBJ/.flags"
 
 CXXFLAGS=(
-    -std=c++11 -O3 -DNDEBUG -DXMRIG_FEATURE_ASM -fno-rtti -fexceptions -pthread
+    -std=c++11 -O3 -DNDEBUG -DXMRIG_FEATURE_ASM -DXMRIG_VAES -fno-rtti -fexceptions -pthread
     -maes -Wall -Wno-strict-aliasing -Wno-class-memaccess
     -I"${ROOT}/src" -I"${ROOT}/src/3rdparty" -I"${ROOT}/src/crypto/randomx"
     -I"${HERE}/capi"
@@ -172,7 +172,17 @@ compile_one() {
         S)
             cc "${CFLAGS[@]}" -x assembler-with-cpp -c "$src" -o "$obj" ;;
         *)
-            c++ "${CXXFLAGS[@]}" -c "$src" -o "$obj" ;;
+            # The VAES-512 AES routine needs its own ISA even when the build host
+            # has none (-march=native only covers the machine doing the build).
+            # Without this the file fails to compile on a CPU without AVX-512,
+            # which made `./build.sh --portable` and older build hosts unusable.
+            # The routine is only ever called behind a runtime CPUID check.
+            case "$src" in
+                */aes_hash_vaes512.cpp)
+                    c++ "${CXXFLAGS[@]}" -mvaes -mavx512f -mavx512vl -c "$src" -o "$obj" ;;
+                *)
+                    c++ "${CXXFLAGS[@]}" -c "$src" -o "$obj" ;;
+            esac ;;
     esac
 }
 

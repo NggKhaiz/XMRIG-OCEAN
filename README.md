@@ -116,7 +116,8 @@ Xeon at 2.6 GHz with 3.9 GiB of RAM, `--mode fast`, 4000 hashes per run.
 
 | Knob | Default | Measured effect |
 | --- | --- | --- |
-| `--huge-pages` / `--no-huge-pages` | on | **+24 %** with explicit 2 MiB pages (832 vs 624–644 H/s). Transparent huge pages alone are worth nothing (≈ 4 KiB). `--check` tells you whether pages are actually reserved. |
+| `--huge-pages` / `--no-huge-pages` | on, and **reserved automatically** | **+25.0 %** measured end-to-end: 855.8 H/s with nothing reserved (what a fresh VPS does) → 1070.0 H/s once the miner reserves 1208 × 2 MiB pages itself at startup. `--no-auto-hugepages` keeps `/proc` untouched; `--check` reports the state and never writes. |
+| `-t/--threads` | one per hardware thread | **−48 %** with one thread on a 2 vCPU box (553.4 vs 1070.0 H/s); 4 threads on 2 vCPU adds nothing (1070.0). `--check` prints both numbers. |
 | `--msr` | off (on for `oneclick.sh` installs) | Prefetchers off through MSR. Needs root and bare metal; the read is refused inside a VM without MSR passthrough, and the miner says so instead of pretending. The installer writes `wrmsr`/`rdmsr` as XMRig does, so a root service gets it and restores the old values on exit; `--no-msr` turns it off for containers. |
 | `--cpu-affinity=0x3` | all cores | XMRig-style bitmask. Pinning both threads to one core in the test box halves the rate (832 → 405 H/s), which is the expected, verifiable behaviour of a real pin. |
 | `--no-affinity` | pin | Lets the scheduler move threads; measured equal to pinning on an idle box, kept for hosts with noisy neighbours. |
@@ -129,6 +130,7 @@ Xeon at 2.6 GHz with 3.9 GiB of RAM, `--mode fast`, 4000 hashes per run.
 | `--nicehash` | auto | Masks the nonce to the 24 bits a NiceHash/rental pool owns, so the top extranonce byte survives. Off unless the pool's job carries a non-zero nonce. |
 | `--user-agent=UA` | `zmrig/6.26.0-mo9` | Sent in the WebSocket upgrade; some relays and Cloudflare routes only accept known miner strings. |
 | `--donate-level=N` | — | Accepted so XMRig scripts keep working, then ignored with a log line: the developer fee is 0 %, never 1 %. |
+| *nothing below this line* | — | Prefetch mode, `--no-huge-pages-jit`, `--no-affinity`, `--randomx-init`, `--no-optimized-init` and `--priority` all measured inside ±3 % noise on the same box. They exist for hosts where they matter; do not expect a number. VAES-512 was tried and is **3.5 % slower** here — see [`doc/PERFORMANCE.md`](doc/PERFORMANCE.md). |
 
 Config file equivalents live where XMRig puts them, so an existing `config.json`
 keeps working: `randomx.mode`, `randomx.init`, `randomx.init-avx2`,
