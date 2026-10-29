@@ -49,6 +49,7 @@ protected:
 private:
     static bool isSupported();
 
+    bool m_file     = false;   // stdout is a regular file/device, no TTY handle needed
     uv_tty_t *m_tty = nullptr;
 
 #   ifdef XMRIG_OS_WIN

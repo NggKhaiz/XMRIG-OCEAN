@@ -381,7 +381,6 @@ public:
     Job job;
     mutable std::map<Algorithm::Id, double> maxHashrate;
     std::vector<IBackend *> backends;
-    String userJobId;
     Timer *timer        = nullptr;
     uint64_t ticks      = 0;
 
@@ -552,7 +551,7 @@ void xmrig::Miner::setEnabled(bool enabled)
 }
 
 
-void xmrig::Miner::setJob(const Job &job, bool donate)
+void xmrig::Miner::setJob(const Job &job)
 {
     for (IBackend *backend : d_ptr->backends) {
         backend->prepare(job);
@@ -575,29 +574,23 @@ void xmrig::Miner::setJob(const Job &job, bool donate)
 
     mutex.lock();
 
-    const uint8_t index = donate ? 1 : 0;
-    const bool same_job_index = d_ptr->job.index() == index;
-
-    d_ptr->reset = !(d_ptr->job.index() == 1 && index == 0 && d_ptr->userJobId == job.id());
+    // Fee-free build: every job belongs to the user's pool, so the job index is
+    // always 0 and there is no "switch back from donation" special case.
+    d_ptr->reset = true;
 
     // Don't reset nonce if pool sends the same hashing blob again, but with different difficulty (for example)
     if (d_ptr->job.isEqualBlob(job)) {
         d_ptr->reset = false;
     }
 
-    d_ptr->job   = job;
-    d_ptr->job.setIndex(index);
-
-    if (index == 0) {
-        d_ptr->userJobId = job.id();
-    }
+    d_ptr->job = job;
+    d_ptr->job.setIndex(0);
 
 #   ifdef XMRIG_ALGO_RANDOMX
     const bool ready = d_ptr->initRX();
 
     // Always reset nonce on RandomX dataset change
-    // Except for switching to/from donation
-    if (!ready && same_job_index) {
+    if (!ready) {
         d_ptr->reset = true;
     }
 #   else

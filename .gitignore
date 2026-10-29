@@ -7,3 +7,11 @@ scripts/deps
 /src/backend/opencl/cl/cn/cryptonight_gen.cl
 .vscode
 /.qtcreator
+/zmrig/out
+
+# pool: runtime state and audit log (money data, never in git)
+/pool/data
+/pool/worker/.wrangler
+
+# local tooling for the web tests (npm install --no-save jsdom)
+/node_modules

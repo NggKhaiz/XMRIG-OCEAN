@@ -70,7 +70,6 @@ set(HEADERS
     src/net/JobResult.h
     src/net/JobResults.h
     src/net/Network.h
-    src/net/strategies/DonateStrategy.h
     src/Summary.h
     src/version.h
    )
@@ -117,7 +116,6 @@ set(SOURCES
     src/core/Taskbar.cpp
     src/net/JobResults.cpp
     src/net/Network.cpp
-    src/net/strategies/DonateStrategy.cpp
     src/Summary.cpp
     src/xmrig.cpp
    )
@@ -217,6 +215,7 @@ add_definitions(-D__STDC_FORMAT_MACROS -DUNICODE -D_FILE_OFFSET_BITS=64)
 find_package(UV REQUIRED)
 
 include(cmake/flags.cmake)
+include(cmake/tuning.cmake)
 # MoneroOcean: CN-GPU adds fork-specific CPU and OpenCL build wiring.
 include(cmake/cn-gpu.cmake)
 # End MoneroOcean

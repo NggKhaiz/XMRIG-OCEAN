@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "saved": "2026-10-26T10:38:24.745Z",
+  "workers": {},
+  "blocks": [],
+  "payouts": [],
+  "totals": {
+    "blocks": 0,
+    "rewardAtomic": "0",
+    "feeAtomic": "0",
+    "paidAtomic": "0"
+  }
+}

@@ -28,6 +28,17 @@
 
 xmrig::ConsoleLog::ConsoleLog(const Title &title)
 {
+    // `xmrig > miner.log`, cron, systemd (non pipe) and every other redirection
+    // to a regular file used to silently discard the whole log, because a
+    // regular file is neither a TTY nor a named pipe. Handle it explicitly and
+    // write plain UTF-8 without escape sequences.
+    if (uv_guess_handle(1) == UV_FILE) {
+        Log::setColors(false);
+        m_file = true;
+
+        return;
+    }
+
     if (!isSupported()) {
         Log::setColors(false);
         return;
@@ -69,6 +80,17 @@ xmrig::ConsoleLog::~ConsoleLog()
 
 void xmrig::ConsoleLog::print(uint64_t, int, const char *line, size_t, size_t size, bool colors)
 {
+    if (m_file) {
+        if (colors) {
+            return;
+        }
+
+        fputs(line, stdout);
+        fflush(stdout);
+
+        return;
+    }
+
     if (!m_tty || Log::isColors() != colors) {
         return;
     }
