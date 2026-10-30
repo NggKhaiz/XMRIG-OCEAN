@@ -24,6 +24,10 @@ answers with the "does not contain the requested file" page.
   wizard's "after install" list. Both render perfectly, which is why nothing
   caught them — `tests/docs/pages.sh` now greps the published files for the old
   name.
+- **The documentation tab said `— zmrig`** while every other page said
+  `— ZMRIG`; the shell builds that title at runtime and nothing compared them.
+- **Two stale facts on the docs page**: the network suite was described as 22
+  cases (29), and the site was described as deployable to Cloudflare only.
 - **CSP meta tags** on all four pages. GitHub Pages ignores `web/_headers`, so
   the policy only existed for Cloudflare; without the header the deployed site
   had no CSP at all. `tests/docs/pages.sh` fails if a page gains an inline
@@ -37,7 +41,7 @@ answers with the "does not contain the requested file" page.
   binary.
 
 ### Added
-- **`tests/docs/pages.sh`** (`npm run test:pages`, 18 checks): an entry point in
+- **`tests/docs/pages.sh`** (`npm run test:pages`, 20 checks): an entry point in
   `web/`, the branch-root redirect for JavaScript and no-JS, no root-absolute
   link, every `href`/`src` (45) and every in-page `#anchor` (17) resolving, the
   docs manifest and its Markdown files, only real pages in the sitemap, CSP

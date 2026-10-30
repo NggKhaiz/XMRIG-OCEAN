@@ -1,0 +1,8 @@
+# Only relevant while GitHub Pages publishes the branch root: the site itself
+# lives in web/, so the sitemap is one level down. With "Source: GitHub
+# Actions" the artifact is web/, this file is not published, and web/robots.txt
+# answers instead.
+User-agent: *
+Allow: /
+
+Sitemap: https://nggkhaiz.github.io/ZMRIG/web/sitemap.xml

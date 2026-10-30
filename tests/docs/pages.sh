@@ -26,7 +26,7 @@ for entry in web/index.html; do
     [ -f "$entry" ] && ok "entry point exists: ${entry}" || bad "missing ${entry}"
 done
 
-for file in index.html 404.html .nojekyll web/.nojekyll; do
+for file in index.html 404.html robots.txt .nojekyll web/.nojekyll; do
     [ -f "$file" ] && ok "branch-root fallback present: ${file}" || bad "missing ${file}"
 done
 
@@ -136,6 +136,16 @@ if [ "$csp_bad" -eq 0 ]; then
     ok "every page carries a CSP meta tag and no page needs inline script"
 else
     bad "${csp_bad} CSP problem(s) above"
+fi
+
+# --- 9. the published titles agree on the product name --------------------
+# Every page ends its <title> with "— ZMRIG". The docs shell builds its title
+# at runtime from the page name, so the suffix lives in docs.js; it said
+# "— zmrig" for a while and looked like a different site.
+if grep -q 'page.title + " — ZMRIG"' web/assets/docs.js; then
+    ok "docs.js titles end in \"— ZMRIG\""
+else
+    bad 'docs.js builds titles with a different suffix than the other pages'
 fi
 
 # --- 4. the files the docs shell fetches are in the artifact --------------
