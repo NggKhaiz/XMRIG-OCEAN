@@ -227,5 +227,19 @@ else
     printf ' SKIP 404.html rewrite (node not installed)\n'
 fi
 
+# --- 8. nothing published still carries the old product name --------------
+# The 6.32.0 rename touched the CLI, the units and the docs, but two pages kept
+# saying /etc/xmrig-ocean and systemctl status xmrig-ocean for a release: both
+# render fine, so nothing failed until somebody followed the instructions. The
+# branch test that looks for the old branch name is the one allowed mention.
+stale=$(grep -rn "xmrig-ocean" web/*.html web/assets/*.js web/content 2>/dev/null \
+    | grep -v "branches.test" | head -5)
+if [ -z "$stale" ]; then
+    ok "no published page mentions the pre-6.32.0 name"
+else
+    bad "the old product name is still published:"
+    printf '      %s\n' "$stale"
+fi
+
 printf '\n    %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

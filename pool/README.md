@@ -1,7 +1,10 @@
-# Ocean Pool
+# zmrig-pool
 
 A Monero (RandomX) mining pool in about 5 000 lines of dependency-free
-JavaScript. It speaks classic stratum over TCP and stratum over WebSocket, which
+JavaScript, part of [ZMRIG](https://github.com/NggKhaiz/ZMRIG) by
+[@nggkhaiz](https://github.com/NggKhaiz).
+
+It speaks classic stratum over TCP and stratum over WebSocket, which
 is what makes it usable from the many VPS providers that only allow outbound
 443. Every share is re-hashed by the pool before it is paid, and every block is
 written to an append-only audit log.
