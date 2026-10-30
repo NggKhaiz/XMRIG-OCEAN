@@ -58,11 +58,29 @@ curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/BETA/oneclick.sh \
   | sudo bash -s -- --wallet 4YourMoneroAddress...
 ```
 
-The installer fetches, builds, tunes the host (huge pages, THP, governor, MSR),
-installs a systemd service, verifies the 0 % fee and prints live stats. Re-running
-it is safe; the config is never overwritten without `--force`.
+That one command is the whole install: it fetches, builds, tunes the host (huge
+pages, THP, governor, MSR), measures the machine to pick the best thread count,
+installs a systemd service, verifies the 0 % fee and prints live stats.
+Re-running it is safe; the config is never overwritten without `--force`.
 
-Choose the engine, the pool, or the transport:
+**No flags beyond the wallet.** Everything else is detected:
+
+| Decision | How it is made |
+| --- | --- |
+| Engine | Pool property, not guesswork. A pool that switches algorithms to whatever pays (MoneroOcean and its clones) gets the C++ engine, which speaks 34 algorithms; a plain Monero pool can only ever send `rx/0`, where `zmrig` is both faster and fee-free. `--algo` overrides it. |
+| Profile | `free` (maximum hashrate, watts ignored) everywhere, except a laptop running on battery, which gets `watt` (maximum hashrate per watt). |
+| Threads | A short measurement after the build: each candidate runs for 8 s on the real dataset and the winner is written into `config.json`. Skip it with `--no-autotune`. |
+| Huge pages | Reserved automatically for the dataset size; falls back to THP and says so. |
+| Governor | `performance` for `free`, the power-aware default for `watt`. |
+
+See the whole plan without touching the machine — every automatic decision and
+the reason for it:
+
+```bash
+./oneclick.sh plan
+```
+
+Choose the engine, the profile, the pool, or the transport:
 
 ```bash
 # C++ frontend, all algorithms
@@ -75,6 +93,27 @@ sudo ./oneclick.sh install --wallet 4YourMoneroAddress... --engine zmrig
 sudo ./oneclick.sh install --wallet 4YourMoneroAddress... \
   --pool pool.example.com:443 --cloudflare --ws-path /stratum
 ```
+
+### Two profiles: free electricity, or every watt counted
+
+```bash
+sudo ./oneclick.sh install --wallet 4YourMoneroAddress... --profile free
+sudo ./oneclick.sh install --wallet 4YourMoneroAddress... --profile watt
+```
+
+`free` is the case the tool was built for: a box that is on anyway, a coffee
+shop, a lab, a school, an office PC. Every logical CPU is used, `--mode fast`,
+huge pages, `--priority 5`; watts are not a variable, so nothing is traded away.
+
+`watt` is for the opposite machine: a laptop, a metered VPS, anywhere the
+electricity bill scales with what you mine. It keeps one thread per physical
+core (SMT siblings add 5–15 % hashrate for 30–40 % more power, which is a bad
+trade), leaves a power-aware CPU governor alone, pauses when the machine drops
+to battery, and reports hashes per watt in the `ZMRIG1.` code so the trade can
+be checked instead of believed.
+
+Neither profile touches the fee: both are 0 %, both are verifiable with
+`sudo ./oneclick.sh verify`.
 
 Prefer to see the command before running it? The site builds it for you:
 **<https://nggkhaiz.github.io/ZMRIG/#builder>** — tick the options you
@@ -93,8 +132,27 @@ sudo ./oneclick.sh bench            # 180 s RandomX measurement
 sudo ./oneclick.sh report --power 95 # ZMRIG1. code for the site calculator
 sudo ./oneclick.sh verify           # prove the 0 % fee
 sudo ./oneclick.sh update           # git pull, rebuild, restart
+sudo ./oneclick.sh tune             # re-run host tuning + thread search
 sudo ./oneclick.sh config --wallet 4YourMoneroAddress... --force
 ```
+
+### Removing it again
+
+Two levels, because they answer different questions:
+
+```bash
+sudo ./oneclick.sh uninstall        # stop, disable, remove the service and binaries
+sudo ./oneclick.sh uninstall --force  # ... and delete the config (wallet included)
+
+sudo ./oneclick.sh purge --dry-run  # list every path this tool created, with sizes
+sudo ./oneclick.sh purge            # remove all of it, including config and build cache
+```
+
+`purge` prints the exact list first and asks you to type `purge` before deleting
+anything; `--yes` skips the prompt for scripted removal, `--dry-run` never
+deletes. It returns `vm.nr_hugepages` to the kernel and does not touch a wallet,
+a pool or a file it did not create — see `tests/oneclick/purge.sh`, which runs
+the real command against a temporary tree and checks both directions.
 
 The same measurements are available from the miner itself:
 
@@ -102,6 +160,7 @@ The same measurements are available from the miner itself:
 zmrig --self-test                   # hash vectors, benchmark, memory pre-flight
 zmrig --bench 60 --mode fast        # 60 s on the real dataset
 zmrig --report --power 95           # prints ZMRIG1.<base64> in ~15 s
+zmrig --autotune=8                  # search for the best thread count (no pool needed)
 zmrig -o pool:3333 -u 4YourAddress.rig1 -t 4
 ```
 
@@ -128,15 +187,19 @@ Xeon at 2.6 GHz with 3.9 GiB of RAM, `--mode fast`, 4000 hashes per run.
 | `--scratchpad-prefetch=0..3` | 1 | Prefetch hint baked into the JIT. All four modes landed in 795–832 H/s on this box: no measurable difference, so the documented default stays. |
 | `--no-jit` | off | Interpreter only, ~6x slower. Kept for CPUs without x86-64/ARM64, never for mining. |
 | `--nicehash` | auto | Masks the nonce to the 24 bits a NiceHash/rental pool owns, so the top extranonce byte survives. Off unless the pool's job carries a non-zero nonce. |
-| `--user-agent=UA` | `zmrig/6.26.0-mo9` | Sent in the WebSocket upgrade; some relays and Cloudflare routes only accept known miner strings. |
+| `--user-agent=UA` | `zmrig/6.27.0-mo10` | Sent in the WebSocket upgrade; some relays and Cloudflare routes only accept known miner strings. |
 | `--donate-level=N` | — | Accepted so XMRig scripts keep working, then ignored with a log line: the developer fee is 0 %, never 1 %. |
 | *nothing below this line* | — | Prefetch mode, `--no-huge-pages-jit`, `--no-affinity`, `--randomx-init`, `--no-optimized-init` and `--priority` all measured inside ±3 % noise on the same box. They exist for hosts where they matter; do not expect a number. VAES-512 was tried and is **3.5 % slower** here — see [`doc/PERFORMANCE.md`](doc/PERFORMANCE.md). |
+
+| `--profile=free\|watt` | auto (`free`, or `watt` on battery) | Thread count and governor policy. `watt` keeps one thread per physical core; `free` uses every logical CPU. On this 2 vCPU box both resolve to 2 threads, because the VM's topology claims one core with SMT — the miner detects the hypervisor and trusts the logical count instead of the fiction. |
+| `--autotune[=SEC]` | off at runtime, on during install | Measures candidates on the real dataset (8 s each) and prints the winner plus `autotune-best-threads=N`. It needs no pool: it measures the machine. Reproducing the known 2× scaling (499.6 H/s at 1 thread, 999.8 at 2) is what makes it trustworthy. |
 
 Config file equivalents live where XMRig puts them, so an existing `config.json`
 keeps working: `randomx.mode`, `randomx.init`, `randomx.init-avx2`,
 `randomx.msr`, `randomx.wrmsr`, `randomx.rdmsr`,
 `randomx.scratchpad_prefetch_mode`, `cpu.affinity` (bitmask or `null`),
-`cpu.priority`, `cpu.huge-pages`, `cpu.huge-pages-jit`.
+`cpu.priority`, `cpu.huge-pages`, `cpu.huge-pages-jit`, `cpu.threads`, and the
+top-level `profile` key the installer writes (`"profile": "watt"`).
 
 Two levers are deliberately *not* shipped as flags because they cannot be
 justified here: 1 GiB pages (the kernel refuses to reserve one when the box is
@@ -262,6 +325,10 @@ any rewrite. See [`doc/BENCHMARKS.md`](doc/BENCHMARKS.md).
 ./tests/hash/check.sh                # C++ known-answer suite
 node run_tests.js --safe --build-dir build
 ./tests/oneclick/branch-switch.sh    # installer can switch branch, and fails loudly if it cannot
+./tests/oneclick/plan.sh             # the auto rules: engine from the pool, profile from the battery
+./tests/oneclick/config.sh           # what the zero-flag path writes into config.json
+./tests/oneclick/governor.sh         # free pins the CPU, watt does not
+./tests/oneclick/purge.sh            # purge removes exactly its own paths, and nothing else
 npm run test:web                     # site builder, docs renderer, address + branch guards
 npm run test:pool                    # pool unit + protocol + end-to-end (28 tests)
 ```

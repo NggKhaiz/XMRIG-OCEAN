@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const api = @import("api.zig");
+const autotune = @import("autotune.zig");
 const hugepages_mod = @import("hugepages.zig");
 const job_mod = @import("job.zig");
 const log = @import("log.zig");
@@ -12,10 +13,11 @@ const api_http = @import("api_http.zig");
 const options = @import("options.zig");
 const report = @import("report.zig");
 const stratum = @import("stratum.zig");
+const topology = @import("topology.zig");
 const verify = @import("verify.zig");
 const util = @import("util.zig");
 
-pub const version = "6.26.0-mo9";
+pub const version = "6.27.0-mo10";
 
 var running = std.atomic.Value(bool).init(true);
 
@@ -212,6 +214,16 @@ pub fn main() !void {
         // was written and then failed under systemd.
         std.process.exit(1);
     };
+
+    // `--profile` decides the thread count, so it is resolved before anything
+    // reads `opts.threads` (`--check` included: the summary must not lie).
+    const profile = resolveProfile(&opts, &log.global);
+
+    if (opts.autotune) {
+        try runAutotune(allocator, &opts, profile, &log.global);
+
+        return;
+    }
 
     if (opts.check) {
         // A closed pipe (`--check | head`) is not a failure.
@@ -891,6 +903,141 @@ fn startMiner(logger: *@import("log.zig").Logger, opts: *const options.Options) 
     autoReserveHugePages(opts, logger);
 
     return miner_mod.Miner.init(logger, opts);
+}
+
+
+/// Turns `--profile` into one of the two concrete modes and applies the thread
+/// count it implies. Explicit `-t` always wins: a user who measured their own
+/// machine should not have it second-guessed.
+fn resolveProfile(opts: *options.Options, logger: *@import("log.zig").Logger) topology.Profile {
+    const logical = miner_mod.cpuCount();
+    const physical = topology.physicalCores(logical);
+    const battery = topology.batteryState();
+
+    const profile: topology.Profile = switch (opts.profile) {
+        .free => .free,
+        .watt => .watt,
+        // A laptop on battery is the only case where the machine's purpose is
+        // obvious from the hardware itself. Everything else gets max hashrate.
+        .auto => if (battery == .discharging) .watt else .free,
+    };
+
+    if (opts.profile == .auto) {
+        logger.debug("profile auto -> {s} (battery {s}, {d} physical of {d} logical cpu)", .{
+            topology.profileName(profile),
+            @tagName(battery),
+            physical,
+            logical,
+        });
+    }
+
+    if (opts.threads == null) {
+        const wanted = topology.threadsFor(profile, logical, physical);
+
+        if (wanted != miner_mod.defaultThreads(logical)) {
+            // Say it once: the difference between the L3 heuristic and the
+            // profile is exactly the thing an autotune run is meant to settle.
+            logger.info("profile {s}: {d} thread(s) of {d} logical cpu ({d} physical cores)", .{
+                topology.profileName(profile),
+                wanted,
+                logical,
+                physical,
+            });
+        }
+        opts.threads = wanted;
+    }
+
+    return profile;
+}
+
+/// `--autotune`: measure a handful of thread counts on this machine and print
+/// the winner. Runs the same code path as `--bench`, so the numbers are directly
+/// comparable with the ones in doc/PERFORMANCE.md.
+fn runAutotune(
+    allocator: std.mem.Allocator,
+    opts: *options.Options,
+    profile: topology.Profile,
+    logger: *@import("log.zig").Logger,
+) !void {
+    const logical = miner_mod.cpuCount();
+    const physical = topology.physicalCores(logical);
+
+    var list_buf: [8]usize = undefined;
+    const list = autotune.candidates(profile, logical, physical, &list_buf);
+
+    var out = std.io.getStdOut().writer();
+    try out.print("autotune: profile {s}, {d} logical cpu, {d} physical cores\n", .{
+        topology.profileName(profile), logical, physical,
+    });
+    try out.print("autotune: {d} candidate(s), {d} s of hashing each, dataset builds once per candidate\n\n", .{
+        list.len, opts.autotune_seconds,
+    });
+    try out.print("{s:>8}  {s:>12}  {s}\n", .{ "threads", "hashrate", "verdict" });
+
+    var best = autotune.Trial{ .threads = 0, .rate = 0 };
+    const margin = 0.02;
+
+    for (list) |threads| {
+        // One trial per candidate. `benchmark` builds its own dataset, so the
+        // wall clock per candidate is the dataset init (~16 s) plus the sample
+        // window; that is honest but not free, which is why the candidate list
+        // is short.
+        var trial_opts = opts.*;
+        trial_opts.threads = threads;
+        trial_opts.bench_hashes = @as(u64, threads) * 2000;
+
+        const measure = benchmark(allocator, &trial_opts, opts.autotune_seconds, 0) catch |e| {
+            try out.print("{d:>8}  {s:>12}  {s}\n", .{ threads, "-", @errorName(e) });
+            continue;
+        };
+
+        const trial = autotune.Trial{ .threads = threads, .rate = @max(measure.steady_rate, measure.rate) };
+        const better = autotune.isBetter(trial, best, margin);
+
+        var rate_buf: [32]u8 = undefined;
+        const scaled = util.scaleHashrate(trial.rate);
+
+        try out.print("{d:>8}  {s:>12}  {s}\n", .{
+            threads,
+            std.fmt.bufPrint(&rate_buf, "{d:.3} {s}", .{ scaled.value, scaled.unit }) catch "?",
+            if (better) "best so far" else if (best.threads == 0) "-" else "no gain (noise)",
+        });
+
+        if (better) best = trial;
+    }
+
+    if (best.threads == 0) {
+        try out.print("\nautotune: no candidate ran; nothing to recommend\n", .{});
+        std.process.exit(1);
+    }
+
+    var rate_buf: [32]u8 = undefined;
+    const scaled = util.scaleHashrate(best.rate);
+    const candidate_threads = miner_mod.defaultThreads(logical);
+
+    try out.print("\nbest: {d} thread(s) at {s} {s}\n", .{
+        best.threads,
+        std.fmt.bufPrint(&rate_buf, "{d:.3}", .{scaled.value}) catch "?",
+        scaled.unit,
+    });
+
+    // One machine-readable line, last in the block above it: the installer
+    // parses this instead of the prose, so re-wording the table cannot break
+    // `oneclick.sh tune`. Values are plain integers/decimals, no units.
+    try out.print("autotune-best-threads={d}\nautotune-best-rate={d:.3}\nautotune-rate-unit={s}\n", .{
+        best.threads, best.rate, scaled.unit,
+    });
+
+    // The heuristic is reported next to the winner, because the difference is
+    // the reason this command exists: it is the gap the user was mining with.
+    if (best.threads == candidate_threads) {
+        try out.print("the default heuristic already picks {d} thread(s) on this machine\n", .{candidate_threads});
+    } else {
+        try out.print("the default heuristic picks {d} thread(s): this machine was leaving hashrate on the table\n", .{candidate_threads});
+    }
+
+    try out.print("\nkeep it:\n  \"threads\": {d}\n  or on the command line: -t {d}\n", .{ best.threads, best.threads });
+    logger.debug("autotune finished", .{});
 }
 
 /// Reserve huge pages when the kernel has none, we are root and the user did

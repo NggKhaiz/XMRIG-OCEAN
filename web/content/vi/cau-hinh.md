@@ -158,6 +158,32 @@ Khoá trong `pools[]`: `url`, `user`, `pass`, `rig-id`, `algo`, `keepalive`, `tl
 -V, --version
 ```
 
+## Hai chế độ: `free` và `watt`
+
+```bash
+sudo ./oneclick.sh install --wallet YOUR_WALLET --profile free   # hashrate tối đa
+sudo ./oneclick.sh install --wallet YOUR_WALLET --profile watt   # tối đa H/W
+sudo ./oneclick.sh install --wallet YOUR_WALLET                  # = auto
+```
+
+`auto` đọc trạng thái pin: laptop đang dùng pin → `watt`, còn lại → `free`.
+
+Cùng một config, hai khoá khác nhau:
+
+```json
+{
+    "profile": "watt",
+    "cpu": {
+        "threads": 6
+    }
+}
+```
+
+`"profile"` do miner đọc lúc khởi động, nên rút sạc rồi restart service là máy tự
+chuyển sang chế độ tiết kiệm điện. `"threads"` là kết quả đo của
+`--autotune` (installer chạy một lần sau khi build); xoá khoá này là quay về
+heuristic `L3 / 2 MiB`.
+
 ## Đổi thread
 
 Mặc định là `L3 cache / 2 MiB`, không vượt quá số CPU logic. Trên VPS 2 vCPU / 54 MB L3, mặc định là 2 thread và đó cũng là mức tốt nhất — đo được 814 H/s với 2 thread và 408 H/s với 1 thread. Chỉ đặt `-t` khi:
@@ -165,6 +191,20 @@ Mặc định là `L3 cache / 2 MiB`, không vượt quá số CPU logic. Trên 
 - bạn muốn chừa CPU cho việc khác (`-t 1`);
 - VPS có nhiều vCPU nhưng L3 nhỏ (mặc định đã xử lý);
 - bạn biết mình đang làm gì với affinity.
+
+Không đoán nữa — để máy tự đo:
+
+```bash
+zmrig --autotune=8        # không cần pool, mỗi ứng viên 8 s
+#   threads     hashrate  verdict
+#         1   499.625 H/s  best so far
+#         2   999.750 H/s  best so far
+# best: 2 thread(s) at 999.750 H/s
+# autotune-best-threads=2
+```
+
+Chênh lệch dưới 2% bị coi là nhiễu, nên nó không đổi thread chỉ vì một lần đo
+may mắn.
 
 ## Kiểm tra cấu hình trước khi chạy
 

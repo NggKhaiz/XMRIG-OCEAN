@@ -8,6 +8,10 @@
 #   sudo ./oneclick.sh --wallet 4... --yes  # fully unattended
 #   sudo ./oneclick.sh --wallet 4... --engine zmrig --cloudflare --ws-path /pool
 #                                          # mine through a CDN / HTTPS-only egress
+#   sudo ./oneclick.sh --wallet 4... --profile watt
+#                                          # max hashrate per watt (laptop, metered VPS)
+#   ./oneclick.sh plan                     # every automatic decision, and why
+#   sudo ./oneclick.sh purge --dry-run     # list what this tool installed, delete nothing
 #   ./oneclick.sh status                   # is it mining? at what hashrate?
 #   ./oneclick.sh bench                    # reproducible hashrate measurement
 #   ./oneclick.sh report                   # machine report code for the web dashboard
@@ -44,8 +48,11 @@ PREFIX="${MINER_PREFIX:-/usr/local}"
 CONFIG_DIR="${MINER_CONFIG_DIR:-/etc/xmrig-ocean}"
 STATE_DIR="${MINER_STATE_DIR:-/var/lib/xmrig-ocean}"
 SERVICE_NAME="xmrig-ocean"
-SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-TUNE_SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}-tune.service"
+# Overridable so the purge safety test can run against a temporary tree
+# instead of the real /etc (a destructive command needs a test that runs it).
+SERVICE_DIR="${MINER_SERVICE_DIR:-/etc/systemd/system}"
+SERVICE_FILE="${SERVICE_DIR}/${SERVICE_NAME}.service"
+TUNE_SERVICE_FILE="${SERVICE_DIR}/${SERVICE_NAME}-tune.service"
 
 BUILD_DIR_DEFAULT="${MINER_BUILD_DIR:-${PREFIX}/src/xmrig-ocean-build}"
 WALLET=""
@@ -53,7 +60,11 @@ POOL="${MINER_POOL:-gulf.moneroocean.stream:10001}"
 POOL_PASS="${MINER_PASS:-x}"
 RIG_ID=""
 ALGO=""
-ENGINE="${MINER_ENGINE:-xmrig}"
+# "auto" resolves in resolve_engine(): the pool decides. A pool that switches
+# algorithms to whatever pays best (MoneroOcean and its clones) needs the C++
+# engine, which speaks 34 algorithms; a plain Monero pool can only ever send
+# rx/0, and there zmrig is both faster and fee-free.
+ENGINE="${MINER_ENGINE:-auto}"
 # Set when the engine was named by the user, so a stale install marker does not
 # silently override the choice.
 ENGINE_EXPLICIT="${MINER_ENGINE:+1}"
@@ -74,6 +85,10 @@ NET_KEEPALIVE_INTERVAL=""
 # MSR / NiceHash / affinity for the zmrig engine. "auto" keeps the XMRig
 # default (write the preset, restore on exit); "off" leaves the registers be.
 MSR_MODE="auto"
+# --profile: what this machine is for. "auto" reads the hardware (a laptop on
+# battery becomes "watt", everything else "free"), so a plain install needs no
+# flags at all.
+PROFILE="${MINER_PROFILE:-auto}"
 CPU_AFFINITY=""
 NICEHASH=0
 # Machine report for the web dashboard (zmrig only): a small file the miner
@@ -94,6 +109,13 @@ DO_SERVICE=1
 DO_BUILD=1
 ALL_BACKENDS=0
 NO_COLOR=0
+PURGE_DRY_RUN=0
+# Run a short thread search after install and bake the winner into config.json.
+# "auto" means: yes for zmrig (it has the command), no for the C++ engine (its
+# thread heuristic is already the best known for its 34 algorithms).
+AUTOTUNE="${MINER_AUTOTUNE:-auto}"
+AUTOTUNE_SECONDS="${MINER_AUTOTUNE_SECONDS:-8}"
+AUTOTUNE_THREADS="${MINER_AUTOTUNE_THREADS:-}"
 
 # ---------------------------------------------------------------------------
 # output helpers
@@ -132,8 +154,16 @@ Options
   --pool HOST:PORT       pool endpoint            (default: gulf.moneroocean.stream:10001)
   --pass VALUE           pool password            (default: x)
   --rig-id NAME          rig identifier shown on the pool dashboard
+  --profile NAME         auto | free | watt. Default auto: free (max hashrate,
+                         electricity is free) everywhere except a laptop on
+                         battery, which gets watt (max hashrate per watt).
+  --autotune[=SEC]       search for the best thread count after install
+                         (default: on for zmrig, 8 s per candidate)
+  --no-autotune          keep the built-in thread heuristic
   --algo NAME            force one algorithm instead of pool auto-selection
-  --engine NAME          xmrig (default, all algorithms) or zmrig (Zig rewrite, rx/* only)
+  --engine NAME          auto (default) | xmrig (all algorithms) | zmrig (Zig, rx/*).
+                         auto reads the pool: switching pools need every algorithm,
+                         RandomX-only pools are faster and fee-free on zmrig
   --tls                  use TLS for the pool connection
   --cloudflare[=HOST[:PORT]]  WebSocket+TLS on 443 (works through CDNs and
                          firewalls that only allow HTTPS). Switches to the
@@ -165,6 +195,7 @@ Options
   --no-build             reuse an existing binary (implies --build-dir must be built)
   --force                regenerate the config file even if it exists
   --yes                  never ask anything
+  --dry-run              with purge: print exactly what would be removed
   --prefix DIR           install prefix          (default: /usr/local)
   --no-color             plain output
   -h, --help             this text
@@ -183,7 +214,7 @@ COMMAND=""
 ARGS=()
 while [ $# -gt 0 ]; do
     case "$1" in
-        install|build|tune|config|start|stop|restart|status|logs|bench|report|verify|update|uninstall)
+        install|build|tune|config|start|stop|restart|status|logs|bench|report|verify|update|uninstall|purge|plan)
             COMMAND="$1" ;;
         --wallet)        WALLET="${2:?}"; shift ;;
         --wallet=*)      WALLET="${1#*=}" ;;
@@ -195,6 +226,12 @@ while [ $# -gt 0 ]; do
         --rig-id=*)      RIG_ID="${1#*=}" ;;
         --algo)          ALGO="${2:?}"; shift ;;
         --algo=*)        ALGO="${1#*=}" ;;
+        --dry-run)       PURGE_DRY_RUN=1 ;;
+        --autotune)      AUTOTUNE=1 ;;
+        --autotune=*)    AUTOTUNE="${1#*=}" ;;
+        --no-autotune)   AUTOTUNE=0 ;;
+        --profile)       PROFILE="${2:?}"; shift ;;
+        --profile=*)     PROFILE="${1#*=}" ;;
         --engine)        ENGINE="${2:?}"; ENGINE_EXPLICIT=1; shift ;;
         --engine=*)      ENGINE="${1#*=}"; ENGINE_EXPLICIT=1 ;;
         --tls)           TLS="true" ;;
@@ -500,10 +537,53 @@ find_uv_header() {
 # ---------------------------------------------------------------------------
 # Picks the miner frontend. zmrig only speaks the RandomX family, so it always
 # pins the algorithm: advertising more than that would get jobs it cannot hash.
+# A pool that picks the most profitable coin for you needs every algorithm;
+# a plain Monero pool can only ever send rx/0. This is the whole auto rule, and
+# it is on purpose a *pool* property, not a hardware property: pinning rx/0 on
+# a switching pool would mine the one algorithm that happens not to pay today.
+pool_switches_algorithms() {
+    case "${1,,}" in
+        *moneroocean*|*ocean*|*mbench*|*minexmr-switch*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# zmrig needs x86-64 or ARM64 Linux: it links the RandomX JIT, which those two
+# architectures have (and no 32-bit build exists).
+engine_available_here() {
+    case "$(uname -m)" in
+        x86_64|amd64|aarch64|arm64) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 resolve_engine() {
     # A previous install records which frontend is in place.
     if [ -z "${ENGINE_EXPLICIT:-}" ] && [ -f "${CONFIG_DIR}/engine" ]; then
         ENGINE=$(cat "${CONFIG_DIR}/engine" 2>/dev/null || echo xmrig)
+    fi
+
+    # Zero-flag default: pick the engine from the pool and the CPU.
+    if [ "$ENGINE" = "auto" ]; then
+        if [ -n "$ALGO" ]; then
+            case "$ALGO" in
+                rx/*|rx|randomx|panthera)
+                    ENGINE="zmrig"
+                    info "auto: algo ${ALGO} is RandomX, using the zmrig engine" ;;
+                *)
+                    ENGINE="xmrig"
+                    info "auto: algo ${ALGO} is not RandomX, using the C++ engine" ;;
+            esac
+        elif ! engine_available_here; then
+            ENGINE="xmrig"
+            info "auto: no zmrig build for $(uname -m), using the C++ engine"
+        elif pool_switches_algorithms "$POOL"; then
+            ENGINE="xmrig"
+            info "auto: ${POOL%%:*} pays for several algorithms, using the C++ engine"
+        else
+            ENGINE="zmrig"
+            info "auto: ${POOL%%:*} mines RandomX only, using the zmrig engine (0% fee)"
+        fi
     fi
 
     case "$ENGINE" in
@@ -557,6 +637,10 @@ ensure_zig() {
             local zig_path
             zig_path=$(as_root "$pip" show -f ziglang 2>/dev/null | awk '/Location:/ { print $2 }')
             if [ -n "$zig_path" ] && [ -x "${zig_path}/ziglang/zig" ]; then
+                # A custom --prefix means ${BIN_DIR} may not exist yet (the
+                # installer only creates it when it installs a binary), and a
+                # symlink into a missing directory fails the whole build.
+                as_root mkdir -p "${BIN_DIR}"
                 as_root ln -sf "${zig_path}/ziglang/zig" "${BIN_DIR}/zig"
                 ZIG_BIN="${zig_path}/ziglang/zig"
                 ok "zig ${ZIG_VERSION} installed"
@@ -815,6 +899,22 @@ write_config() {
     \"power\": ${NET_POWER}"
     fi
 
+    # zmrig-only keys. `profile` is read by the miner itself (so a laptop that
+    # gets unplugged switches to the watt profile on its next start), and
+    # `threads` is the winner of the install-time search. Both are values this
+    # script generated, never user text.
+    local profile_json=""
+    local cpu_threads_json=""
+    if [ "${ENGINE:-xmrig}" = "zmrig" ]; then
+        resolve_profile_effective
+        profile_json="
+    \"profile\": \"${PROFILE_EFFECTIVE}\","
+        case "${AUTOTUNE_THREADS:-}" in
+            ''|*[!0-9]*) ;;
+            *) cpu_threads_json="        \"threads\": ${AUTOTUNE_THREADS}," ;;
+        esac
+    fi
+
     local tmp
     tmp=$(mktemp)
     cat >"$tmp" <<EOF
@@ -830,7 +930,7 @@ write_config() {
         "access-token": ${http_token},
         "restricted": true
     },
-    "autosave": true,
+    "autosave": true,${profile_json}
     "background": false,
     "colors": false,
     "title": true,
@@ -845,6 +945,7 @@ write_config() {
         "scratchpad_prefetch_mode": 1
     },
     "cpu": {
+${cpu_threads_json}
         "enabled": true,
         "huge-pages": true,
         "huge-pages-jit": true,
@@ -949,15 +1050,18 @@ EOF
 # ---------------------------------------------------------------------------
 run_tune() {
     resolve_root
+    resolve_profile_effective
     step "tuning the host (huge pages, THP, governor, MSR)"
     if [ "$DO_TUNE" != 1 ]; then
         info "skipped (--no-tune)"
         return 0
     fi
     if is_root; then
-        "${CONFIGURED_ROOT}/scripts/tune-linux.sh" || warn "tuning reported problems, continuing"
+        "${CONFIGURED_ROOT}/scripts/tune-linux.sh" --profile="${PROFILE_EFFECTIVE}" \
+            || warn "tuning reported problems, continuing"
     elif have sudo; then
-        sudo "${CONFIGURED_ROOT}/scripts/tune-linux.sh" || warn "tuning reported problems, continuing"
+        sudo "${CONFIGURED_ROOT}/scripts/tune-linux.sh" --profile="${PROFILE_EFFECTIVE}" \
+            || warn "tuning reported problems, continuing"
     else
         warn "not root, skipping host tuning"
     fi
@@ -1450,6 +1554,7 @@ cmd_install() {
         [ -x "${BUILD_DIR}/xmrig" ] || die "no binary in ${BUILD_DIR}"
     fi
 
+    maybe_autotune
     run_tune
     write_config
     install_binary
@@ -1511,11 +1616,331 @@ cmd_uninstall() {
     info "the build directory ${BUILD_DIR} was kept"
 }
 
+
+# ---------------------------------------------------------------------------
+# purge: remove everything this tool ever put on the machine
+# ---------------------------------------------------------------------------
+#
+# `uninstall` deliberately keeps the config and the build directory: re-running
+# the installer is common, and throwing away a wallet you pasted once is rude.
+# `purge` is the other half of that contract -- it removes what `uninstall`
+# leaves behind. It never guesses: `--dry-run` prints the exact list, paths and
+# sizes, and `--all` refuses to run without an explicit confirmation word when a
+# terminal is attached.
+#
+# It does not touch: your wallet, the pool, any file outside the paths below,
+# other miners, or anything in the current directory.
+
+# (PURGE_DRY_RUN is declared with the other defaults at the top: assigning it
+# here would run *after* argument parsing and silently cancel --dry-run.)
+
+# Every path this tool may have created, in removal order (service first, so a
+# restart cannot resurrect a half-deleted install).
+purge_targets() {
+    printf '%s\n' "${SERVICE_FILE}" "${TUNE_SERVICE_FILE}"
+    printf '%s\n' "${BIN_DIR}/xmrig-ocean" "${BIN_DIR}/zmrig" "${BIN_DIR}/xmrig" \
+        "${BIN_DIR}/xmrig-ocean-tune" "${BIN_DIR}/xmrig-ocean-bench" \
+        "${BIN_DIR}/xmrig-ocean-verify" "${BIN_DIR}/xmrig-ocean-report"
+    printf '%s\n' "${CONFIG_DIR}"
+    printf '%s\n' "${STATE_DIR}"
+    printf '%s\n' "${BUILD_DIR_DEFAULT}"
+    printf '%s\n' "${PREFIX}/src/xmrig-ocean"
+    printf '%s\n' /var/log/xmrig-ocean /var/log/xmrig-ocean.log
+}
+
+path_size() {
+    local path="$1"
+
+    if [ -d "$path" ]; then
+        du -sh "$path" 2>/dev/null | cut -f1
+    elif [ -f "$path" ]; then
+        du -sh "$path" 2>/dev/null | cut -f1
+    else
+        printf '%s' "-"
+    fi
+}
+
+cmd_purge() {
+    step "purge"
+
+    if [ "${PURGE_DRY_RUN}" = 1 ]; then
+        info "dry run: nothing will be removed"
+    fi
+
+    local found=0
+    local path
+
+    printf '\n    %-52s %8s  %s\n' "path" "size" "what"
+    printf '    %-52s %8s  %s\n' "----" "----" "----"
+
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        [ -e "$path" ] || continue
+
+        found=$((found + 1))
+
+        local what="install"
+        case "$path" in
+            *systemd*|*.service) what="service unit" ;;
+            */etc/*)             what="config, contains your wallet" ;;
+            */var/lib/*)         what="runtime state" ;;
+            */src/*)             what="cloned sources / build objects" ;;
+            */log/*|*.log)       what="logs" ;;
+        esac
+
+        printf '    %-52s %8s  %s\n' "$path" "$(path_size "$path")" "$what"
+    done < <(purge_targets)
+
+    if [ "$found" -eq 0 ]; then
+        printf '    %-52s %8s  %s\n' "(no install found)" "-" "nothing of this tool is on the machine"
+    fi
+
+    # Huge pages are a host-wide setting; a purge returns them to the kernel.
+    local huge_pages
+    huge_pages=$(cat /proc/sys/vm/nr_hugepages 2>/dev/null || echo 0)
+    [ "${huge_pages:-0}" -gt 0 ] 2>/dev/null && \
+        printf '    %-52s %8s  %s\n' "/proc/sys/vm/nr_hugepages (${huge_pages} pages)" "-" "host setting, reset to 0"
+
+    printf '\n'
+
+    if [ "${PURGE_DRY_RUN}" = 1 ]; then
+        info "re-run without --dry-run to remove it (add --yes for an unattended run)"
+        return 0
+    fi
+
+    if [ "$found" -eq 0 ] && [ "${huge_pages:-0}" -eq 0 ] 2>/dev/null; then
+        return 0
+    fi
+
+    if [ "$ASSUME_YES" != 1 ]; then
+        if [ -t 0 ]; then
+            local answer=""
+            printf '    This deletes the install, its config and its build cache. Type "purge" to continue: '
+            read -r answer || true
+            [ "$answer" = "purge" ] || die "aborted, nothing was removed"
+        else
+            die "refusing to purge without confirmation: pass --yes (or --dry-run to see the list)"
+        fi
+    fi
+
+    if has_systemd; then
+        as_root systemctl stop "${SERVICE_NAME}.service" "${SERVICE_NAME}-tune.service" >/dev/null 2>&1 || true
+        as_root systemctl disable "${SERVICE_NAME}.service" "${SERVICE_NAME}-tune.service" >/dev/null 2>&1 || true
+    fi
+
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        [ -e "$path" ] || continue
+        as_root rm -rf "$path"
+    done < <(purge_targets)
+
+    if has_systemd; then
+        as_root systemctl daemon-reload >/dev/null 2>&1 || true
+        as_root systemctl reset-failed >/dev/null 2>&1 || true
+    fi
+
+    if [ "${huge_pages:-0}" -gt 0 ] 2>/dev/null; then
+        as_root sh -c 'echo 0 > /proc/sys/vm/nr_hugepages' 2>/dev/null && \
+            ok "huge pages returned to the kernel (was ${huge_pages} pages)" || \
+            warn "could not reset nr_hugepages; do it with: echo 0 | sudo tee /proc/sys/vm/nr_hugepages"
+    fi
+
+    ok "purged"
+    info "your wallet was in ${CONFIG_DIR}/config.json, which is now gone; nothing else was touched"
+}
+
+
+
+# ---------------------------------------------------------------------------
+# automatic decisions (the zero-flag path)
+# ---------------------------------------------------------------------------
+#
+# Everything here answers one question with facts from the machine, so a bare
+# `sudo ./oneclick.sh` lands on the best setup without a single flag. Each
+# decision is printed with its reason -- a silent default is indistinguishable
+# from a bug.
+
+# free: every logical CPU, watts do not matter (free electricity, a shared
+#       office machine, a lab PC that is on anyway).
+# watt: one thread per physical core and no SMT-only threads, because the last
+#       few percent of hashrate costs 30-40% more power there.
+# auto: a laptop on battery gets watt, everything else gets free.
+profile_battery_state() {
+    local bat status=""
+    for bat in /sys/class/power_supply/BAT*; do
+        [ -r "${bat}/status" ] || continue
+        status=$(cat "${bat}/status" 2>/dev/null || true)
+        case "$status" in
+            Discharging) printf '%s' "discharging"; return 0 ;;
+            Charging|Full) ;;
+        esac
+    done
+    case "$status" in
+        "") printf '%s' "none" ;;
+        *)  printf '%s' "plugged" ;;
+    esac
+}
+
+resolve_profile_effective() {
+    case "$PROFILE" in
+        free|watt) PROFILE_EFFECTIVE="$PROFILE" ;;
+        auto)
+            case "$(profile_battery_state)" in
+                discharging) PROFILE_EFFECTIVE="watt" ;;
+                *)           PROFILE_EFFECTIVE="free" ;;
+            esac
+            ;;
+        *) die "--profile must be auto, free or watt (got '${PROFILE}')" ;;
+    esac
+}
+
+profile_reason() {
+    case "$PROFILE" in
+        free) printf '%s' "requested" ;;
+        watt) printf '%s' "requested" ;;
+        auto)
+            case "$(profile_battery_state)" in
+                discharging) printf '%s' "auto: on battery, watts are the limit" ;;
+                none)        printf '%s' "auto: no battery, electricity is treated as free" ;;
+                *)           printf '%s' "auto: on mains power" ;;
+            esac
+            ;;
+    esac
+}
+
+huge_page_plan() {
+    local pages
+    pages=$(cat /proc/sys/vm/nr_hugepages 2>/dev/null || echo "?")
+    if [ "$pages" = "?" ]; then
+        printf '%s' "unknown (no /proc/sys/vm/nr_hugepages)"
+    elif [ "${pages:-0}" -gt 0 ] 2>/dev/null; then
+        printf '%s' "${pages} pages of 2 MiB already reserved"
+    else
+        printf '%s' "none yet, the installer reserves what the dataset needs"
+    fi
+}
+
+autotune_wanted() {
+    case "$AUTOTUNE" in
+        0|no|off|false) return 1 ;;
+        auto) [ "$ENGINE" = "zmrig" ] ;;
+        *) return 0 ;;
+    esac
+}
+
+autotune_plan() {
+    if [ "$ENGINE" != "zmrig" ]; then
+        printf '%s' "not applicable (zmrig only); the C++ engine keeps its own heuristic"
+    elif autotune_wanted; then
+        printf '%s' "${AUTOTUNE_SECONDS} s per candidate, winner written to config.json"
+    else
+        printf '%s' "off, keeping the built-in heuristic"
+    fi
+}
+
+# Runs the search once the binary exists and bakes the winner into
+# AUTOTUNE_THREADS, which write_config() then writes as "threads". Never fatal:
+# an install that cannot measure still has to install.
+maybe_autotune() {
+    AUTOTUNE_THREADS="${MINER_AUTOTUNE_THREADS:-}"
+    autotune_wanted || return 0
+
+    local bin
+    bin=$(find_binary) || { warn "no zmrig binary to measure, keeping the heuristic"; return 0; }
+
+    step "searching for the best thread count"
+    info "this takes about a minute per candidate and can be skipped with --no-autotune"
+
+    local out
+    out=$("$bin" --autotune="${AUTOTUNE_SECONDS}" 2>&1) || {
+        warn "the search did not finish, keeping the heuristic"
+        printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g' | tail -3 | sed 's/^/    /'
+        return 0
+    }
+
+    # The table itself is the interesting part; show it.
+    printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g' | grep -E '^ *[0-9]+ |^autotune|^best' | sed 's/^/    /'
+
+    AUTOTUNE_THREADS=$(printf '%s\n' "$out" | sed -n 's/^autotune-best-threads=//p' | head -1)
+
+    case "$AUTOTUNE_THREADS" in
+        ''|*[!0-9]*) warn "the search printed no winner, keeping the heuristic"; AUTOTUNE_THREADS="${MINER_AUTOTUNE_THREADS:-}" ; return 0 ;;
+    esac
+
+    ok "best thread count on this machine: ${AUTOTUNE_THREADS} (written to the config)"
+}
+
+# Writes AUTOTUNE_THREADS into an existing config.json. Used by `tune`, where
+# the config already exists; the installer instead writes it while generating
+# the file and never needs this path.
+apply_autotune_threads() {
+    [ -n "${AUTOTUNE_THREADS:-}" ] || return 0
+    [ -f "$CONFIG_FILE" ] || return 0
+
+    local tmp
+    tmp=$(mktemp)
+
+    if grep -q '"threads"' "$CONFIG_FILE" 2>/dev/null; then
+        sed -E "s/(\"threads\"[[:space:]]*:[[:space:]]*)[0-9]+/\1${AUTOTUNE_THREADS}/" \
+            "$CONFIG_FILE" >"$tmp"
+    else
+        # Insert right after the cpu block opens; that is where the miner looks.
+        sed -E "0,/\"cpu\"[[:space:]]*:[[:space:]]*\{/s//\"cpu\": {\n        \"threads\": ${AUTOTUNE_THREADS},/" \
+            "$CONFIG_FILE" >"$tmp"
+    fi
+
+    if [ -s "$tmp" ] && as_root install -m 0640 "$tmp" "$CONFIG_FILE"; then
+        ok "config now pins \"threads\": ${AUTOTUNE_THREADS} (${CONFIG_FILE})"
+    else
+        warn "could not write ${CONFIG_FILE}; set \"threads\": ${AUTOTUNE_THREADS} by hand"
+    fi
+    rm -f "$tmp"
+}
+
+# ---------------------------------------------------------------------------
+# plan: what the installer is about to do, and why
+# ---------------------------------------------------------------------------
+#
+# The zero-flag path is only trustworthy if it can be inspected, so `plan`
+# resolves every automatic decision and prints it -- engine, profile, mode,
+# pool, thread search -- without touching the machine. It is also what the
+# test suite asserts against: the auto rules are shell logic, and shell logic
+# without a test is a rumour.
+cmd_plan() {
+    resolve_engine
+    resolve_profile_effective
+
+    step "plan"
+
+    local engine_note=""
+    case "$ENGINE" in
+        zmrig) engine_note="RandomX family, 0% fee" ;;
+        xmrig) engine_note="all algorithms, pool picks the coin" ;;
+    esac
+
+    printf '    %-14s %s\n' "engine" "${ENGINE}  (${engine_note})"
+    printf '    %-14s %s\n' "pool" "${POOL}"
+    printf '    %-14s %s  (%s)\n' "profile" "${PROFILE_EFFECTIVE}" "$(profile_reason)"
+    printf '    %-14s %s\n' "mode" "$( [ "$ENGINE" = zmrig ] && echo "auto (fast when RAM allows)" || echo "pool default")"
+    printf '    %-14s %s\n' "huge pages" "$(huge_page_plan)"
+    printf '    %-14s %s\n' "autotune" "$(autotune_plan)"
+    printf '    %-14s %s\n' "service" "$( [ "$DO_SERVICE" = 1 ] && echo "${SERVICE_NAME}.service (systemd)" || echo "none, run in the foreground")"
+    printf '\n'
+
+    info "run 'sudo ./oneclick.sh' with no other flags to apply this"
+}
+
 case "$COMMAND" in
     install)   cmd_install ;;
     build)     detect_os; ensure_deps; build_miner ;;
-    tune)      detect_os; run_tune ;;
-    config)    detect_os; resolve_root; write_config ;;
+    tune)
+        detect_os
+        resolve_engine
+        run_tune
+        maybe_autotune
+        apply_autotune_threads
+        ;;
+    config)    detect_os; resolve_root; resolve_engine; write_config ;;
     start)     resolve_engine; svc_ctl start; ok "start requested" ;;
     stop)      resolve_engine; svc_ctl stop; ok "stop requested" ;;
     restart)   resolve_engine; svc_ctl restart; ok "restart requested" ;;
@@ -1639,5 +2064,7 @@ case "$COMMAND" in
         exit "$rc"
         ;;
     uninstall) cmd_uninstall ;;
+    purge)     detect_os; cmd_purge ;;
+    plan)      detect_os; cmd_plan ;;
     *)         fail "unknown command: ${COMMAND}"; usage; exit 1 ;;
 esac

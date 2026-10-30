@@ -12,7 +12,7 @@ the ratio between configurations measured back to back.
 | L3 | 54 MB (reported), 1234 huge pages of 2 MiB reserved |
 | RAM | 3.9 GiB |
 | Kernel | Linux, `HugePages_Total: 1234` |
-| Binary | `zmrig 6.26.0-mo9`, built with `ZIG=zig ./zmrig/build.sh --jobs 2` (`-march=native`) |
+| Binary | `zmrig 6.27.0-mo10`, built with `ZIG=zig ./zmrig/build.sh --jobs 2` (`-march=native`) |
 | Algorithm | `rx/0`, mode `fast` unless stated |
 
 ## Method

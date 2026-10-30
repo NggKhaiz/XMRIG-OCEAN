@@ -11,6 +11,8 @@
 #   sudo ./scripts/tune-linux.sh                # apply the recommended preset
 #   sudo ./scripts/tune-linux.sh --dry-run      # show what would be changed
 #   sudo ./scripts/tune-linux.sh --hugepages 1G # reserve 1GB pages instead of 2MB
+#   sudo ./scripts/tune-linux.sh --profile watt # keep the CPU's power saving
+#                                               # governor (max hashrate per watt)
 #   ./scripts/tune-linux.sh --status            # read-only report (no root needed)
 #
 # Revert:
@@ -23,6 +25,11 @@ HUGE_MODE="2M"          # 2M | 1G | off
 THP_MODE="always"       # always | madvise | off
 SWAPPINESS="10"
 SET_GOVERNOR="performance"
+PROFILE="auto"
+# Overridable so the profile/gonernor logic can be tested against a fake tree
+# instead of real sysfs (a governor test must not change the test machine).
+CPU_ROOT="${CPU_ROOT:-/sys/devices/system/cpu}"
+POWER_SUPPLY_ROOT="${POWER_SUPPLY_ROOT:-/sys/class/power_supply}"
 DRY_RUN=0
 STATUS_ONLY=0
 QUIET=0
@@ -54,6 +61,8 @@ while [ $# -gt 0 ]; do
         --swappiness)     SWAPPINESS="${2:-10}"; shift ;;
         --swappiness=*)   SWAPPINESS="${1#*=}" ;;
         --no-governor)    SET_GOVERNOR="" ;;
+        --profile)        PROFILE="${2:-auto}"; shift ;;
+        --profile=*)      PROFILE="${1#*=}" ;;
         -q|--quiet)       QUIET=1 ;;
         -h|--help)        usage ;;
         *)                warn "unknown option: $1"; usage ;;
@@ -240,11 +249,63 @@ if [ -w /proc/sys/vm/compact_memory ]; then
 fi
 
 step "4. CPU governor"
-if [ -n "$SET_GOVERNOR" ] && [ -d /sys/devices/system/cpu/cpu0/cpufreq ]; then
-    for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-        [ -w "$gov" ] || continue
-        write_value "$gov" "$SET_GOVERNOR"
-    done
+
+# The profile decides this, and it is the clearest place the two profiles differ.
+#
+# `performance` pins every core to its highest frequency. That is the right
+# answer when the electricity is free: the binning-aware governor never has to
+# ramp, so a block of work never starts at a low clock.
+#
+# Under `watt` it is the wrong answer. Power grows with V^2*f, and a mining
+# thread that is stalled on memory does not need the top bin: pinning the clock
+# up spends joules on waits. The distro default (`schedutil` on most systems)
+# already tracks utilisation, so the watt profile keeps it and only reports
+# what it found.
+case "$PROFILE" in
+    auto)
+        # A laptop on battery is the case the watt profile exists for.
+        for bat in "${POWER_SUPPLY_ROOT}"/BAT*; do
+            [ -r "${bat}/status" ] || continue
+            if [ "$(cat "${bat}/status" 2>/dev/null)" = "Discharging" ]; then
+                PROFILE="watt"
+                info "on battery: using the watt profile for the governor"
+                break
+            fi
+        done
+        [ "$PROFILE" = "auto" ] && PROFILE="free"
+        ;;
+esac
+
+if [ -d "${CPU_ROOT}/cpu0/cpufreq" ]; then
+    case "$PROFILE" in
+        watt)
+            # Do not fight the firmware: leave the governor alone unless the
+            # machine is stuck on `performance`, which is the one setting that
+            # actively wastes power while waiting on memory.
+            for gov in "${CPU_ROOT}"/cpu*/cpufreq/scaling_governor; do
+                [ -w "$gov" ] || continue
+                current=$(cat "$gov" 2>/dev/null || true)
+                [ "$current" = "performance" ] || continue
+                if grep -qx schedutil "${CPU_ROOT}/cpu0/cpufreq/scaling_available_governors" 2>/dev/null; then
+                    write_value "$gov" schedutil
+                elif grep -qx powersave "${CPU_ROOT}/cpu0/cpufreq/scaling_available_governors" 2>/dev/null; then
+                    write_value "$gov" powersave
+                fi
+            done
+            info "profile watt: the CPU keeps its power-saving governor (max hashrate per watt)"
+            ;;
+        free)
+            if [ -n "$SET_GOVERNOR" ]; then
+                for gov in "${CPU_ROOT}"/cpu*/cpufreq/scaling_governor; do
+                    [ -w "$gov" ] || continue
+                    write_value "$gov" "$SET_GOVERNOR"
+                done
+            fi
+            ;;
+        *)
+            warn "unknown profile '${PROFILE}' (auto, free or watt); leaving the governor alone"
+            ;;
+    esac
 else
     info "governor control not available or disabled"
 fi

@@ -112,6 +112,7 @@ pub const Seen = struct {
     huge_pages: bool = false,
     huge_pages_jit: bool = false,
     auto_hugepages: bool = false,
+    profile: bool = false,
     jit: bool = false,
     affinity: bool = false,
     affinity_mask: bool = false,
@@ -136,6 +137,28 @@ pub const Seen = struct {
     report_interval: bool = false,
     report_id: bool = false,
     power: bool = false,
+};
+
+pub const ProfileSetting = enum {
+    auto,
+    free,
+    watt,
+
+    pub fn fromName(name: []const u8) ?ProfileSetting {
+        if (std.mem.eql(u8, name, "auto")) return .auto;
+        if (std.mem.eql(u8, name, "free")) return .free;
+        if (std.mem.eql(u8, name, "watt")) return .watt;
+
+        return null;
+    }
+
+    pub fn label(self: ProfileSetting) []const u8 {
+        return switch (self) {
+            .auto => "auto",
+            .free => "free",
+            .watt => "watt",
+        };
+    }
 };
 
 pub const Options = struct {
@@ -173,6 +196,16 @@ pub const Options = struct {
     /// root. Measured +20.7 % on a 2 vCPU host (855.7 -> 1033.0 H/s); disabled
     /// with `--no-auto-hugepages` for hosts where /proc must not change.
     auto_hugepages: bool = true,
+    /// `--profile=free|watt|auto`: what the machine is for. `free` maximises
+    /// hashrate (electricity is not the user's problem: cafe, school lab,
+    /// flat-rate VPS), `watt` maximises hashrate per watt (physical cores only,
+    /// stops on battery). `auto` resolves to `watt` on a laptop running on
+    /// battery and to `free` everywhere else.
+    profile: ProfileSetting = .auto,
+    /// `--autotune[=SECONDS]`: measure the thread count on this machine, print
+    /// the winner and the config line to keep. Never trusts the L3 heuristic.
+    autotune: bool = false,
+    autotune_seconds: u32 = 8,
     /// Use the AVX2 dataset initialiser (faster seeding, identical hashes).
     optimized_init: bool = true,
     /// Apply the RandomX MSR preset (prefetchers off). Needs root; off by
@@ -290,6 +323,8 @@ pub const usage =
     \\      --no-huge-pages      disable huge pages
     \\      --auto-hugepages     reserve the pages this mode needs when running as root (default)
     \\      --no-auto-hugepages  never reserve huge pages, even when running as root
+    \\      --profile=NAME       auto | free (max hashrate) | watt (max hashrate per watt)
+    \\      --autotune[=SEC]     measure the thread count here, print the winner, then exit
     \\      --no-huge-pages-jit  disable huge pages for the JIT code
     \\      --msr                apply the RandomX MSR preset (needs root and bare metal)
     \\      --no-msr             do not touch MSR registers (default)
@@ -576,6 +611,16 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8) ParseEr
         } else if (std.mem.eql(u8, name, "--no-msr-restore")) {
             opts.msr_restore = false;
             opts.seen.msr_restore = true;
+        } else if (std.mem.eql(u8, name, "--profile")) {
+            const value = try needValue(args, &i, inline_value);
+            opts.profile = ProfileSetting.fromName(value) orelse return error.UnknownOption;
+            opts.seen.profile = true;
+        } else if (std.mem.eql(u8, name, "--autotune")) {
+            opts.autotune = true;
+            if (inline_value) |v| {
+                opts.autotune_seconds = parseNumber(u32, v) catch return error.InvalidNumber;
+                if (opts.autotune_seconds == 0) return error.InvalidNumber;
+            }
         } else if (std.mem.eql(u8, name, "--auto-hugepages")) {
             // Only meaningful with huge pages on; --no-huge-pages wins.
             opts.auto_hugepages = opts.huge_pages;
@@ -730,7 +775,12 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8) ParseEr
 }
 
 pub fn validate(opts: *const Options) ParseError!void {
-    if (opts.help or opts.version or opts.self_test or opts.benchmark or opts.report or opts.verify_share) return;
+    // Local actions: they measure or describe the machine, so a pool and a
+    // wallet are not part of the question. `--autotune` belongs here too --
+    // it used to be rejected with NoPools, which made the one command that
+    // helps a fresh box useless on a fresh box.
+    if (opts.help or opts.version or opts.self_test or opts.benchmark or
+        opts.report or opts.verify_share or opts.autotune) return;
     _ = opts.check;
 
     if (opts.pools.items.len == 0) return error.NoPools;
@@ -964,6 +1014,11 @@ pub fn parseConfigFile(allocator: std.mem.Allocator, opts: *Options, path: []con
     if (jsonInt(u32, root, "retry-pause")) |v| opts.retry_pause = v;
     if (jsonInt(u32, root, "idle-timeout")) |v| opts.idle_timeout = v;
     if (jsonInt(u32, root, "keepalive-interval")) |v| opts.keepalive_interval = v;
+    // Written by `oneclick.sh --profile=...`. No `seen` flag: the config is
+    // read before the command line, so an explicit `--profile` still wins.
+    if (jsonString(root, "profile")) |v| {
+        opts.profile = ProfileSetting.fromName(v) orelse opts.profile;
+    }
     if (jsonBool(root, "colors")) |v| opts.colors = v;
     if (jsonBool(root, "background")) |v| opts.background = v;
     if (root.get("power")) |value| {
@@ -1311,4 +1366,70 @@ test "an explicit thread array becomes a cpu mask, -1 means anywhere" {
 
     try testing.expectEqual(@as(usize, 2), any.threads.?);
     try testing.expectEqual(@as(?u64, null), any.affinity_mask);
+}
+
+test "the installer's profile key is read from the config file" {
+    const testing = std.testing;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{ .sub_path = "config.json", .data = 
+        \\{"profile":"watt","pools":[{"url":"pool.example.com:3333","user":"w"}]}
+    });
+
+    var opts = Options{};
+    defer opts.deinit(testing.allocator);
+    const path = try tmp.dir.realpathAlloc(testing.allocator, "config.json");
+    defer testing.allocator.free(path);
+    try parseConfigFile(testing.allocator, &opts, path);
+
+    try testing.expectEqual(ProfileSetting.watt, opts.profile);
+
+    // An unknown value in the file is ignored instead of becoming an error: a
+    // newer config must not stop an older binary from mining.
+    var tmp2 = testing.tmpDir(.{});
+    defer tmp2.cleanup();
+    try tmp2.dir.writeFile(.{ .sub_path = "config.json", .data = 
+        \\{"profile":"turbo","pools":[{"url":"pool.example.com:3333","user":"w"}]}
+    });
+
+    var other = Options{};
+    defer other.deinit(testing.allocator);
+    const path2 = try tmp2.dir.realpathAlloc(testing.allocator, "config.json");
+    defer testing.allocator.free(path2);
+    try parseConfigFile(testing.allocator, &other, path2);
+
+    try testing.expectEqual(ProfileSetting.auto, other.profile);
+}
+
+test "an autotune run needs no pool: it measures the machine" {
+    const testing = std.testing;
+
+    // `--autotune` used to be rejected with NoPools, which made the one
+    // command that helps a fresh box useless on a fresh box.
+    var argv = [_][]const u8{ "--autotune=5" };
+    var opts = try parseArgs(testing.allocator, &argv);
+    defer opts.deinit(testing.allocator);
+
+    try testing.expect(opts.autotune);
+    try testing.expectEqual(@as(u32, 5), opts.autotune_seconds);
+    try validate(&opts);
+
+    // ...while a real mining run still refuses to start without a pool.
+    var plain = Options{};
+    defer plain.deinit(testing.allocator);
+    try testing.expectError(error.NoPools, validate(&plain));
+}
+
+test "--profile is parsed and a bad name is rejected" {
+    const testing = std.testing;
+
+    var argv = [_][]const u8{ "--profile=watt" };
+    var opts = try parseArgs(testing.allocator, &argv);
+    defer opts.deinit(testing.allocator);
+    try testing.expectEqual(ProfileSetting.watt, opts.profile);
+
+    var bad = [_][]const u8{ "--profile=turbo" };
+    try testing.expectError(error.UnknownOption, parseArgs(testing.allocator, &bad));
 }

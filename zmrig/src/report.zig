@@ -37,6 +37,11 @@ pub const Snapshot = struct {
     uptime_s: i64 = 0,
     power_watts: ?f64 = null,
     power_source: []const u8 = "none",
+    /// Hashes per joule-second, i.e. hashrate / watts. Sent only when a power
+    /// number exists; the dashboard reads it as `hw`. This is the number the
+    /// watt profile is actually optimising, so it belongs in the payload
+    /// instead of being recomputed (badly) by every consumer.
+    hashes_per_watt: ?f64 = null,
     pool: []const u8 = "",
     timestamp: i64 = 0,
 };
@@ -73,6 +78,21 @@ pub fn encode(buf: []u8, snap: Snapshot) ![]const u8 {
         try w.print(",\"pw\":null,\"pwsrc\":", .{});
     }
     try writeJsonString(w, snap.power_source);
+
+    // Hashes per watt, from the 60 s column (the steadiest short window). A
+    // caller can pass it explicitly; otherwise it is derived here, so a report
+    // can never claim a power figure and then omit the efficiency that follows
+    // from it.
+    const efficiency = snap.hashes_per_watt orelse blk: {
+        const watts = snap.power_watts orelse break :blk null;
+        if (watts <= 0) break :blk null;
+        break :blk snap.rates[1] / watts;
+    };
+    if (efficiency) |hw| {
+        try w.print(",\"hw\":{d:.1}", .{hw});
+    } else {
+        try w.print(",\"hw\":null", .{});
+    }
 
     try w.print(",\"pool\":", .{});
     try writeJsonString(w, snap.pool);
@@ -307,7 +327,7 @@ test "encode has the prefix and round trips through base64" {
     var buf: [1200]u8 = undefined;
     const code = try encode(&buf, .{
         .id = "rig \"one\"",
-        .version = "6.26.0-mo9",
+        .version = "6.27.0-mo10",
         .cpu = "Test CPU",
         .rates = .{ 1000, 990, 980, 1010 },
         .shares = .{ 12, 1, 0 },
@@ -328,6 +348,48 @@ test "encode has the prefix and round trips through base64" {
     try testing.expect(std.mem.indexOf(u8, json, "\"id\":\"rig \\\"one\\\"\"") != null);
     try testing.expect(std.mem.indexOf(u8, json, "\"pw\":45.5") != null);
     try testing.expect(std.mem.indexOf(u8, json, "\"shares\":[12,1,0]") != null);
+
+    // 990 H/s over 45.5 W, derived because the caller did not pass it.
+    try testing.expect(std.mem.indexOf(u8, json, "\"hw\":21.8") != null);
+}
+
+test "hashes per watt is absent, not zero, when no power is known" {
+    const testing = std.testing;
+
+    var buf: [1200]u8 = undefined;
+    const code = try encode(&buf, .{
+        .rates = .{ 1000, 990, 980, 1010 },
+        .power_watts = null,
+        .power_source = "none",
+    });
+
+    const payload = code[code_prefix.len..];
+    var decoded: [1024]u8 = undefined;
+    const decoded_len = try std.base64.url_safe_no_pad.Decoder.calcSizeForSlice(payload);
+    try std.base64.url_safe_no_pad.Decoder.decode(decoded[0..decoded_len], payload);
+    const json = decoded[0..decoded_len];
+
+    // `null`, not 0: a dashboard that divides by it must see "unknown".
+    try testing.expect(std.mem.indexOf(u8, json, "\"hw\":null") != null);
+}
+
+test "an explicit hashes-per-watt wins over the derived one" {
+    const testing = std.testing;
+
+    var buf: [1200]u8 = undefined;
+    const code = try encode(&buf, .{
+        .rates = .{ 1000, 990, 980, 1010 },
+        .power_watts = 100,
+        .power_source = "user",
+        .hashes_per_watt = 12.5,
+    });
+
+    const payload = code[code_prefix.len..];
+    var decoded: [1024]u8 = undefined;
+    const decoded_len = try std.base64.url_safe_no_pad.Decoder.calcSizeForSlice(payload);
+    try std.base64.url_safe_no_pad.Decoder.decode(decoded[0..decoded_len], payload);
+
+    try testing.expect(std.mem.indexOf(u8, decoded[0..decoded_len], "\"hw\":12.5") != null);
 }
 
 test "cpuModel never returns an empty string" {

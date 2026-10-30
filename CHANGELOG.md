@@ -1,3 +1,72 @@
+# v6.27.0-mo10 — no flags, two profiles, and a way out
+
+The installer now decides everything from the machine it is on, and the miner
+learned which of two very different jobs it is being asked to do.
+
+### New
+- **`--profile free` and `--profile watt`.** `free` is a machine whose
+  electricity costs nothing (a coffee shop, a lab, an office PC): every logical
+  CPU, `--mode fast`, huge pages, `--priority 5`, `performance` governor. `watt`
+  is the opposite machine: one thread per physical core (SMT adds 5–15 % hashrate
+  for 30–40 % more power), a power-aware governor left alone, and mining paused
+  when a laptop drops to battery. The default is `auto`, which reads the battery
+  state. New modules `zmrig/src/topology.zig` (physical cores, VM detection,
+  battery) and `zmrig/src/autotune.zig` (candidates, 2 % margin, median), 13 unit
+  tests between them.
+- **`zmrig --autotune[=SEC]`** searches for the best thread count on the real
+  dataset — one trial per candidate, 2 % margin above noise — and prints a table
+  plus a machine-readable `autotune-best-threads=N` line. It needs no pool: it
+  measures the machine. The installer runs it once after the build and bakes the
+  winner into `config.json` as `cpu.threads` (skip with `--no-autotune`).
+- **Zero-flag install.** `sudo ./oneclick.sh` with only a wallet now resolves the
+  engine from the pool (a switching pool like MoneroOcean gets the C++ engine and
+  its 34 algorithms; a RandomX-only pool gets `zmrig`, which is faster and
+  fee-free), the profile from the battery, the threads from a measurement and the
+  huge pages from the dataset size. `./oneclick.sh plan` prints every decision
+  with its reason and changes nothing.
+- **`oneclick.sh purge`** removes everything the tool installed — service units,
+  binaries, config (wallet included), state, build cache, logs — prints the exact
+  list with sizes first, asks for the word `purge` before deleting, returns
+  `vm.nr_hugepages` to the kernel, and never touches a file it did not create.
+  `--dry-run` lists without deleting; `--yes` for scripts.
+  `uninstall` keeps its old, less destructive contract.
+- **Hashes per watt in the report code.** `ZMRIG1.` grew `"hw"` (hashrate ÷
+  watts, from the 60 s column) next to `"pw"`, so the profile trade can be
+  checked on the actual machine instead of believed. `null` when no power source
+  exists — never 0.
+- **`oneclick.sh tune`** re-runs host tuning *and* the thread search, and writes
+  the result into the existing `config.json`.
+
+### Fixed
+- **The 15-minute column was an 8.5-minute average.** The sample ring held 512
+  one-second samples, so `rate(900)` silently fell back to the oldest sample it
+  had. It is 1024 now: a real 15-minute figure after 15 minutes of mining.
+- `--autotune` was rejected with `NoPools`, which made the one command that
+  helps a fresh box useless on a fresh box.
+- `oneclick.sh config --engine=zmrig` wrote `"algo": null` because it skipped
+  engine resolution; it now pins `rx/0`.
+- The installer's `performance` governor is no longer forced under the `watt`
+  profile, and `tune-linux.sh --profile` is testable against a fake sysfs tree
+  (`CPU_ROOT`, `POWER_SUPPLY_ROOT`).
+
+### Performance
+- Per-thread hash counters are padded to one 64-byte cache line each (no more
+  false sharing across neighbouring threads), and the benchmark stop condition
+  is checked every 64 hashes instead of every hash. **Both are below the noise
+  floor on the 2 vCPU test box and are reported as such** — full A/B, including
+  the negative results, in [`doc/PERFORMANCE.md`](doc/PERFORMANCE.md) §2b/§2c.
+  End-to-end after the round: 1058.9 H/s against the 1070.0 H/s baseline, i.e.
+  inside the ±2.7 % band: no regression, no claimed speedup.
+
+### Tests
+- `tests/oneclick/{plan,config,governor,purge}.sh` — 41 checks that run the real
+  commands against temporary trees: the auto rules, what lands in config.json,
+  which governor each profile gets, and a purge that must delete exactly its own
+  paths and nothing else. Wired into CI (`installer` job) and `npm run
+  test:oneclick`.
+- `zmrig/tests/cli.sh` grew 8 checks for `--profile`, `--autotune` and their
+  `--help` coverage; `report.zig` and `options.zig` grew 5 unit tests.
+
 # v6.26.0-mo9 — mining through picky networks
 
 The transport layer of `zmrig` was rewritten into a byte-stream layer

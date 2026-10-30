@@ -101,6 +101,15 @@ Hashrate không phải tất cả. Một máy chạy 814 H/s ở 95 W hiệu qu�
 cat /sys/class/powercap/intel-rapl:0/energy_uj   # hai lần, cách nhau 1 giây
 ```
 
-`zmrig --report` đọc giúp bạn và ghi nguồn đo vào mã báo cáo (`pwsrc`: `rapl`, `hwmon`, `user` hoặc `none`). Bảng tính ở trang chủ quy đổi tiếp sang điện năng và tiền.
+`zmrig --report` đọc giúp bạn và ghi nguồn đo vào mã báo cáo (`pwsrc`: `rapl`, `hwmon`, `user` hoặc `none`), kèm luôn `hw` — số hash trên mỗi watt (hashrate cột 60 s chia cho công suất). Đó chính là con số mà chế độ `watt` tối ưu, nên nó có trong mã báo cáo thay vì để mỗi người tự chia.
+
+| | hashrate | điện | H/W |
+| --- | --- | --- | --- |
+| `--profile free` | cao nhất máy làm được | cao nhất | thấp hơn |
+| `--profile watt` | thấp hơn vài % (bỏ thread SMT) | thấp hơn 30–40% ở phần SMT | cao hơn |
+
+Bảng trên chỉ đúng theo hướng, không phải con số cho máy bạn: **điện không đo được trong container của repo này** (RAPL bị chặn), nên phần watt được suy ra từ P ∝ V²·f và số liệu SMT đã công bố. Phần hashrate thì đo thật. Trên máy có RAPL, chạy hai lần `zmrig --report` với hai profile rồi so `hw` — lúc đó kết luận là của máy bạn, với giá điện của bạn.
+
+Bảng tính ở trang chủ quy đổi tiếp sang điện năng và tiền.
 
 Tiếp: [Mạng kén chọn](#mang).

@@ -202,6 +202,22 @@ why the defaults did not change.
 | `--mode=light` | 114.8 | −89 %: the fallback for 2 GiB boxes, never a choice |
 | **VAES-512 AES path enabled** (see below) | 1033 | **−3.5 %**, rejected |
 
+### The 2026-10 round: profiles, counters, sampling
+
+The same box, the same harness. Three changes were made in this round; two are
+honest zeroes and one is a correctness fix.
+
+| Change | What it is | Measured on this box |
+|---|---|---|
+| Per-thread hash counters padded to 64 B | The old array put eight `u64` counters in one cache line, so every increment invalidated the line for the other threads (false sharing) | **Below the noise floor here** (2 vCPU, ~1000 increments/s). Kept because it is free and the effect is real on ≥ 8 cores; not claimed as a speedup. |
+| Benchmark stop condition checked every 64 hashes | `totalHashes()` sums one atomic per thread, and it ran once per hash — 32 cross-line atomic loads per hash on a 32-core box, inside the benchmark that produces the numbers everyone compares | **Not measurable on 2 vCPU** (2 atomics per hash out of ~1 ms of work). Kept for the same reason: it cannot help here, it cannot hurt, and it removes a scaling trap. |
+| Ring buffer 512 → 1024 samples | One sample per second, so 512 samples was 8.5 minutes. `rate(900)` — the 15-minute column in `ZMRIG1.` — was silently an 8-minute average, which reads as a very stable hashrate that never existed | **Correctness**, not speed. The 15-minute figure is now a real 15-minute figure after 15 minutes of mining. |
+| Thread search (`--autotune`) | One measured trial per candidate on the real dataset | Reproduces the known curve: **499.625 H/s at 1 thread, 999.750 H/s at 2**. The tool is validated where it agrees with the heuristic, which is the only way to trust it where it disagrees. |
+
+A full end-to-end run after all of it: **1058.9 H/s** (`zmrig --report`), against
+the 1070.0 H/s baseline — inside the ±2.7 % noise band, i.e. no regression, and
+no speedup either. That is the honest result.
+
 ### VAES-512: the one "new instruction" that exists, and it loses
 
 RandomX ships a hand-written VAES/AVX-512 implementation of the AES hash
@@ -259,6 +275,56 @@ per physical core (−48 % if you get it wrong)**, a pool that does not drop
 shares, and a miner that does not get OOM-killed. Everything below that is noise.
 
 ---
+
+## 2c. Two profiles: free electricity, or every watt counted
+
+`--profile free` and `--profile watt` are not marketing names, they are two
+different answers to "what does the next hashrate cost".
+
+**`free`** — the machine is on anyway: a coffee shop laptop, a lab PC, an office
+desktop, a school computer. Power is not a variable, so nothing is traded away:
+every logical CPU, `--mode fast`, huge pages, `--priority 5`, `performance`
+governor.
+
+**`watt`** — the electricity bill moves with the hashrate: a metered VPS, a
+laptop on battery, a country with expensive power. Three decisions change:
+
+1. **One thread per physical core.** SMT siblings add roughly 5–15 % hashrate
+   for 30–40 % more package power: they run the same memory-bound workload on a
+   core that is already waiting on cache. Trading that away is what a
+   hashes-per-watt profile is for. On this 2 vCPU container the topology claims
+   one core with two siblings, which is fiction — the miner detects the
+   hypervisor and uses the logical count instead, because trusting the guest
+   topology halved the thread count (**−48 % hashrate**, measured) in exchange
+   for a power saving that does not exist on a shared vCPU.
+2. **No governor forcing.** `performance` pins every core to its highest
+   frequency bin. Power grows with V²·f, and a thread stalled on a 2 MiB
+   scratchpad read does not need the top bin. The distro default
+   (`schedutil`/`powersave`) already tracks utilisation, so `watt` keeps it and
+   only repairs a machine stuck on `performance`.
+3. **Pause on battery.** A laptop that drops to battery stops mining rather than
+   draining it — a watt-profile machine that empties its own battery is not
+   saving anything.
+
+Huge pages stay on in both profiles: they raise hashrate **and** lower energy per
+hash, because the win comes from fewer TLB misses and shorter stalls, not from
+more work per joule of compute. There is no trade to make.
+
+The honest limit of this section: **watts cannot be measured in this container**
+(`/sys/class/powercap/intel-rapl:0/energy_uj` is unreadable, and there is no
+hwmon energy counter). Everything above about power is derived from P ∝ V²·f and
+from published SMT efficiency, and is labelled as such — the hashrate side of
+each claim *is* measured. On a machine with RAPL the miner reports the measured
+watts and `hashes per watt` in the `ZMRIG1.` code (`"pw"`, `"hw"`), which turns
+the trade into something you can check in one run:
+
+```
+ZMRIG1.<…>"hs":[1058.9,…],"pw":96.4,"pwsrc":"rapl","hw":10.9…
+```
+
+`hw` is hashrate ÷ watts from the 60 s column. Compare it between the two
+profiles on the same machine and the profile argument is settled locally, with
+your electricity price, instead of with this table.
 
 ## 3. MSR mod ("HASHRATE WILL BE LOW")
 
