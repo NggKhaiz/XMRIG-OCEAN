@@ -1,3 +1,44 @@
+# v6.32.0 — the name on the binary
+
+The project is called ZMRIG everywhere except in the places a user actually
+looks: `--version`, the systemd unit, the path of the config file. This release
+makes the tool say its own name, and keeps every install made before it working.
+
+### Changed
+- **Version string**: `6.31.0-mo14` → `6.32.0`. The `-mo` suffix described the
+  upstream lineage, not this fork; the lineage now lives in `NOTICE`.
+- **Installed paths**: `/etc/zmrig`, `/var/lib/zmrig`, `/var/log/zmrig`,
+  `zmrig.service`, `zmrig-tune`, `zmrig-bench`, `zmrig-verify`. The C++ engine
+  installs as `/usr/local/bin/xmrig`, the Zig engine as `/usr/local/bin/zmrig`;
+  the service, the config and the logs stay under one name either way.
+- **Banners**: `--help`, `--version`, a rejected option, a rejected config and
+  the first log line all carry `ZMRIG <version> - … by @nggkhaiz`, the licence
+  and the repository URL. The engine identifies itself as `RandomX (ZMRIG)`.
+- **Installer**: `1.3`, with the author line in `--help`, the banner, the ready
+  message and both unit `Description=` fields.
+- **Packages**: npm names `zmrig`, `zmrig-proxy`, `zmrig-pool`, each with
+  `author`, `homepage`, `repository` and `bugs`.
+
+### Added
+- **`NOTICE`** — author, licence, and a table of what came from where (XMRig,
+  RandomX, MoneroOcean, Monero, libuv, hwloc, rapidjson, fmt), plus what was
+  removed from upstream and why.
+- **`tests/docs/links.sh`** (`npm run test:docs`) — every relative link and
+  every `#anchor` in the documentation resolves. 52 checks; it immediately found
+  three dead links, including one in the site's own install guide.
+- **Migration from installer 1.2** — an install made under the old name keeps
+  its config (`/etc/xmrig-ocean/config.json` is copied, mode 600, to
+  `/etc/zmrig/config.json`), its state directory is moved, the old unit is
+  disabled and removed, and `purge` removes both names.
+
+### Fixed
+- `tests/oneclick/config.sh` asserted `rx/0` while the installer writes `auto`.
+  The installer was right: a pool that switches algorithms can only use the rig
+  if it advertises the family.
+- The site footer was three different pieces of markup on four pages; it is now
+  one block in `site.css` with the version, the licence and the notice link.
+- Every page title, `og:site_name` and meta description.
+
 # v6.31.0-mo14 — a wizard instead of a wall of flags
 
 The installer was already zero-flag, but the site still made a visitor read a

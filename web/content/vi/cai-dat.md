@@ -40,7 +40,7 @@ Muốn xem trước mà không thay đổi gì trên máy:
 ./oneclick.sh plan
 ```
 
-Script làm theo thứ tự: cài phụ thuộc (build-essential, cmake, libuv, …) → build engine hash + miner → đo và chọn số thread → tune hệ thống (huge pages, THP, governor, MSR) → viết `/etc/xmrig-ocean/config.json` → tạo systemd unit `xmrig-ocean` → self-check → in hashrate.
+Script làm theo thứ tự: cài phụ thuộc (build-essential, cmake, libuv, …) → build engine hash + miner → đo và chọn số thread → tune hệ thống (huge pages, THP, governor, MSR) → viết `/etc/zmrig/config.json` → tạo systemd unit `zmrig` → self-check → in hashrate.
 
 Toàn bộ idempotent: chạy lại không tạo service trùng, không ghi đè config trừ khi có `--force`, bỏ qua bước build nếu binary mới hơn source.
 
@@ -110,7 +110,7 @@ sudo ./oneclick.sh update
 |---|---|
 | `--wallet ADDR` | địa chỉ ví hoặc login pool |
 | `--pool HOST:PORT` | endpoint pool, mặc định `gulf.moneroocean.stream:10001`. Tên ngắn cũng được: `moneroocean`, `supportxmr`, `c3pool`, `xmrpool`, `herominers`, `p2pool`, `p2pool-nano`. |
-| `--failover DANH_SÁCH` | pool dự phòng, cách nhau bằng dấu phẩy; ghi vào `config.json`, chỉ dùng khi pool đầu không tới được hoặc từ chối IP này. Xem [Chọn pool](chon-pool.html). |
+| `--failover DANH_SÁCH` | pool dự phòng, cách nhau bằng dấu phẩy; ghi vào `config.json`, chỉ dùng khi pool đầu không tới được hoặc từ chối IP này. Xem [Chọn pool](docs.html#chon-pool). |
 | `--pass VALUE` | password pool (mặc định `x`) |
 | `--rig-id NAME` | tên máy hiện trên dashboard pool và trong mã báo cáo |
 | `--algo NAME` | ghim một thuật toán; `--algo=auto` khai cả họ RandomX để pool chuyển sang coin đắt nhất (mặc định: pool tự chọn) |
@@ -125,7 +125,7 @@ sudo ./oneclick.sh update
 | `--tls-ca FILE` | tin CA riêng / pin chứng chỉ relay |
 | `--idle-timeout N` | ngắt kết nối nếu pool im lặng N giây (0 = tắt) |
 | `--power W` | công suất thực của máy, ghi vào mã báo cáo |
-| `--report-file PATH` | nơi zmrig ghi mã báo cáo (mặc định `/var/lib/xmrig-ocean/report.txt`) |
+| `--report-file PATH` | nơi zmrig ghi mã báo cáo (mặc định `/var/lib/zmrig/report.txt`) |
 | `--no-report` | không ghi file báo cáo |
 | `--http-port PORT` | cổng API giám sát (mặc định 18080) |
 | `--http-token TOKEN` | yêu cầu `Authorization: Bearer TOKEN` |
@@ -169,11 +169,11 @@ curl -s 127.0.0.1:18080/1/summary | head -c 400
 Trạng thái dịch vụ:
 
 ```bash
-systemctl status xmrig-ocean
-journalctl -u xmrig-ocean -f
+systemctl status zmrig
+journalctl -u zmrig -f
 ```
 
-Unit dùng `Restart=always`, `RestartSec=5`, `Nice=-10`, `LimitMEMLOCK=infinity`, `PrivateTmp=true`. Config chỉ root đọc được (`/etc/xmrig-ocean/config.json`, mode 600) vì có thể chứa token API.
+Unit dùng `Restart=always`, `RestartSec=5`, `Nice=-10`, `LimitMEMLOCK=infinity`, `PrivateTmp=true`. Config chỉ root đọc được (`/etc/zmrig/config.json`, mode 600) vì có thể chứa token API.
 
 ## Cập nhật và gỡ
 

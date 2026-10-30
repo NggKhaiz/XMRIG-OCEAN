@@ -1,4 +1,4 @@
-/* XMRig Ocean - compatibility shim for the standalone hash library.
+/* ZMRIG (by @nggkhaiz) - compatibility shim for the standalone hash library.
  *
  * Two symbols that RandomX needs normally live in XMRig's miner layer, which
  * we deliberately do not link:

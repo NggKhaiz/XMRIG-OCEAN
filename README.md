@@ -1,55 +1,86 @@
-# XMRig Ocean
+<div align="center">
 
-A RandomX miner with **no developer fee**, and the pool that pays for it.
+# ZMRIG
 
-[0 % fee](#the-money-model-stated-plainly) · [install in one command](#install-in-one-command) ·
-[measured tuning](#tuning-the-miner) · [documentation](#documentation) ·
-[donate (optional)](#supporting-the-work)
+**A RandomX miner with no developer fee, the pool that pays for it,<br>a proxy for the whole farm, and the site that puts it together.**
 
-This repository contains two halves of a working setup:
+by **[@nggkhaiz](https://github.com/NggKhaiz)**
+
+[![release](https://img.shields.io/badge/release-6.32.0-f2763f)](CHANGELOG.md)
+[![licence](https://img.shields.io/badge/licence-GPL--3.0-blue)](LICENSE)
+[![dev fee](https://img.shields.io/badge/developer%20fee-0%25-46b17b)](doc/ZERO_FEE.md)
+[![platform](https://img.shields.io/badge/platform-Linux%20x86--64%20%C2%B7%20macOS%20%C2%B7%20Windows-lightgrey)](#build-from-source)
+[![tests](https://img.shields.io/badge/tests-330%20checks%20%C2%B7%209%20suites-46b17b)](#tests)
+[![stars](https://img.shields.io/github/stars/NggKhaiz/ZMRIG?style=flat&color=f2763f)](https://github.com/NggKhaiz/ZMRIG/stargazers)
+[![last commit](https://img.shields.io/github/last-commit/NggKhaiz/ZMRIG)](https://github.com/NggKhaiz/ZMRIG/commits/BETA)
+
+[Install](#install-in-one-command) · [Wizard](https://nggkhaiz.github.io/ZMRIG/wizard.html) · [Documentation](#documentation) · [Performance](#performance) · [Credits](#credits) · [Donate (optional)](#support)
+
+</div>
+
+---
+
+ZMRIG is a complete Monero mining setup, not a loose collection of scripts:
 
 | Part | What it is | What it costs |
 | --- | --- | --- |
-| **Miner** — `src/`, `zmrig/`, `oneclick.sh` | XMRig `6.26.0` fork with the donation code removed, plus a complete Zig miner on the same RandomX engine | 0 % — forever, provable |
-| **Pool** — `pool/`, `deploy/`, `worker/` | Self-hosted Monero pool: stratum over TCP and WebSocket, PPLNS ledger, share verification, auditable payouts | 1 % of each block reward |
-| **Site** — `web/` | Static documentation, a four-step install wizard, a fleet calculator, and the pool table the wizard is generated from | free to host |
+| **Miner** — `src/`, `zmrig/`, `oneclick.sh` | XMRig `6.26.0` fork with every line of donation code removed, plus a complete Zig miner on the same RandomX engine | **0 %**, forever, provable |
+| **Proxy** — `proxy/` | One pool connection for a farm: extranonce per rig, per-rig difficulty, tunnels for rigs in another building | free |
+| **Pool** — `pool/`, `worker/`, `deploy/` | Self-hosted Monero pool: stratum over TCP and WebSocket, PPLNS, every share re-hashed before it is paid | 1 % of each block, and nothing else |
+| **Site** — `web/` | Install wizard, command builder, fleet calculator, and the documentation | free to host |
 
-You can use the miner with any pool. If you point it at the pool included
-here, the 1 % fee is what keeps the project alive; nothing else is charged, and
-the miner takes nothing from you either way.
+Point the miner at any pool. If you point it at the pool in this repository,
+the 1 % fee is what keeps the project alive; the miner itself takes nothing
+from you either way, and there is no account, no token and no telemetry
+anywhere in it.
 
-If you would rather just say thank you, there is one optional Monero address
-at the bottom of this page — [Supporting the work](#supporting-the-work). It is
-never read by the miner, the installer or the pool, and sending to it changes
-no hashrate and no fee.
+---
 
-## The money model, stated plainly
+## Table of contents
 
-**The miner has no fee.** The donation strategy, its time slicing, its wallet
-and its endpoint are gone from the source and from the binary. `donate-level`
-and `donate-over-proxy` are accepted and ignored. `sudo ./oneclick.sh verify`
-greps the binary for the upstream endpoints and wallets, and the miner prints
-`0% developer fee` at startup.
+[What makes it different](#what-makes-it-different) ·
+[Install](#install-in-one-command) ·
+[Prove the 0 % fee](#prove-the-0-fee) ·
+[Pools, and not getting banned](#pools-and-not-getting-banned) ·
+[Farms](#farms-one-connection) ·
+[Self-hosted pool](#self-hosted-pool) ·
+[Performance](#performance) ·
+[Repository layout](#repository-layout) ·
+[Tests](#tests) ·
+[Documentation](#documentation) ·
+[Branches](#branches-and-releases) ·
+[Credits](#credits) ·
+[Licence](#licence) ·
+[Support](#support)
 
-**The pool charges 1 % of each block reward**, taken before the PPLNS split and
-rounded *down*. It is not a hidden spread: the miner receives the number in the
-`login` reply, `/api/config` prints it, the status page shows it, and every
-block is written to an append-only audit log with the reward, the fee, each
-miner's payment and the leftover dust.
+---
 
-**Why 1 %.** It is the range the established Monero pools live in (0.6 – 1 %),
-and it has to fund the thing those pools mostly skip: the pool re-hashes every
-submitted share with `zmrig --verify-share` before paying for it. That costs the
-operator real CPU, and it is the only reason a miner can trust that nobody else
-is being paid for work they did not do. There is no registration, no coin
-switching and no donation mechanism inside the miner. The one Monero address in
-this repository is printed at the bottom of this page, is entirely optional, and
-is never touched by the miner.
+## What makes it different
 
-**Long-term fairness.** A 1 % fee with honest share accounting keeps the best
-miners, and the best miners are the only reason a pool earns anything. The
-ledger is PPLNS over one hour by share *difficulty*, so a slow connection is not
-punished and a split rig is not paid twice.
+Most miners ask you to trust a percentage. This one is built so the percentage
+can be checked, and so the things that quietly cost money are handled where
+they happen:
+
+1. **No developer fee, and a way to prove it.** The donation strategy, its
+   wallet and its endpoint are gone from the source and the binary.
+   `sudo ./oneclick.sh verify` greps the binary for the upstream endpoints and
+   wallets and prints what it found. [`doc/ZERO_FEE.md`](doc/ZERO_FEE.md).
+2. **Zero flags to start.** `--wallet <address>` is the only required input: the
+   installer detects the CPU, the RAM, the hypervisor and the battery, then picks
+   the engine, the thread count, the huge-page strategy and the CPU governor,
+   and prints the reason for each choice before it acts.
+3. **It tells you when it stops earning.** A miner whose pool rejects every
+   share looks perfectly healthy from outside. `zmrig` judges its own numbers
+   once a second and exits so the supervisor can restart it — 20 seconds of
+   lost hashrate instead of a night of zero.
+4. **A refusal is a decision, not a retry loop.** A banned IP, a wrong wallet,
+   a rate limit: each is classified, each gets its own cooldown per pool, and
+   reconnects are jittered so a rack of rebooting rigs does not arrive in the
+   same millisecond. This is the difference between one bad evening and a
+   permanent block.
+5. **One command that can be undone.** `purge --dry-run` lists every path the
+   tool created, with sizes, before anything is deleted, and a test asserts it
+   never touches a file it did not make.
 
 ## Install in one command
 
@@ -58,509 +89,344 @@ curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/BETA/oneclick.sh \
   | sudo bash -s -- --wallet 4YourMoneroAddress...
 ```
 
-That one command is the whole install: it fetches, builds, tunes the host (huge
-pages, THP, governor, MSR), measures the machine to pick the best thread count,
-installs a systemd service, verifies the 0 % fee and prints live stats.
-Re-running it is safe; the config is never overwritten without `--force`.
+That is the whole install. It fetches the sources, builds for this CPU, tunes
+the host (huge pages, THP, governor, MSR), measures the machine to find the best
+thread count, writes a systemd unit, proves the 0 % fee and prints live stats.
+Re-running is safe: an existing config is never overwritten without `--force`.
 
-Do not want to remember flags? There is a
-[wizard](https://nggkhaiz.github.io/ZMRIG/wizard.html) that asks for the wallet,
-the pool and the network, and prints the same command the installer will
-receive — including a `plan`-only variant that changes nothing. Both the wizard and the quick builder
-are generated by one function (`web/assets/command.js`) from one pool table
-(`web/assets/pools.js`), and `web/tests/pools.test.js` fails if that table ever
-disagrees with `oneclick.sh` or `doc/POOLS.md`.
+Do not want to remember flags? The **[wizard](https://nggkhaiz.github.io/ZMRIG/wizard.html)**
+asks for the wallet, the pool and the network of the machine, and prints exactly
+this command — plus a `plan` variant that resolves everything and changes
+nothing. The wizard and the home-page builder are generated by one function
+from one pool table, and `web/tests/pools.test.js` fails if that table ever
+disagrees with `oneclick.sh` or the documentation.
 
-**No flags beyond the wallet.** Everything else is detected:
-
-| Decision | How it is made |
-| --- | --- |
-| Engine | `zmrig` by default, and it negotiates. A pool that switches coins to whatever pays (MoneroOcean and its clones) gets a login that advertises the whole RandomX family, so it can move this rig between coins while the rig keeps the fee-free engine; a plain Monero pool simply answers `rx/0`. `--algo=rx/0` pins one coin, and a non-RandomX `--algo` (cn/2, …) or `--engine=xmrig` selects the C++ engine, which speaks all 34 algorithms. |
-| Profile | `free` (maximum hashrate, watts ignored) everywhere, except a laptop running on battery, which gets `watt` (maximum hashrate per watt). |
-| Threads | A short measurement after the build: each candidate runs for 8 s on the real dataset and the winner is written into `config.json`. Skip it with `--no-autotune`. |
-| Huge pages | Reserved automatically for the dataset size; falls back to THP and says so. |
-| Governor | `performance` for `free`, the power-aware default for `watt`. |
-
-See the whole plan without touching the machine — every automatic decision and
-the reason for it:
+See every automatic decision and its reason without touching the machine:
 
 ```bash
 ./oneclick.sh plan
 ```
 
-Choose the engine, the profile, the pool, or the transport:
+## Prove the 0 % fee
 
 ```bash
-# C++ frontend, all algorithms
-sudo ./oneclick.sh install --wallet 4YourMoneroAddress...
-
-# Zig frontend (RandomX), same engine, same hashrate
-sudo ./oneclick.sh install --wallet 4YourMoneroAddress... --engine zmrig
-
-# only 443/tcp out, or behind a CDN
-sudo ./oneclick.sh install --wallet 4YourMoneroAddress... \
-  --pool pool.example.com:443 --cloudflare --ws-path /stratum
+sudo ./oneclick.sh verify
 ```
 
-### Two profiles: free electricity, or every watt counted
-
-```bash
-sudo ./oneclick.sh install --wallet 4YourMoneroAddress... --profile free
-sudo ./oneclick.sh install --wallet 4YourMoneroAddress... --profile watt
+```
+==> verifying zmrig
+    OK  PASS rx/0 reference vector
+    OK  PASS pipelined hashing
+    OK  PASS full-memory dataset matches the cache
+    OK  no donation endpoints or wallets: 0% developer fee
+    OK  verified
 ```
 
-`free` is the case the tool was built for: a box that is on anyway, a coffee
-shop, a lab, a school, an office PC. Every logical CPU is used, `--mode fast`,
-huge pages, `--priority 5`; watts are not a variable, so nothing is traded away.
-
-`watt` is for the opposite machine: a laptop, a metered VPS, anywhere the
-electricity bill scales with what you mine. It keeps one thread per physical
-core (SMT siblings add 5–15 % hashrate for 30–40 % more power, which is a bad
-trade), leaves a power-aware CPU governor alone, pauses when the machine drops
-to battery, and reports hashes per watt in the `ZMRIG1.` code so the trade can
-be checked instead of believed.
-
-Neither profile touches the fee: both are 0 %, both are verifiable with
-`sudo ./oneclick.sh verify`.
-
-Prefer to see the command before running it? The site builds it for you:
-**<https://nggkhaiz.github.io/ZMRIG/wizard.html>** walks four steps,
-**<https://nggkhaiz.github.io/ZMRIG/#builder>** shows every switch at once.
-Tick, paste, and the only thing left is your `sudo` password.
-
-Every command above installs from **`BETA`**, which is the default branch and the
-only one meant for users. `master` keeps the upstream history and receives `BETA`
-at release time; `ALPHA` carries work that is not released yet. See
-[Branches](#branches) for the rules and for how to run `ALPHA` instead.
+The check greps the binary for `donate.v2.xmrig.com`, `xmrig.com/donate` and
+every wallet the upstream forks are known to use, then runs hash self-tests so
+"it found nothing" cannot mean "it looked at the wrong file". `donate-level` and
+`donate-over-proxy` are still accepted so existing scripts keep working, then
+ignored with a log line.
 
 ## Everyday commands
 
 ```bash
-sudo ./oneclick.sh status           # service, hashrate, shares, health
-sudo ./oneclick.sh bench            # 180 s RandomX measurement
-sudo ./oneclick.sh report --power 95 # ZMRIG1. code for the site calculator
-sudo ./oneclick.sh verify           # prove the 0 % fee
-sudo ./oneclick.sh update           # git pull, rebuild, restart
-sudo ./oneclick.sh tune             # re-run host tuning + thread search
-sudo ./oneclick.sh config --wallet 4YourMoneroAddress... --force
+sudo ./oneclick.sh status            # service, hashrate, shares, health
+sudo ./oneclick.sh bench             # 180 s RandomX measurement
+sudo ./oneclick.sh report --power 95 # ZMRIG1. code for the fleet calculator
+sudo ./oneclick.sh update            # git pull, rebuild, restart
+sudo ./oneclick.sh tune              # re-run host tuning + thread search
+sudo ./oneclick.sh logs              # journalctl, last 200 lines
 ```
 
-### Removing it again
-
-Two levels, because they answer different questions:
+From the miner itself:
 
 ```bash
-sudo ./oneclick.sh uninstall        # stop, disable, remove the service and binaries
-sudo ./oneclick.sh uninstall --force  # ... and delete the config (wallet included)
-
-sudo ./oneclick.sh purge --dry-run  # list every path this tool created, with sizes
-sudo ./oneclick.sh purge            # remove all of it, including config and build cache
+zmrig --self-test                    # hash vectors, benchmark, memory pre-flight
+zmrig --bench=20000                  # fixed hash count, same seed every time
+zmrig --report --power 95            # prints ZMRIG1.<base64url> in ~15 s
+zmrig --autotune=8                   # measure thread counts; no pool needed
+zmrig -o gulf.moneroocean.stream:10001 -u 4YourAddress.rig1 -a auto
 ```
 
-`purge` prints the exact list first and asks you to type `purge` before deleting
-anything; `--yes` skips the prompt for scripted removal, `--dry-run` never
-deletes. It returns `vm.nr_hugepages` to the kernel and does not touch a wallet,
-a pool or a file it did not create — see `tests/oneclick/purge.sh`, which runs
-the real command against a temporary tree and checks both directions.
+## Pools, and not getting banned
 
-The same measurements are available from the miner itself:
+Fees are a percentage; an IP that cannot connect is 100 % of the income. Both
+are handled, in that order.
+
+| Pool | Fee | Min payout | Endpoint | Why |
+| --- | ---: | ---: | --- | --- |
+| **MoneroOcean** | 0 % | 0.003 XMR | `gulf.moneroocean.stream:10001` | pays the best RandomX coin per hash, pays out in XMR |
+| SupportXMR | 0.6 % | 0.1 XMR | `pool.supportxmr.com:3333` | largest pool, lowest variance |
+| C3Pool | 0 % | 0.003 XMR | `c3pool.com:3333` | 0 %, no switching, different infrastructure |
+| HeroMiners | 0.9 % | 0.01 XMR | `monero.herominers.com:10191` | smallest payout threshold |
+| xmrpool.eu | 0.9 % | 0.07 XMR | `xmrpool.eu:3333` · `:443` TLS | 443-only networks; strictest ban policy |
+| P2Pool mini / nano | 0 % | ~0.0004 XMR | `pool.xmr.pub:3333` · `:3334` | no pool owner, block-by-block payouts |
 
 ```bash
-zmrig --self-test                   # hash vectors, benchmark, memory pre-flight
-zmrig --bench 60 --mode fast        # 60 s on the real dataset
-zmrig --report --power 95           # prints ZMRIG1.<base64> in ~15 s
-zmrig --autotune=8                  # search for the best thread count (no pool needed)
-zmrig -o pool:3333 -u 4YourAddress.rig1 -t 4
+sudo ./oneclick.sh install --wallet 4YourAddress... \
+  --pool=moneroocean --failover=supportxmr,c3pool
 ```
 
-`oneclick.sh report` refuses to run when the machine cannot hold the dataset,
-instead of being killed by the OOM killer mid-measurement.
+Short names resolve to the right host, port and TLS mode; `--failover` writes
+backup pools into `config.json`, used only when the first is unreachable or
+refuses this IP. What the miner refuses to do, because each of these is how an
+IP gets banned:
 
-## Is it still earning?
-
-That question is not the same as "is the process running", and the difference is
-where money disappears quietly. A miner whose pool rejects every share looks
-perfect from the outside: alive, connected, hashing, and earning nothing.
-
-`zmrig` now judges its own numbers once a second and reports one of five states:
-
-| State | Meaning | What happens |
-| --- | --- | --- |
-| `warming` | dataset is building, or the user paused it | nothing (a pause is a feature, not a fault) |
-| `ok` | hashrate near this session's best, shares accepted | nothing |
-| `degraded` | below 80 % of the session peak for ten minutes (throttle, noisy neighbour) | logged as a warning |
-| `stalled` | no hashes at all while the process lives | logged as an error |
-| `rejected` | shares are being sent, the pool accepts none | logged as an error |
-
-```bash
-sudo ./oneclick.sh status
-#   hashrate: 1042.6 H/s (10s/60s/15m)
-#   shares:   184/0/0 accepted
-#   health:   ok
-```
-
-`stalled` or `rejected` for **15 minutes** and the process exits with code 3,
-which `Restart=always` turns into a clean start — that is the only thing that
-actually fixes a stuck engine or a pool that has decided against you. The trade is
-explicit: 16–30 s of lost hashrate instead of hours of zero.
-
-```bash
-zmrig ... --no-health-restart        # never exit on its own
-zmrig ... --health-restart=1800      # be slower to give up (seconds)
-zmrig ... --health-warmup=300        # judge nothing for the first 5 minutes
-```
-
-The state also travels in the `ZMRIG1.` code (`"health":"ok"`), so a fleet
-dashboard can sort by machines that are running but earning nothing.
-
-## Tuning the miner
-
-Every knob below was measured with `zmrig/tests/ab.sh` (same binary, same
-machine, idle cores) — nothing here is a guess. The numbers are from a 2 vCPU
-Xeon at 2.6 GHz with 3.9 GiB of RAM, `--mode fast`, 4000 hashes per run.
-
-| Knob | Default | Measured effect |
-| --- | --- | --- |
-| `--huge-pages` / `--no-huge-pages` | on, and **reserved automatically** | **+25.0 %** measured end-to-end: 855.8 H/s with nothing reserved (what a fresh VPS does) → 1070.0 H/s once the miner reserves 1208 × 2 MiB pages itself at startup. `--no-auto-hugepages` keeps `/proc` untouched; `--check` reports the state and never writes. |
-| `-t/--threads` | one per hardware thread | **−48 %** with one thread on a 2 vCPU box (553.4 vs 1070.0 H/s); 4 threads on 2 vCPU adds nothing (1070.0). `--check` prints both numbers. |
-| `--msr` | off (on for `oneclick.sh` installs) | Prefetchers off through MSR. Needs root and bare metal; the read is refused inside a VM without MSR passthrough, and the miner says so instead of pretending. The installer writes `wrmsr`/`rdmsr` as XMRig does, so a root service gets it and restores the old values on exit; `--no-msr` turns it off for containers. |
-| thread pinning | one thread per physical core first, sockets interleaved | Not a flag: the order comes from sysfs, because "thread *i* on cpu *i*" is wrong on AMD, where SMT siblings are adjacent (cpu0/cpu1 are one core). `--check` prints the mapping. On a single-socket Intel box the two orders are identical, which is why this went unnoticed for so long; the cost of getting it wrong is 4 threads on 2 cores, i.e. about half the machine. |
-| `--cpu-affinity=0x3` | all cores | XMRig-style bitmask. Pinning both threads to one core in the test box halves the rate (832 → 405 H/s), which is the expected, verifiable behaviour of a real pin. |
-| `--no-affinity` | pin | Lets the scheduler move threads; measured equal to pinning on an idle box, kept for hosts with noisy neighbours. |
-| `--priority=N` / `--cpu-priority=N` | off | 1..5 (XMRig scale) or a raw nice value; the worker sets it per thread. |
-| `--mode=fast\|light` | auto | `fast` builds the 2 GiB dataset; `light` hashes straight from the 256 MiB cache and is ~9x slower (819 → 91 H/s). Auto picks fast when the box has ≥ 3 GiB. |
-| `--randomx-init=N` | hashing threads | Threads used to build the dataset, and nothing else: one thread instead of two took 36 s instead of 16 s to seed. |
-| `--no-optimized-init` | off | Skips the AVX2 dataset initialiser. Measured within noise (16.1 s vs 16.4 s on this Xeon), identical hashes; useful as a fallback, never a speed-up. |
-| `--scratchpad-prefetch=0..3` | 1 | Prefetch hint baked into the JIT. All four modes landed in 795–832 H/s on this box: no measurable difference, so the documented default stays. |
-| `--no-jit` | off | Interpreter only, ~6x slower. Kept for CPUs without x86-64/ARM64, never for mining. |
-| `--nicehash` | auto | Masks the nonce to the 24 bits a NiceHash/rental pool owns, so the top extranonce byte survives. Off unless the pool's job carries a non-zero nonce. |
-| `--user-agent=UA` | `zmrig/6.31.0-mo14` | Sent in the WebSocket upgrade; some relays and Cloudflare routes only accept known miner strings. |
-| `--donate-level=N` | — | Accepted so XMRig scripts keep working, then ignored with a log line: the developer fee is 0 %, never 1 %. |
-| *nothing below this line* | — | Prefetch mode, `--no-huge-pages-jit`, `--no-affinity`, `--randomx-init`, `--no-optimized-init` and `--priority` all measured inside ±3 % noise on the same box. They exist for hosts where they matter; do not expect a number. VAES-512 was tried and is **3.5 % slower** here — see [`doc/PERFORMANCE.md`](doc/PERFORMANCE.md). |
-
-| `--profile=free\|watt` | auto (`free`, or `watt` on battery) | Thread count and governor policy. `watt` keeps one thread per physical core; `free` uses every logical CPU. On this 2 vCPU box both resolve to 2 threads, because the VM's topology claims one core with SMT — the miner detects the hypervisor and trusts the logical count instead of the fiction. |
-| `--autotune[=SEC]` | off at runtime, on during install | Measures candidates on the real dataset (8 s each) and prints the winner plus `autotune-best-threads=N`. It needs no pool: it measures the machine. Reproducing the known 2× scaling (499.6 H/s at 1 thread, 999.8 at 2) is what makes it trustworthy. |
-
-Config file equivalents live where XMRig puts them, so an existing `config.json`
-keeps working: `randomx.mode`, `randomx.init`, `randomx.init-avx2`,
-`randomx.msr`, `randomx.wrmsr`, `randomx.rdmsr`,
-`randomx.scratchpad_prefetch_mode`, `cpu.affinity` (bitmask or `null`),
-`cpu.priority`, `cpu.huge-pages`, `cpu.huge-pages-jit`, `cpu.threads`, and the
-top-level `profile` key the installer writes (`"profile": "watt"`).
-
-Two levers are deliberately *not* shipped as flags because they cannot be
-justified here: 1 GiB pages (the kernel refuses to reserve one when the box is
-fragmented, and `--check` reports the reservation honestly) and MSR presets
-other than the Intel/AMD defaults in `src/crypto/rx/RxConfig.cpp`.
-
-## Mining to Ocean Pool
-
-The pool in `pool/` is meant to be deployed by whoever runs it; there is no
-central service to sign up for. A reference deployment is reachable as:
-
-```bash
-zmrig -o wss://pool.example.com/stratum -u 4YourMoneroAddress.rig1 -t 4
-# or, where raw TCP is allowed
-zmrig -o pool.example.com:3333 -u 4YourMoneroAddress.rig1 -t 4
-```
-
-Fees from that pool go to `46SQLW7D…n6ysb5tJ`, the same wallet as the donation
-address below — the full string is published at `/api/config` by every running
-instance, and in [`doc/DONATE.md`](doc/DONATE.md). The source keeps it
-obfuscated in `pool/src/operator.js` so a repository scraper cannot harvest it,
-not because it is a secret: a pool that hides where its fee goes does not
-deserve miners. Point your own instance at your own wallet with
-`OPERATOR_ADDRESS`; every payout is on-chain either way.
-
-Running your own pool is documented in [`pool/README.md`](pool/README.md):
-five-minute start, PPLNS and audit log, wallet-rpc payouts, Docker, Render,
-Fly.io and the Cloudflare Worker bridge.
-
-## The pool
-
-* **Stratum over TCP and over WebSocket** — the second one is what makes a
-  miner work on a host that only allows outbound 443.
-* **Every share verified** — the pool runs `zmrig --verify-share` on the blob it
-  handed out; a hash that does not match closes the connection instead of being
-  paid.
-* **PPLNS in BigInt piconero** — no floating point anywhere near money, fee
-  rounded down, dust listed rather than absorbed.
-* **Auditable** — `/api/audit` and `audit.jsonl` carry the reward, the fee and
-  every miner payment for every block.
-* **No dependencies** — `node pool/src/index.js`, no `npm install`, no database.
-* **Free to host** — one process, one port; Render for WSS, Fly.io for raw TCP,
-  a Cloudflare Worker in front if your miners are behind a restrictive network.
-
-```bash
-cd pool
-node src/index.js --check --config config.json   # validate and exit
-node src/index.js --config config.json           # stratum + HTTP
-npm test                                         # 28 tests, includes a real miner
-```
-
-## Getting paid for the coin that pays best
-
-`zmrig` implements seven RandomX variants — the engine has a named configuration
-for each (`src/crypto/rx/RxAlgo.cpp`), so a job for `rx/wow` hashes correctly
-rather than being Monero parameters in disguise. What it did not do until now is
-*tell the pool*:
-
-```bash
-zmrig -o gulf.moneroocean.stream:10001 -u <wallet> -a auto
-```
-
-That one flag sends `"algo":["rx/0","rx/wow","rx/arq","rx/graft","rx/sfx","rx/yada","panthera"]`
-in the login. A pool that pays whatever coin is worth most per hash at that
-moment (MoneroOcean and its clones) needs that list — without it the rig is a
-Monero-only rig and stays on `rx/0` forever.
-
-* `-a auto` — advertise the family. The pool decides, and may switch mid-session; the miner rebuilds the engine and keeps mining (`zmrig/src/miner.zig`, `applyJob`).
-* `-a rx/0` — pin one coin. A pin is a promise: nothing else is advertised.
-* nothing — unchanged: no list, the pool decides from its own defaults.
-
-`rx/2` is deliberately not advertised: what it means depends on which fork
-compiled the pool, and a wrong guess is a night of rejected shares. `zmrig
---check` prints what will be advertised, because a list the pool ignores is
-otherwise invisible.
-
-The proxy advertises the same list for the whole farm (`--algo=auto`, the
-default there) and writes the extranonce at the right nonce offset for each
-algorithm — 39 for Monero, 147 for panthera ([`doc/PROXY.md`](doc/PROXY.md)).
-
-## Which pool, and why the IP matters
-
-Fees are a percentage; an IP that cannot connect is 100 % of the income. Two
-things follow from that: pick the pool that pays most per hash, and never let a
-refusal turn into a ban.
-
-| | Pool | Fee | Min payout | Endpoint |
-|---|---|---:|---:|---|
-| **1** | MoneroOcean | 0 % | 0.003 XMR | `gulf.moneroocean.stream:10001` |
-| **2** | SupportXMR | 0.6 % | 0.1 XMR | `pool.supportxmr.com:3333` |
-| 3 | C3Pool | 0 % | 0.003 XMR | `c3pool.com:3333` |
-| — | P2Pool (`xmr.pub`) | 0 % | ~0.0004 XMR | `pool.xmr.pub:3334` |
-
-`./oneclick.sh install --pool=moneroocean --failover=supportxmr,c3pool` is the
-whole configuration: short names resolve to the right host, port and TLS mode,
-and the backups go into `config.json` as extra pools that are only used when the
-first one is unreachable or refuses this IP.
-
-What the miner now refuses to do, because each of these is how an IP gets banned:
-
-* retry a **wrong wallet** every five seconds — it identifies the refusal and
-  leaves that pool alone for 30 minutes, with the fix printed;
-* reconnect immediately after `your IP is banned` — 15 minutes per pool, then the
-  next pool;
-* keep submitting after the pool calls three shares **invalid** — a 10-minute
-  pause instead of the hour-long ban `xmrpool.eu` hands out for it;
+* retry a **wrong wallet** every five seconds — it identifies the refusal, leaves
+  that pool alone for 30 minutes and prints the fix;
+* reconnect immediately after `your IP is banned` — 15 minutes per pool
+  (`--ban-cooldown`), then the next one;
+* keep submitting once the pool has called three shares **invalid** — a
+  10-minute pause instead of the hour-long ban `xmrpool.eu` hands out;
 * let twenty rebooting rigs reconnect in the same millisecond — every retry is
   jittered ±20 %.
 
-DNS filters, not pools, are the usual reason a rig stops: Quad9 blocks
-`gulf.moneroocean.stream` and Cloudflare's malware resolver blocks
-`pool.supportxmr.com`. A backup pool with a different domain, a regional
-hostname, or TLS on port 443 gets around it. Details, sources and the
-`--connect-to` workaround: [`doc/POOLS.md`](doc/POOLS.md).
+The usual reason a rig stops is not a pool ban but DNS filtering: Quad9 returns
+NXDOMAIN for `gulf.moneroocean.stream`, Cloudflare's malware resolver does the
+same for `pool.supportxmr.com`. A backup pool on another domain, a regional
+hostname, TLS on 443 or `--connect-to` gets past it. Sources and the full
+table: [`doc/POOLS.md`](doc/POOLS.md).
 
-## Several rigs, one address: `proxy/`
+### Networks that only allow 443
 
-A farm loses money in three ways that never show up in a miner log: two rigs
-computing the same nonce, one difficulty that starves the smallest machine, and a
-login storm that gets the public IP rate-limited. `proxy/` fixes all three and
-needs nothing installed:
+```bash
+# WebSocket + TLS on 443, the shape that survives HTTPS-only egress and CDNs
+sudo ./oneclick.sh install --wallet 4YourAddress... \
+  --pool pool.example.com --cloudflare --ws-path /stratum
+
+# or a proxy the host already has
+zmrig -o gulf.moneroocean.stream:10001 -u 4YourAddress.rig1 \
+  --proxy socks5://127.0.0.1:9050
+```
+
+`--connect-to` dials an IP while keeping the hostname for SNI and `Host`, for
+the case where DNS is poisoned but the route works. Details:
+[`doc/NETWORK.md`](doc/NETWORK.md).
+
+## Farms: one connection
+
+A farm loses money in three ways that never appear in a miner log: two rigs
+computing the same nonce, one difficulty that starves the smallest machine, and
+a login storm that gets the public IP rate-limited.
 
 ```bash
 sudo ./proxy/install.sh --user=<wallet> --pool=gulf.moneroocean.stream:10001
 ```
 
-* **one upstream connection** for the whole farm, one login at the pool;
-* **one nonce byte per rig** (255 rigs), so no two machines can find the same
-  share — the byte order lives in `proxy/src/blob.js` and is unit-tested, because
-  getting it wrong looks completely healthy from the outside;
-* **per-rig difficulty**, ~15 s between shares on a 500 H/s box and a 20 kH/s one;
-* **rigs survive the pool dying**: sockets stay open, the last job is replayed, a
-  pool that refuses the login is left behind immediately;
+* **one upstream connection**, one login at the pool, for up to 255 rigs;
+* **one nonce byte per rig**, so no two machines can find the same share — the
+  byte order is unit-tested because getting it wrong looks healthy from outside;
+* **per-rig difficulty**, ~15 s between shares whether the rig does 500 H/s or
+  20 kH/s;
+* **rigs survive the pool dying**: sockets stay open, the last job is replayed,
+  a pool that refuses the login is left behind immediately;
 * **one flag for the network**: `--tunnel=wireguard` (fixed `10.66.66.x`, UDP, no
-  third party), `--tunnel=tailscale`, `--tunnel=cf`, `--tunnel=cf-quick`;
-* **H/s and XMR/day per rig** in `/status`, measured from accepted shares, not
-  guessed from a CPU name — and `null` when the network difficulty is unknown;
-* **60 tests**, including real sockets and a WebSocket rig: `cd proxy && npm test`.
-* **57 page tests** for the site: the wizard and the builder must produce the
-  same command, the pool table must match `oneclick.sh`, no page may repeat an
-  id or link to a page that does not exist: `cd web && node --test tests/`.
+  third party), `tailscale`, `cf`, `cf-quick`;
+* **H/s and XMR/day per rig** in `/status`, measured from accepted shares, and
+  `null` when the network difficulty is unknown rather than guessed.
 
-Cloudflare quick tunnels are **demo only** — random hostname that changes on every
-restart, 200 concurrent requests, no authentication, and Cloudflare says so. The
-reasoning, the WireGuard recipe and the pool choice are in
-[`doc/PROXY.md`](doc/PROXY.md).
+60 tests, including real sockets and a WebSocket rig. Tunnel comparison and the
+WireGuard recipe: [`doc/PROXY.md`](doc/PROXY.md).
 
-## Restrictive networks
+## Self-hosted pool
 
-`--cloudflare` switches the miner to WebSocket over TLS on 443, dials a specific
-edge IP when DNS is poisoned (`--connect-to`), and keeps certificate
-verification against the real hostname. HTTP CONNECT and SOCKS5 proxies are
-supported, and [`worker/`](pool/worker/) is a ready-to-deploy Cloudflare bridge
-that turns a WebSocket into a TCP connection to your own pool. Details:
-[`doc/NETWORK.md`](doc/NETWORK.md).
+* **Stratum over TCP and WebSocket** — the second one is what makes a miner work
+  on a host that only allows outbound 443.
+* **Every share verified** — the pool re-hashes each submitted blob with
+  `zmrig --verify-share`; a hash that does not match closes the connection
+  instead of being paid.
+* **PPLNS in BigInt piconero** — no floating point near money, fee rounded down,
+  dust listed instead of absorbed.
+* **Auditable** — `/api/audit` and `audit.jsonl` carry the reward, the fee and
+  every miner payment for every block.
+* **No dependencies** — `node pool/src/index.js`, no `npm install`, no database.
+* **Free to host** — one process, one port; Render for WSS, Fly.io for raw TCP,
+  a Cloudflare Worker in front when rigs are behind a restrictive network.
 
-## Branches
+```bash
+cd pool
+node src/index.js --check --config config.json   # validate and exit
+node src/index.js --config config.json           # stratum + HTTP
+npm test                                         # 29 tests, includes a real miner
+```
+
+Fees from a reference deployment go to the wallet in
+[`doc/DONATE.md`](doc/DONATE.md); your own instance pays your own wallet.
+
+## Performance
+
+Measured on a 2 vCPU Xeon at 2.6 GHz, 3.9 GiB RAM, `rx/0`, mode `fast`. Absolute
+hashrate on shared vCPU moves with the host (20–25 % between sessions on the
+same box), so the ratios are the useful part.
+
+| Configuration | Hashrate | Ratio |
+| --- | ---: | ---: |
+| tuned install (huge pages reserved by the miner, MSR, affinity) | **1070 H/s** | 100 % |
+| stock defaults, nothing reserved (what a fresh VPS does) | 856 H/s | 80 % |
+| `--no-huge-pages` | 634 H/s | 59 % |
+| `-t 1` (one thread on two vCPUs) | 553 H/s | 52 % |
+| `--mode light` (256 MiB cache, for tiny VPS) | 76 H/s | 7 % |
+| `--no-jit` (interpreter only) | ~180 H/s | never for mining |
+
+Everything else that was tried — scratchpad prefetch modes, `--no-affinity`,
+`--no-optimized-init`, VAES-512 — landed inside noise or worse, and is
+documented as such instead of being sold as a speed-up. The full table, the
+method and the commands: [`doc/BENCHMARKS.md`](doc/BENCHMARKS.md) and
+[`doc/PERFORMANCE.md`](doc/PERFORMANCE.md).
+
+**Worth more than any rewrite:** huge pages (the miner reserves them itself),
+MSR on bare metal, one thread per physical core, and a governor that does not
+downclock. `./oneclick.sh install` does all four.
+
+## Repository layout
+
+```
+oneclick.sh            installer: build, tune, config, service, verify, purge
+zmrig/                 the Zig miner (build.sh, src/, tests/, capi/ bindings)
+src/                   the C++ miner (XMRig 6.26.0, donation code removed)
+proxy/                 one pool connection for a farm (node, no dependencies)
+pool/                  self-hosted Monero pool (node, no dependencies)
+  worker/              Cloudflare Worker: WebSocket -> TCP bridge
+web/                   site: wizard, builder, calculator, documentation
+doc/                   everything written down (see Documentation)
+scripts/               build, tune, benchmark, audit helpers
+tests/                 installer and hash-conformance suites
+CHANGELOG.md           one entry per release, newest first
+NOTICE                 attribution and upstream lineage
+```
+
+## Tests
+
+Nine suites, no mocks where a socket will do. Run them all:
+
+```bash
+sudo apt install -y build-essential cmake nodejs python3   # once
+./zmrig/build.sh --jobs 2
+cd web && npm install --no-save jsdom && cd ..
+npm run test:web && npm run test:pool && npm run test:oneclick && npm run test:docs
+cd proxy && npm test
+cd .. && ./zmrig/tests/unit.sh && ./zmrig/tests/cli.sh && ./zmrig/tests/health.sh
+./zmrig/tests/net.sh --soak
+```
+
+| Suite | Assertions | What it proves |
+| --- | ---: | --- |
+| `web` `node --test tests/` | 57 | wizard and builder produce the same command, pool table matches `oneclick.sh`, no duplicate ids, every link resolves |
+| `proxy` `npm test` | 60 | extranonce allocation, vardiff, real sockets, WebSocket rig, banned pool left alone |
+| `pool` `npm test` | 29 | PPLNS in BigInt, share verification, payouts, audit log, end-to-end with a real miner |
+| `zmrig/tests/unit.sh` | 16 modules | options, hashing, health, report codes, stratum parsing, proxy handshakes |
+| `zmrig/tests/cli.sh` | 40 | flags, exit codes, `--help` covers the parser |
+| `zmrig/tests/net.sh` | 29 | TCP/TLS/WS/WSS against a fake pool, ban and refusal handling, failover, seed change |
+| `zmrig/tests/health.sh` | 7 | the watchdog, both directions: an honest pool is not a fault, an all-reject pool is |
+| `tests/oneclick/*.sh` | 56 | plan, config, governor, purge (removes only its own paths), branch switching |
+| `tests/docs/links.sh` | 52 | every relative link and every `#anchor` in the documentation resolves |
+
+## Documentation
+
+* [`doc/INSTALL.md`](doc/INSTALL.md) — installer, every option, service layout,
+  unattended fleet install, troubleshooting.
+* [`doc/SETUP.md`](doc/SETUP.md) — the things only a repository owner can do:
+  settings, workflows, publishing the site, deploying the pool.
+* [`doc/PERFORMANCE.md`](doc/PERFORMANCE.md) · [`doc/BENCHMARKS.md`](doc/BENCHMARKS.md)
+  — every lever that affects hashrate, with the measurements.
+* [`doc/POOLS.md`](doc/POOLS.md) — pool fees and policies, and how to keep
+  mining when DNS or a firewall says no.
+* [`doc/NETWORK.md`](doc/NETWORK.md) — 443-only VPS, proxies, edge dialling.
+* [`doc/PROXY.md`](doc/PROXY.md) — farms: extranonce, vardiff, tunnels.
+* [`doc/ARCHITECTURE.md`](doc/ARCHITECTURE.md) — the code base, thread by thread.
+* [`doc/ZERO_FEE.md`](doc/ZERO_FEE.md) — what was removed and how to verify it.
+* [`doc/DONATE.md`](doc/DONATE.md) — the one address, how to check it, and what
+  a donation does and does not buy.
+* [`doc/ALTERNATIVES.md`](doc/ALTERNATIVES.md) — measured comparison with Rust
+  and Go miners, and why the C++ RandomX JIT stays.
+* [`zmrig/README.md`](zmrig/README.md) · [`pool/README.md`](pool/README.md) ·
+  [`proxy/README.md`](proxy/README.md) · [`web/README.md`](web/README.md)
+* [`web/content/vi/`](web/content/vi/) — the same material as a browsable site.
+
+## Branches and releases
 
 ```
 ALPHA  ──►  BETA  ──►  master
-newest      default      upstream base
-work        (install)    (release tags)
+newest      default      history + tags
+work        (install)
 ```
 
 | Branch | What it is | How to use it |
 | --- | --- | --- |
-| **`BETA`** | default branch, the release state | nothing to do — every install command in this README uses it |
+| **`BETA`** | default branch, the released state | every command in this README already uses it |
 | `ALPHA` | the next release, may break | `MINER_BRANCH=ALPHA sudo -E ./oneclick.sh install --wallet …` |
-| `master` | upstream XMRig `6.26.0-mo5` plus merge commits | history only; a release is `BETA` → `master`, then a tag |
+| `master` | upstream history plus merge commits, tagged per release | reference only |
 
-Nothing hard-codes a branch name except `oneclick.sh`, which defaults to `BETA`
-and accepts `MINER_BRANCH`. `web/tests/branches.test.js` enforces that: a link, a
-one-liner or a script default pointing at anything else fails the build, because
-the installer once pointed at a short-lived branch and `update` failed silently
-(it fetched nothing, checked out nothing, and still printed a commit hash).
+`oneclick.sh` is the only place that hard-codes a branch, and
+`web/tests/branches.test.js` fails if any link, one-liner or default points
+somewhere else — the installer once pointed at a short-lived branch and `update`
+failed silently, which is exactly the class of bug a test should own.
 
-## Website
+## Credits
 
-`web/` is a static site — no framework, no build step, no analytics:
+ZMRIG is built by **[@nggkhaiz](https://github.com/NggKhaiz)** and stands on
+work that is not mine. Nothing here would exist without it, and every
+copyright header is intact — see [`NOTICE`](NOTICE).
 
-* operator documentation in Vietnamese,
-* a fleet calculator that prices one machine or a thousand from a `ZMRIG1.` report
-  code (computed in the browser, nothing uploaded),
-* a **command builder** that assembles the exact install command from the
-  options you tick.
+| Project | What it contributes | Licence |
+| --- | --- | --- |
+| [XMRig](https://github.com/xmrig/xmrig) (xmrig.com, SChernykh) | the C++ miner, the RandomX engine, the config format, the CLI | GPL-3.0 |
+| [RandomX](https://github.com/tevador/RandomX) (tevador) | the proof-of-work algorithm and its JIT | BSD-3-Clause |
+| [MoneroOcean](https://github.com/MoneroOcean/xmrig) | the algorithm-switching pool model and the `-mo` lineage | GPL-3.0 |
+| [Monero](https://github.com/monero-project/monero) (The Monero Project) | the coin, the daemon, wallet-rpc | BSD-3-Clause |
+| [libuv](https://libuv.org), [hwloc](https://www.open-mpi.org/projects/hwloc/), [rapidjson](https://rapidjson.org), [{fmt}](https://fmt.dev) | networking, topology, config, formatting | MIT / BSD / ICU |
 
-```bash
-python3 -m http.server -d web 8080    # preview
-```
+**Where the numbers come from.** Every hashrate in this repository was measured
+with `zmrig/tests/ab.sh` or `zmrig --bench` on the same 2 vCPU Xeon host, one
+configuration per run, dataset built before the timer starts; the raw tables and
+the exact commands are in [`doc/BENCHMARKS.md`](doc/BENCHMARKS.md). Where a
+measurement landed inside noise, it says so instead of becoming a selling point.
 
-Deploy by pointing Cloudflare Pages or Vercel at the repository with no build
-command and `web` as the output directory.
+**Where the pool data comes from.** Fees, minimum payouts and port lists were
+read from each pool's own pages and public stats (`cryptunit`, `xmr.pub`, the
+`xmrpool.eu` FAQ) in **October 2026**, and are dated in
+[`doc/POOLS.md`](doc/POOLS.md). DNS-blocking reports come from the resolvers'
+own blocklists. These numbers change; the file says when it was checked so you
+can tell how stale it is.
 
-## Build from source
+## Licence
 
-```bash
-# C++ miner (Release, native ISA, CPU only)
-./scripts/build-optimized.sh
-sudo ./scripts/tune-linux.sh
-sudo ./build/xmrig -c config/performance.json
+GPL-3.0. The C++ miner is XMRig, Copyright (C) 2016-2026 xmrig.com and
+Copyright (C) 2018-2026 SChernykh; RandomX is Copyright (C) tevador and
+contributors; the MoneroOcean work is Copyright (C) MoneroOcean. This fork adds
+the Zig engine, the installer, the proxy, the pool and the site, all under the
+same licence, Copyright (C) 2026 @nggkhaiz. Full text in [`LICENSE`](LICENSE),
+attribution in [`NOTICE`](NOTICE).
 
-# Zig miner
-./zmrig/build.sh                        # needs zig 0.13 and g++
-./zmrig/out/zmrig -o pool:3333 -u 4YourAddress...
-```
+## Support
 
-Measured on the validation host (2 vCPU): **1084–1089 H/s** from the Zig
-frontend, **1075.7 H/s** from the C++ frontend, 813.77 H/s with stock defaults —
-the frontend is never the bottleneck, and the tuning scripts are worth more than
-any rewrite. See [`doc/BENCHMARKS.md`](doc/BENCHMARKS.md).
-
-## Tests
-
-```bash
-./zmrig/tests/run.sh                 # hash vectors and engine conformance
-./zmrig/tests/unit.sh                # 16 modules of unit tests (zig test)
-./zmrig/tests/cli.sh                 # 40 checks: flags, exit codes, --help parity
-./zmrig/tests/net.sh --soak          # 29 network cases: pools, proxies, WS/TLS, bans
-./tests/hash/check.sh                # C++ known-answer suite
-node run_tests.js --safe --build-dir build
-./tests/oneclick/branch-switch.sh    # installer can switch branch, and fails loudly if it cannot
-./tests/oneclick/plan.sh             # the auto rules: engine from the pool, profile from the battery
-./tests/oneclick/config.sh           # what the zero-flag path writes into config.json
-./tests/oneclick/governor.sh         # free pins the CPU, watt does not
-./tests/oneclick/purge.sh            # purge removes exactly its own paths, and nothing else
-./zmrig/tests/health.sh              # the watchdog: honest pool vs a pool that rejects everything
-npm run test:web                     # site builder, docs renderer, address + branch guards
-npm run test:pool                    # pool unit + protocol + end-to-end (28 tests)
-```
-
-## Documentation
-
-* [`doc/INSTALL.md`](doc/INSTALL.md) — installer, options, service layout,
-  unattended fleet install, troubleshooting.
-* [`pool/README.md`](pool/README.md) — running a pool: configuration, PPLNS,
-  payouts, deployment, API.
-* [`zmrig/README.md`](zmrig/README.md) — the Zig miner: architecture, build,
-  tests, measured hashrate.
-* [`doc/ARCHITECTURE.md`](doc/ARCHITECTURE.md) — the code base, thread by thread.
-* [`doc/PERFORMANCE.md`](doc/PERFORMANCE.md) — every lever that affects hashrate.
-* [`doc/SETUP.md`](doc/SETUP.md) — what has to be done by hand: repository
-  settings, the two workflow files, publishing the site, deploying the pool,
-  and why each of those cannot be automated.
-* [`doc/ZERO_FEE.md`](doc/ZERO_FEE.md) — what was removed and how to prove it.
-* [`doc/DONATE.md`](doc/DONATE.md) — the one donation address, how to check it,
-  and what a donation does and does not buy.
-* [`doc/NETWORK.md`](doc/NETWORK.md) — 443-only VPS, proxies, edge dialling.
-* [`doc/POOLS.md`](doc/POOLS.md) — which pool, what it charges, how its IP
-  policy works, and how to keep mining when DNS or a firewall says no.
-* [`doc/PROXY.md`](doc/PROXY.md) — `proxy/`: one pool connection for a farm,
-  extranonce, per-rig difficulty, and the honest tunnel comparison.
-* [`doc/ALTERNATIVES.md`](doc/ALTERNATIVES.md) — measured comparison with
-  Rust/Go miners, and why the C++ RandomX JIT stays.
-* [`web/content/vi/`](web/content/vi/) — the same material as a browsable site.
-
-## Mining backends
-
-* **CPU** — x86/x64, ARMv7/ARMv8, RISC-V; RandomX v2, CryptoNight family,
-  Argon2, GhostRider, Flex/KCN, Panthera.
-* **OpenCL** for AMD GPUs and **CUDA** for NVIDIA GPUs via the external
-  [CUDA plugin](https://github.com/xmrig/xmrig-cuda) with `--all-backends`.
-
-## Supporting the work
-
-The miner costs nothing and has no fee, so the honest answer to "how do I
-support this?" is: you do not have to. Some people still want to send
-something, so there is exactly one address, and it is this one.
+The miner has no fee, so the honest answer to "how do I support this?" is: you
+do not have to. If you still want to, there is exactly one address:
 
 <p align="center">
-  <img src="doc/donate/monero.png" width="190" alt="QR code for the Monero donation address 46SQLW7D…n6ysb5tJ">
+  <img src="doc/donate/monero.png" width="190" alt="QR code for the Monero address 46SQLW7D…n6ysb5tJ">
 </p>
 
 ```text
 46SQLW7DXaq6GJaQbHUFMAhd1VYpfQFJQ2gfZo9TCB8bf9vnf1MUwAD2Fwj6KMsY4RU3oKA3x6hByg8BKg7FfMWn6ysb5tJ
 ```
 
-Monero (XMR), mainnet, standard address — 95 characters, network byte `18`,
-base58 checksum valid. It is the same wallet the pool's 1 % fee is paid to
-(`pool/src/operator.js`, and every running instance publishes it at
-`/api/config`), so a thank-you and a fee payment land in one place with one
-audit trail. The verification recipe is in [`doc/DONATE.md`](doc/DONATE.md).
+Monero (XMR), mainnet, 95 characters, network byte `18`, base58 checksum valid.
+It is the same wallet the pool's 1 % fee is paid to, so a thank-you and a fee
+payment land in one place with one audit trail; the verification recipe is in
+[`doc/DONATE.md`](doc/DONATE.md). No flag, config key or service reads this
+address — `./oneclick.sh verify` still reports 0 % with it sitting in this file.
 
-**What a donation does not buy.** Nothing in the miner reads this address: no
-flag, config key, build step or service points at it, and `sudo ./oneclick.sh
-verify` still reports a 0 % developer fee with it sitting in the README. There
-is no supporter build, no priority queue, no badge and no subscription. If you
-ever feel pushed to pay for better hashrate, you are being scammed — the same
-binary mines at full speed for free.
+**Worth more than money:** mine through the pool, send a before/after
+measurement, or open an issue with the command, the full output and the
+hardware. Addresses in forks, issues, videos or direct messages are not mine;
+only the one above is.
 
-**Worth more than money**, if you would rather spend time:
+<div align="center">
 
-1. **Mine through the pool.** The 1 % fee is what pays for the work, and it only
-   exists while somebody is mining.
-2. **Send a measurement.** A before/after with `zmrig/tests/ab.sh` has settled
-   more arguments here than any opinion; see [`doc/PERFORMANCE.md`](doc/PERFORMANCE.md).
-3. **Report a bug** in the tracker with the command, the output and the hardware.
-   Crashes in `--mode light` on small VPSes are especially welcome.
+[![Star History Chart](https://api.star-history.com/svg?repos=NggKhaiz/ZMRIG&type=Date)](https://star-history.com/#NggKhaiz/ZMRIG&Date)
 
-**One address, and only this one.** `46SQLW7D…n6ysb5tJ` is the only wallet this
-project has ever published. Addresses in forks, issues, pull requests, videos or
-direct messages are not ours. Before you paste it into a wallet, check that it
-starts with `46SQLW7D`, ends with `n6ysb5tJ` and is 95 characters long; the QR
-above encodes the same string, so scanning it and comparing the text is a
-two-second check against a typo or a swap.
+<sub>ZMRIG · made by <a href="https://github.com/NggKhaiz">@nggkhaiz</a> · GPL-3.0 · no tracking, no accounts, no developer fee</sub>
 
-## License and funding
-
-XMRig is Copyright (C) 2016-2026 xmrig.com, Copyright (C) 2018-2026 SChernykh,
-and the RandomX authors, licensed under **GPL-3.0**. The MoneroOcean additions
-are Copyright (C) MoneroOcean. This fork keeps every copyright header and the
-licence intact; see [`LICENSE`](LICENSE).
-
-The work is funded by the pool fee, not by donations: donations are voluntary,
-go to the wallet above, and buy nothing but goodwill. If you would rather not
-spend money at all, mine through the pool, report a bug with a measurement
-attached, or send a patch — those are worth more here than a transfer.
-
+</div>

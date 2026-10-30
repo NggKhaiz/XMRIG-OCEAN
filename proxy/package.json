@@ -1,6 +1,6 @@
 {
   "name": "zmrig-proxy",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "One pool connection for every rig: extranonce allocation, per-rig difficulty, tunnels.",
   "type": "commonjs",
@@ -26,5 +26,11 @@
     "stratum",
     "proxy",
     "mining"
-  ]
+  ],
+  "author": "@nggkhaiz (https://github.com/NggKhaiz)",
+  "homepage": "https://github.com/NggKhaiz/ZMRIG",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NggKhaiz/ZMRIG.git"
+  }
 }

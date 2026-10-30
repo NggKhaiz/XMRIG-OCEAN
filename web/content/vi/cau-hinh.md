@@ -57,7 +57,7 @@ Một điểm dễ nhầm: **chỉ cờ bạn thực sự gõ mới ghi đè con
   "retry-pause": 5,
   "idle-timeout": 300,
   "keepalive-interval": 60,
-  "report": { "enabled": true, "file": "/var/lib/xmrig-ocean/report.txt", "interval": 60 },
+  "report": { "enabled": true, "file": "/var/lib/zmrig/report.txt", "interval": 60 },
   "power": 45
 }
 ```
@@ -213,7 +213,7 @@ may mắn.
 ## Kiểm tra cấu hình trước khi chạy
 
 ```bash
-sudo ./zmrig/out/zmrig -c /etc/xmrig-ocean/config.json --check
+sudo ./zmrig/out/zmrig -c /etc/zmrig/config.json --check
 # config ok
 #   pool    wss://my-relay.example.com:443/pool user=4Ad... algo=auto
 #   route   connect 10.0.0.7:443, Host: my-relay.example.com

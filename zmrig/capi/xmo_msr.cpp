@@ -1,4 +1,4 @@
-/* XMRig Ocean - RandomX memory-latency fix (the "MSR mod").
+/* ZMRIG (by @nggkhaiz) - RandomX memory-latency fix (the "MSR mod").
  *
  * RandomX is a memory-bound workload: the CPU's hardware prefetchers guess
  * wrong on the dataset and waste memory bandwidth. Disabling them (Intel:

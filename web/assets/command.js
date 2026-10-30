@@ -255,8 +255,8 @@
         plan: plan,
         after: [
           "# trạng thái dịch vụ và log — cần cho mọi lần gỡ lỗi",
-          "sudo systemctl status xmrig-ocean --no-pager -l",
-          "sudo journalctl -u xmrig-ocean -n 40 --no-pager",
+          "sudo systemctl status zmrig --no-pager -l",
+          "sudo journalctl -u zmrig -n 40 --no-pager",
           "",
           "# đo lại máy và in mã báo cáo cho bảng tính",
           "zmrig --report --power 0",

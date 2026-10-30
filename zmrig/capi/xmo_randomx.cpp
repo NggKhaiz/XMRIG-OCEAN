@@ -1,4 +1,4 @@
-/* XMRig Ocean - hash engine C API implementation.
+/* ZMRIG (by @nggkhaiz) - hash engine C API implementation.
  *
  * Thin, allocation-aware wrapper around the RandomX build in this repository.
  * Everything performance relevant happens inside RandomX itself; this file only
@@ -444,5 +444,5 @@ void xmo_set_optimized_dataset_init(int value)    { randomx_set_optimized_datase
 
 const char *xmo_engine_name(void)
 {
-    return "RandomX (XMRig Ocean)";
+    return "RandomX (ZMRIG)";
 }

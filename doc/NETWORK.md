@@ -5,9 +5,9 @@ connections quickly, or sit behind a CDN that refuses arbitrary ports. This
 document covers the transport options that make `zmrig` work there, and how to
 reach a pool through Cloudflare if you cannot reach it directly.
 
-Everything here is a `zmrig` feature. The C++ engine (`xmrig-ocean`) speaks
-plain TCP and TLS only, so any WebSocket transport switches the installer to
-`zmrig` automatically.
+Everything here is a `zmrig` feature. The C++ engine (`xmrig`) speaks plain TCP
+and TLS only, so asking for a WebSocket transport switches the installer to the
+Zig engine automatically.
 
 ## Quick table
 
@@ -19,7 +19,7 @@ plain TCP and TLS only, so any WebSocket transport switches the installer to
 | nothing but an HTTP proxy | `http CONNECT` | `--proxy http://user:pass@proxy:3128` |
 | nothing but a SOCKS5 proxy | SOCKS5 (with auth) | `--proxy socks5://user:pass@proxy:1080` |
 | only a specific CDN IP is allowed | dial the IP, keep the name | `--connect-to 1.2.3.4:443` |
-| a private CA / self-signed pool | pin the CA | `--tls-ca /etc/xmrig-ocean/tls-ca.pem` |
+| a private CA / self-signed pool | pin the CA | `--tls-ca /etc/zmrig/tls-ca.pem` |
 
 ## One flag: `--cloudflare`
 
@@ -45,7 +45,7 @@ Run it without installing to see what would be written:
 
 ```sh
 sudo ./oneclick.sh config --force --wallet ... --pool host:443 --cloudflare --ws-path /monero/TOKEN
-sudo ./zmrig/out/zmrig -c /etc/xmrig-ocean/config.json --check
+sudo ./zmrig/out/zmrig -c /etc/zmrig/config.json --check
 ```
 
 ## How to get a `wss` endpoint
@@ -160,7 +160,7 @@ private CA, or to pin a relay's own certificate:
 sudo ./oneclick.sh install ... --tls-ca /path/to/ca.pem
 ```
 
-The installer copies the file to `/etc/xmrig-ocean/tls-ca.pem` (the unit runs
+The installer copies the file to `/etc/zmrig/tls-ca.pem` (the unit runs
 with a private `/tmp`, so keeping it next to the config matters) and records
 that path in the pool section.
 
@@ -190,7 +190,7 @@ legitimately go quiet for long stretches.
 ```sh
 sudo ./oneclick.sh verify     # engine conformance + 0% fee
 sudo ./oneclick.sh status     # transport, hashrate, shares
-sudo journalctl -u xmrig-ocean -f
+sudo journalctl -u zmrig -f
 ```
 
 A healthy `wss` session logs `connecting to wss://...`, `login ok`, and then
@@ -217,7 +217,7 @@ For a real endpoint, the same three commands work with your own pool and a
 
 ```sh
 ./zmrig/out/zmrig -o wss://pool.example.com:443/relay/TOKEN -u WALLET \
-    --connect-to 203.0.113.10:443 --tls-ca /etc/xmrig-ocean/tls-ca.pem \
+    --connect-to 203.0.113.10:443 --tls-ca /etc/zmrig/tls-ca.pem \
     --idle-timeout 120 --verbose
 ```
 

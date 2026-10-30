@@ -1,6 +1,8 @@
 # Giới thiệu
 
-Đây là bản fork của XMRig (nhánh `6.26.0-mo9`) với hai điểm khác bản gốc:
+**ZMRIG** là bộ công cụ đào Monero do **[@nggkhaiz](https://github.com/NggKhaiz)** làm và giữ: miner (hai engine), installer một lệnh, proxy cho cả farm, pool tự dựng, và website bạn đang đọc. Giấy phép GPL-3.0, không có phí developer, không tracking.
+
+Phần lõi hash là XMRig — một fork của XMRig (nhánh `6.26.0-mo9`) với hai điểm khác bản gốc:
 
 1. **Không có phí developer.** Không ví donate, không chiến lược donate, không endpoint donate trong binary.
 2. **Có thêm engine `zmrig`** viết bằng Zig, nói được WebSocket/TLS trên cổng 443, HTTP CONNECT và SOCKS5 — tức là chạy được trên VPS chỉ mở HTTPS, sau CDN hoặc sau proxy công ty.
@@ -78,3 +80,14 @@ src/                     XMRig gốc, đã bỏ phần donate
 - Không hứa chạy được trên mọi thứ. Engine Zig cần Linux x86-64 (ARM64 build được nhưng chưa test), RandomX JIT cần x86-64/ARM64/RISCV64. Trên kiến trúc khác, RandomX rơi xuống interpreter và chậm hơn nhiều — đó là giới hạn của RandomX, không phải của miner.
 
 Tiếp: [Cài đặt](#cai-dat).
+
+## Tác giả và giấy phép
+
+| | |
+|---|---|
+| Tác giả | [@nggkhaiz](https://github.com/NggKhaiz) — mã nguồn, installer, proxy, pool, website |
+| Giấy phép | GPL-3.0 ([`LICENSE`](https://github.com/NggKhaiz/ZMRIG/blob/BETA/LICENSE)) |
+| Ghi công | [`NOTICE`](https://github.com/NggKhaiz/ZMRIG/blob/BETA/NOTICE) — XMRig, RandomX, MoneroOcean, Monero Project, và các thư viện đi kèm |
+| Mã nguồn | <https://github.com/NggKhaiz/ZMRIG> (nhánh `BETA` là bản dùng) |
+| Báo lỗi | <https://github.com/NggKhaiz/ZMRIG/issues> — kèm lệnh, output đầy đủ và phần cứng |
+| Ủng hộ | không cần; nếu muốn thì có đúng một địa chỉ ở [trang chủ](index.html#ung-ho) |

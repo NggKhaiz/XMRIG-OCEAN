@@ -82,11 +82,15 @@ else
     fail "config.json is missing"
 fi
 
+# The Zig engine advertises the whole RandomX family by default, which is what
+# lets a switching pool (MoneroOcean and its clones) move this rig between
+# coins. A pinned rx/0 would silently give that up, so `auto` is the correct
+# value here -- and it still works on a plain pool, which simply answers rx/0.
 algo=$(json_get "${DIR1}/config.json" "pools.0.algo")
-if [ "$algo" = "rx/0" ]; then
-    pass "zmrig config pins algo rx/0"
+if [ "$algo" = "auto" ]; then
+    pass "zmrig config advertises the RandomX family (algo auto)"
 else
-    fail "zmrig config has algo '${algo}', expected rx/0"
+    fail "zmrig config has algo '${algo}', expected auto"
 fi
 
 profile=$(json_get "${DIR1}/config.json" "profile")

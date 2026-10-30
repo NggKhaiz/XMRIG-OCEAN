@@ -381,7 +381,7 @@ npx wrangler deploy --var POOL_HOST:pool.example.com --var POOL_PORT:3333
 # or edit [vars] in wrangler.toml and run: npx wrangler deploy
 ```
 
-Miners then use `wss://ocean-pool-bridge.<account>.workers.dev/stratum`. The
+Miners then use `wss://zmrig-pool-bridge.<account>.workers.dev/stratum`. The
 Worker cannot reach a private address, so `POOL_HOST` must be publicly routable.
 
 ### 5d. Never commit pool money data

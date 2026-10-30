@@ -323,7 +323,7 @@ pub const Engine = struct {
             self.logger.warn("no reserved huge pages: using {s} pages instead costs up to ~25% hashrate (measured on a 2 vCPU host)", .{
                 if (huge_explicit == 0) "4 KiB" else "partly 4 KiB",
             });
-            self.logger.warn("fix it once as root: echo {d} > /proc/sys/vm/nr_hugepages  (or: sudo xmrig-ocean-tune)", .{need_pages});
+            self.logger.warn("fix it once as root: echo {d} > /proc/sys/vm/nr_hugepages  (or: sudo zmrig-tune)", .{need_pages});
         }
 
         self.wrapped = wrapped;

@@ -14,7 +14,7 @@
 | `share rejected: …` | difficulty/job cũ, đồng hồ máy lệch | kiểm tra NTP (`timedatectl`), xem thông báo cụ thể của pool |
 | API trả 401 | có `access-token` | gửi `Authorization: Bearer TOKEN` |
 | API không truy cập được từ máy khác | mặc định bind `127.0.0.1` | đừng mở ra Internet; dùng SSH tunnel |
-| `--tls-ca` không có tác dụng | file nằm trong `/tmp`, unit dùng `PrivateTmp` | copy vào `/etc/xmrig-ocean/tls-ca.pem` |
+| `--tls-ca` không có tác dụng | file nằm trong `/tmp`, unit dùng `PrivateTmp` | copy vào `/etc/zmrig/tls-ca.pem` |
 | `verify` báo có chuỗi donate | bản cũ grep chữ "donate" | cập nhật repo; bản hiện tại chỉ grep endpoint/ví |
 | Log file có ký tự `\x1b[` | bản cũ ghi nguyên dòng màu | đã sửa: file nhận text thuần, stdout vẫn có màu |
 | `--background` không tách ra nền | bản cũ bỏ qua cờ | đã sửa; kiểm tra bằng `ps -o ppid= -p $(pgrep zmrig)` |
@@ -65,7 +65,7 @@ Kèm theo:
 ./zmrig/out/zmrig --version
 sudo ./oneclick.sh status
 sudo ./oneclick.sh logs 80
-cat /etc/xmrig-ocean/config.json | sed 's/"user": *"[^"]*"/"user": "REDACTED"/'
+cat /etc/zmrig/config.json | sed 's/"user": *"[^"]*"/"user": "REDACTED"/'
 ```
 
 Che ví và token trước khi dán lên đâu đó. Log thường đã đủ để thấy lỗi nằm ở transport, TLS hay pool.
