@@ -10,6 +10,7 @@
 const std = @import("std");
 const api = @import("api.zig");
 const job_mod = @import("job.zig");
+const topology = @import("topology.zig");
 const log = @import("log.zig");
 const options = @import("options.zig");
 const stratum = @import("stratum.zig");
@@ -45,6 +46,10 @@ pub const Submitter = struct {
     accepted: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     rejected: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     failed: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    /// Shares handed to the pool, accepted or not. `accepted + rejected`
+    /// counts answers, this counts questions, so "sent 500, answered 0" is
+    /// visible -- which is what a pool that goes silent looks like.
+    submitted: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
 
     pub fn attach(self: *Submitter, session: *stratum.Session) void {
         self.mutex.lock();
@@ -81,6 +86,8 @@ pub const Submitter = struct {
     }
 
     pub fn submit(self: *Submitter, share: *const Share, logger: *log.Logger) void {
+        _ = self.submitted.fetchAdd(1, .monotonic);
+
         self.mutex.lock();
         defer self.mutex.unlock();
 
@@ -405,6 +412,11 @@ pub const Miner = struct {
     affinity: bool = true,
     /// `--cpu-affinity` bitmask: thread i is pinned to the i-th set bit.
     affinity_mask: ?u64 = null,
+    /// The CPUs this run should use, best first, from the topology map: one
+    /// per physical core, sockets interleaved, SMT siblings last. Thread i
+    /// takes `cpu_order[i]`. Empty means "fall back to i % hw_threads".
+    cpu_order: [max_threads]usize = undefined,
+    cpu_order_len: usize = 0,
     started: bool = false,
 
     const Self = @This();
@@ -448,6 +460,19 @@ pub const Miner = struct {
             .affinity_mask = opts.affinity_mask,
         };
 
+        // Order the CPUs before the threads start: thread i must land on a
+        // distinct physical core before it lands on an SMT sibling, and on a
+        // dual socket machine it must spread before it doubles up. Pinning
+        // `i % hw_threads` is wrong on AMD, where siblings are adjacent.
+        var cpus_buf: [256]topology.Cpu = undefined;
+        const cpus = topology.cpuMap(&cpus_buf);
+        const profile: topology.Profile = switch (opts.profile) {
+            .watt => .watt,
+            .free, .auto => .free,
+        };
+        const order = topology.selectCpus(profile, cpus, &miner.cpu_order);
+        miner.cpu_order_len = @min(order.len, miner.cpu_order.len);
+
         miner.shared.thread_count = threads;
         miner.shared.init_threads = opts.init_threads;
         miner.shared.priority = opts.priority;
@@ -477,7 +502,8 @@ pub const Miner = struct {
     }
 
     /// Which core a worker should be pinned to: the i-th bit of
-    /// `--cpu-affinity`, or thread i modulo the core count.
+    /// `--cpu-affinity`, else the topology order, else thread i modulo the
+    /// core count.
     fn cpuFor(self: *const Self, index: usize) ?usize {
         if (!self.affinity) return null;
 
@@ -492,7 +518,22 @@ pub const Miner = struct {
             return if (seen == 0) null else self.cpuFor(index % seen);
         }
 
+        // The topology order handles SMT and sockets; the modulo is only the
+        // fallback for a machine that reported no topology at all.
+        if (self.cpu_order_len > 0) return self.cpu_order[index % self.cpu_order_len];
+
         return if (self.hw_threads > 0) index % self.hw_threads else null;
+    }
+
+    /// The CPUs this run will actually hash on, for `--check` and the log.
+    pub fn cpuList(self: *const Self, out: []usize) []usize {
+        const n = @min(self.thread_count(), out.len);
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            out[i] = self.cpuFor(i) orelse i;
+        }
+
+        return out[0..n];
     }
 
     /// CPUs listed in an affinity mask, for logging and `--check`.

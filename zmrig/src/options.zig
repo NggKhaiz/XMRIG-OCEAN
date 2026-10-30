@@ -113,6 +113,7 @@ pub const Seen = struct {
     huge_pages_jit: bool = false,
     auto_hugepages: bool = false,
     profile: bool = false,
+    health_restart: bool = false,
     jit: bool = false,
     affinity: bool = false,
     affinity_mask: bool = false,
@@ -196,6 +197,14 @@ pub const Options = struct {
     /// root. Measured +20.7 % on a 2 vCPU host (855.7 -> 1033.0 H/s); disabled
     /// with `--no-auto-hugepages` for hosts where /proc must not change.
     auto_hugepages: bool = true,
+    /// `--no-health-restart`: never exit to recover from a stall.
+    health_restart: bool = true,
+    /// How long a fault must hold before the process exits for a restart.
+    health_restart_seconds: u32 = 900,
+    /// Grace period before the health rules judge anything (dataset init,
+    /// first share). 180 s is generous for a laptop; a bare-metal server is
+    /// hashing in 20.
+    health_warmup_seconds: u32 = 180,
     /// `--profile=free|watt|auto`: what the machine is for. `free` maximises
     /// hashrate (electricity is not the user's problem: cafe, school lab,
     /// flat-rate VPS), `watt` maximises hashrate per watt (physical cores only,
@@ -324,6 +333,10 @@ pub const usage =
     \\      --auto-hugepages     reserve the pages this mode needs when running as root (default)
     \\      --no-auto-hugepages  never reserve huge pages, even when running as root
     \\      --profile=NAME       auto | free (max hashrate) | watt (max hashrate per watt)
+    \\      --no-health-restart  never exit to recover from a stall
+    \\      --health-restart=SEC exit after SEC s of stall / all-rejected
+    \\                           (default 900; the supervisor restarts it)
+    \\      --health-warmup=SEC  do not judge the miner for SEC s (default 180)
     \\      --autotune[=SEC]     measure the thread count here, print the winner, then exit
     \\      --no-huge-pages-jit  disable huge pages for the JIT code
     \\      --msr                apply the RandomX MSR preset (needs root and bare metal)
@@ -611,6 +624,20 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8) ParseEr
         } else if (std.mem.eql(u8, name, "--no-msr-restore")) {
             opts.msr_restore = false;
             opts.seen.msr_restore = true;
+        } else if (std.mem.eql(u8, name, "--no-health-restart")) {
+            opts.health_restart = false;
+            opts.seen.health_restart = true;
+        } else if (std.mem.eql(u8, name, "--health-warmup")) {
+            opts.health_warmup_seconds = try parseNumber(u32, try needValue(args, &i, inline_value));
+        } else if (std.mem.eql(u8, name, "--health-restart")) {
+            // Optional value: "--health-restart" alone re-enables it, with a
+            // value it also sets the delay.
+            if (inline_value) |value| {
+                opts.health_restart_seconds = try parseNumber(u32, value);
+            } else {
+                opts.health_restart = true;
+            }
+            opts.seen.health_restart = true;
         } else if (std.mem.eql(u8, name, "--profile")) {
             const value = try needValue(args, &i, inline_value);
             opts.profile = ProfileSetting.fromName(value) orelse return error.UnknownOption;
@@ -1048,6 +1075,16 @@ pub fn parseConfigFile(allocator: std.mem.Allocator, opts: *Options, path: []con
     }
     if (jsonString(root, "log-file")) |v| opts.log_file = allocator.dupe(u8, v) catch return error.OutOfMemory;
 
+    // `"health": {"restart": false}`: the one health rule a user may want to
+    // turn off, e.g. on a machine that must stay up whatever happens.
+    if (root.get("health")) |health_value| {
+        if (health_value == .object) {
+            if (jsonBool(health_value.object, "restart")) |v| opts.health_restart = v;
+            if (jsonInt(u32, health_value.object, "warmup")) |v| opts.health_warmup_seconds = v;
+            if (jsonInt(u32, health_value.object, "restart-seconds")) |v| opts.health_restart_seconds = v;
+        }
+    }
+
     if (root.get("cpu")) |cpu_value| {
         if (cpu_value == .object) {
             const cpu = cpu_value.object;
@@ -1432,4 +1469,27 @@ test "--profile is parsed and a bad name is rejected" {
 
     var bad = [_][]const u8{ "--profile=turbo" };
     try testing.expectError(error.UnknownOption, parseArgs(testing.allocator, &bad));
+}
+
+test "the health block in the config is honoured" {
+    const testing = std.testing;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{ .sub_path = "config.json", .data = 
+        \\{"health":{"restart":false,"warmup":30},"pools":[{"url":"pool.example.com:3333","user":"w"}]}
+    });
+
+    var opts = Options{};
+    defer opts.deinit(testing.allocator);
+    const path = try tmp.dir.realpathAlloc(testing.allocator, "config.json");
+    defer testing.allocator.free(path);
+    try parseConfigFile(testing.allocator, &opts, path);
+
+    // A machine that must stay up whatever happens is a real requirement.
+    try testing.expect(!opts.health_restart);
+    try testing.expectEqual(@as(u32, 30), opts.health_warmup_seconds);
+    // Untouched keys keep their defaults.
+    try testing.expectEqual(@as(u32, 900), opts.health_restart_seconds);
 }

@@ -19,6 +19,17 @@ Kiểm tra: vector tham chiếu `rx/0`, hashing có pipelining, và dataset dự
 
 Chạy self-test cộng thêm các case so sánh kết quả hash giữa cấu hình khác nhau (căn lề buffer, nhiều block, so sánh dataset) và kiểm tra API. Output cuối: `all API checks passed`.
 
+## Watchdog: 2 case với pool thật
+
+`zmrig/tests/health.sh` chạy miner thật với pool giả ở hai chế độ, để chứng minh cả hai chiều:
+
+| Case | Kỳ vọng |
+|---|---|
+| Pool tử tế | health ở `ok`, **không** báo lỗi, không tự khởi động lại |
+| Pool từ chối mọi share | health chuyển `rejected`, process thoát **mã 3** để systemd khởi động lại, log nói rõ cách tắt |
+
+Cộng thêm 7 unit test cho máy trạng thái (`health.zig`): tạm dừng không phải lỗi, một hai share stale là bình thường, dip phải kéo dài mới gọi là `degraded`.
+
 ## Bộ test mạng — 22 case
 
 Dựng pool giả, TLS shim, proxy HTTP/SOCKS5 và WebSocket ngay trên máy bạn, rồi bắt miner nói chuyện với chúng:

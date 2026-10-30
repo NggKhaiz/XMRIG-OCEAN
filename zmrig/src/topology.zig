@@ -18,6 +18,17 @@ const std = @import("std");
 
 pub const Profile = enum { free, watt };
 
+/// Where sysfs lives. Overridable so the AMD/dual-socket layouts can be tested
+/// on a machine that is neither (this repository's CI is a 2 vCPU container).
+/// Only `ZMRIG_CPU_ROOT` is honoured, and only for tests: a typo there means
+/// "no topology", which falls back to the numbering the miner used for years.
+pub fn cpuRoot() []const u8 {
+    const override = std.process.getEnvVarOwned(std.heap.page_allocator, "ZMRIG_CPU_ROOT") catch return "/sys/devices/system/cpu";
+    // Deliberately leaked-free: one read per process start, and freeing it
+    // would need every caller to care. The process is a miner, not a daemon.
+    return override;
+}
+
 pub fn profileName(profile: Profile) []const u8 {
     return switch (profile) {
         .free => "free",
@@ -37,7 +48,9 @@ pub fn physicalCores(logical: usize) usize {
     if (inVirtualMachine()) return logical;
 
     var buf: [4096]u8 = undefined;
-    const text = readFile(&buf, "/sys/devices/system/cpu/present") orelse return logical;
+    var present_buf: [192]u8 = undefined;
+    const present_path = std.fmt.bufPrint(&present_buf, "{s}/present", .{cpuRoot()}) catch "/sys/devices/system/cpu/present";
+    const text = readFile(&buf, present_path) orelse return logical;
 
     // "present" is a range list like "0-3" or "0-1,4-5"; count the CPUs in it.
     var count: usize = 0;
@@ -65,7 +78,7 @@ pub fn physicalCores(logical: usize) usize {
     var cpu: usize = 0;
     while (cpu < count and cpu < 4096) : (cpu += 1) {
         var path_buf: [128]u8 = undefined;
-        const base = std.fmt.bufPrint(&path_buf, "/sys/devices/system/cpu/cpu{d}/topology", .{cpu}) catch continue;
+        const base = std.fmt.bufPrint(&path_buf, "{s}/cpu{d}/topology", .{ cpuRoot(), cpu }) catch continue;
 
         var id_buf: [256]u8 = undefined;
         const package = readNumberIn(&id_buf, base, "physical_package_id") orelse 0;
@@ -102,6 +115,257 @@ pub fn threadsFor(profile: Profile, logical: usize, physical: usize) usize {
         .free => @max(logical, 1),
         .watt => @max(@min(physical, logical), 1),
     };
+}
+
+
+/// One CPU as the kernel describes it: which socket it is in, and which core of
+/// that socket it is. Two CPUs with the same (package, core) are SMT siblings.
+pub const Cpu = struct {
+    id: u32,
+    package: u32,
+    core: u32,
+};
+
+/// Pure ordering rule, separated from sysfs so it can be tested against the
+/// layouts real machines have (and this one does not).
+///
+/// The problem it solves: Linux numbers SMT siblings *adjacently* on AMD
+/// (cpu0/cpu1 = core 0, cpu2/cpu3 = core 1) and on ARM big.LITTLE, but far
+/// apart on most Intel parts. A miner that pins thread `i` to cpu `i` therefore
+/// lands on two halves of the same core on AMD. That is invisible on a VM, and
+/// on bare metal it meant profile `watt` (one thread per physical core) pinned
+/// 8 threads onto 4 cores: half the machine idle, ~50 % of the hashrate gone,
+/// for a power "saving" that was really just idling.
+///
+/// The order this produces is: one CPU per physical core first, sockets
+/// interleaved so a small thread count still spreads across memory channels,
+/// and only then the SMT siblings.
+pub fn selectCpus(profile: Profile, cpus: []const Cpu, out: []usize) []usize {
+    var written: usize = 0;
+
+    // Primary: the first CPU seen for each (package, core) pair, grouped by
+    // package so iteration can interleave them.
+    var packages: [64]u32 = undefined;
+    var package_count: usize = 0;
+    var primary: [256]Cpu = undefined;
+    var primary_count: usize = 0;
+    var sibling: [256]Cpu = undefined;
+    var sibling_count: usize = 0;
+
+    for (cpus) |cpu| {
+        var found = false;
+        for (packages[0..package_count]) |known| {
+            if (known == cpu.package) {
+                found = true;
+                break;
+            }
+        }
+        if (!found and package_count < packages.len) {
+            packages[package_count] = cpu.package;
+            package_count += 1;
+        }
+
+        // Same core as an earlier CPU? Then it is a sibling, not a new core.
+        var is_sibling = false;
+        for (primary[0..primary_count]) |known| {
+            if (known.package == cpu.package and known.core == cpu.core) {
+                is_sibling = true;
+                break;
+            }
+        }
+
+        if (is_sibling) {
+            if (sibling_count < sibling.len) {
+                sibling[sibling_count] = cpu;
+                sibling_count += 1;
+            }
+        } else if (primary_count < primary.len) {
+            primary[primary_count] = cpu;
+            primary_count += 1;
+        }
+    }
+
+    // Round-robin over the sockets: with 4 cores on socket 0 and 4 on socket 1,
+    // a 2-thread run takes one core from each socket instead of two from the
+    // same one, which halves the memory traffic crossing the interconnect.
+    var round: usize = 0;
+    var take_primary = true;
+    while (take_primary and round < 64) : (round += 1) {
+        var progressed = false;
+        for (packages[0..package_count]) |package| {
+            for (primary[0..primary_count]) |cpu| {
+                if (cpu.package != package) continue;
+                // The k-th round takes the k-th core of this package.
+                var index: usize = 0;
+                for (primary[0..primary_count]) |earlier| {
+                    if (earlier.package != package) continue;
+                    if (earlier.id == cpu.id) break;
+                    index += 1;
+                }
+                if (index != round) continue;
+
+                if (written < out.len) {
+                    out[written] = cpu.id;
+                    written += 1;
+                    progressed = true;
+                }
+                break;
+            }
+        }
+        take_primary = progressed;
+    }
+
+    // Profile `watt` stops here: the siblings are exactly what it is trying to
+    // avoid. Profile `free` appends them, because on free electricity a thread
+    // that adds 10 % hashrate for 35 % more power is still more money.
+    if (profile == .free) {
+        for (sibling[0..sibling_count]) |cpu| {
+            if (written < out.len) {
+                out[written] = cpu.id;
+                written += 1;
+            }
+        }
+    }
+
+    return out[0..written];
+}
+
+
+/// CPU ids the kernel says are online, from `cpu/online` ("0-3,8-11"), else
+/// `0..getCpuCount()`. Parsing the file instead of trusting the count matters
+/// in two cases that are common on rented metal: a cgroup that exposes only
+/// CPUs 4-7 (count 4, ids not 0-3) and a machine with offline cores.
+pub fn onlineCpuIds(buf: []u32) []u32 {
+    var path_buf: [192]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "{s}/online", .{cpuRoot()}) catch return defaultCpuIds(buf);
+
+    var text_buf: [512]u8 = undefined;
+    const text = readFile(&text_buf, path) orelse return defaultCpuIds(buf);
+
+    const parsed = parseCpuList(text, buf);
+    if (parsed.len == 0) return defaultCpuIds(buf);
+
+    return parsed;
+}
+
+/// "0-3,8,10-11" -> {0,1,2,3,8,10,11}. Junk is skipped rather than fatal: a
+/// kernel that writes something unexpected must not stop a miner.
+pub fn parseCpuList(text: []const u8, buf: []u32) []u32 {
+    var written: usize = 0;
+    var it = std.mem.splitScalar(u8, text, ',');
+    while (it.next()) |part| {
+        const trimmed = std.mem.trim(u8, part, " \n\r\t");
+        if (trimmed.len == 0) continue;
+
+        if (std.mem.indexOfScalar(u8, trimmed, '-')) |dash| {
+            const lo = std.fmt.parseInt(u32, trimmed[0..dash], 10) catch continue;
+            const hi = std.fmt.parseInt(u32, trimmed[dash + 1 ..], 10) catch continue;
+            if (hi < lo) continue;
+            // A malformed range must not spin: cap at the buffer.
+            var id = lo;
+            while (id <= hi and written < buf.len) : (id += 1) {
+                buf[written] = id;
+                written += 1;
+            }
+        } else {
+            const id = std.fmt.parseInt(u32, trimmed, 10) catch continue;
+            if (written < buf.len) {
+                buf[written] = id;
+                written += 1;
+            }
+        }
+    }
+
+    return buf[0..written];
+}
+
+fn defaultCpuIds(buf: []u32) []u32 {
+    const count = std.Thread.getCpuCount() catch 1;
+    const n = @min(count, buf.len);
+    for (0..n) |i| buf[i] = @intCast(i);
+
+    return buf[0..n];
+}
+
+/// Is this CPU in the process's own affinity mask? A systemd unit with
+/// `CPUAffinity=` or a `taskset` wrapper limits us to a subset; pinning a
+/// thread to a CPU outside it makes `sched_setaffinity` fail and the thread
+/// float, which looks like a pinning bug when it is really a permission.
+pub fn isAllowed(cpu: u32) bool {
+    var set: std.os.linux.cpu_set_t = std.mem.zeroes(std.os.linux.cpu_set_t);
+    const rc = std.os.linux.sched_getaffinity(0, @sizeOf(std.os.linux.cpu_set_t), &set);
+    if (std.os.linux.E.init(rc) != .SUCCESS) return true; // unknown: do not filter
+    if (cpu >= @sizeOf(std.os.linux.cpu_set_t) * 8) return false;
+
+    const words = @as([*]const usize, @ptrCast(&set));
+    const word = cpu / @bitSizeOf(usize);
+    const bit = cpu % @bitSizeOf(usize);
+
+    return (words[word] >> @intCast(bit)) & 1 == 1;
+}
+
+/// Reads the topology of every online CPU. In a VM every CPU is treated as its
+/// own core: the guest's (package, core) numbers describe the host's idea of
+/// the topology, and the hypervisor schedules us anywhere. Believing that
+/// fiction is what halved the thread count on the validation container.
+pub fn cpuMap(buf: []Cpu) []Cpu {
+    // Only CPUs this process may actually use: a unit with CPUAffinity= or a
+    // taskset wrapper would otherwise be "pinned" to CPUs the kernel refuses,
+    // and every thread would silently float.
+    const all = cpuMapAll(buf);
+
+    var written: usize = 0;
+    for (all) |cpu| {
+        if (!isAllowed(cpu.id)) continue;
+        buf[written] = cpu;
+        written += 1;
+    }
+
+    return buf[0..written];
+}
+
+/// The topology of every online CPU, ignoring this process's affinity mask.
+/// Exists so `--check` can say "16 CPUs, but your unit only allows 2".
+pub fn cpuMapAll(buf: []Cpu) []Cpu {
+    var ids_buf: [256]u32 = undefined;
+    const ids = onlineCpuIds(&ids_buf);
+
+    const vm = inVirtualMachine();
+
+    var written: usize = 0;
+    for (ids) |id| {
+        if (written >= buf.len) break;
+
+        if (vm) {
+            // The guest's (package, core) describes the host's topology; the
+            // hypervisor schedules us on vCPUs, so each is its own core.
+            buf[written] = .{ .id = id, .package = 0, .core = id };
+            written += 1;
+            continue;
+        }
+
+        var path_buf: [192]u8 = undefined;
+        const base = std.fmt.bufPrint(&path_buf, "{s}/cpu{d}/topology", .{ cpuRoot(), id }) catch continue;
+
+        var id_buffer: [256]u8 = undefined;
+        const package = readNumberIn(&id_buffer, base, "physical_package_id");
+        const core = readNumberIn(&id_buffer, base, "core_id");
+
+        buf[written] = if (core) |core_id|
+            .{ .id = id, .package = @intCast(package orelse 0), .core = @intCast(core_id) }
+        else
+            // No topology files at all: trust the numbering, which is what the
+            // miner did before this existed.
+            .{ .id = id, .package = 0, .core = id };
+        written += 1;
+    }
+
+    return buf[0..written];
+}
+
+/// CPUs a run should use for `profile`, in the order threads should take them.
+pub fn threadCpus(profile: Profile, cpus: []const Cpu, out: []usize) []usize {
+    return selectCpus(profile, cpus, out);
 }
 
 pub const Battery = enum { unknown, charging, discharging, full };
@@ -252,4 +516,103 @@ test "battery parsing accepts the words the kernel actually uses" {
     if (state == .unknown) {
         try testing.expect(!shouldPause(.watt, state, true));
     }
+}
+
+test "SMT siblings are interleaved on AMD layouts, not adjacent" {
+    const testing = std.testing;
+
+    // AMD Zen, 4 cores / 8 threads: cpu0/cpu1 are the two halves of core 0.
+    // Pinning thread i to cpu i would put 4 threads on 2 cores.
+    const amd = [_]Cpu{
+        .{ .id = 0, .package = 0, .core = 0 }, .{ .id = 1, .package = 0, .core = 0 },
+        .{ .id = 2, .package = 0, .core = 1 }, .{ .id = 3, .package = 0, .core = 1 },
+        .{ .id = 4, .package = 0, .core = 2 }, .{ .id = 5, .package = 0, .core = 2 },
+        .{ .id = 6, .package = 0, .core = 3 }, .{ .id = 7, .package = 0, .core = 3 },
+    };
+
+    var out: [16]usize = undefined;
+
+    // watt: 4 threads, all on distinct cores.
+    const watt = selectCpus(.watt, &amd, &out);
+    try testing.expectEqual(@as(usize, 4), watt.len);
+    try testing.expectEqualSlices(usize, &.{ 0, 2, 4, 6 }, watt);
+
+    // free: all 8, core before sibling.
+    const free = selectCpus(.free, &amd, &out);
+    try testing.expectEqual(@as(usize, 8), free.len);
+    try testing.expectEqual(@as(usize, 0), free[0]);
+    try testing.expectEqual(@as(usize, 1), free[4]);
+}
+
+test "a dual socket machine spreads threads across sockets first" {
+    const testing = std.testing;
+
+    // Two sockets, two cores each, no SMT: 0,1 on package 0 and 8,9 on 1.
+    const dual = [_]Cpu{
+        .{ .id = 0, .package = 0, .core = 0 }, .{ .id = 1, .package = 0, .core = 1 },
+        .{ .id = 8, .package = 1, .core = 0 }, .{ .id = 9, .package = 1, .core = 1 },
+    };
+
+    var out: [8]usize = undefined;
+    const picked = selectCpus(.watt, &dual, &out);
+
+    try testing.expectEqual(@as(usize, 4), picked.len);
+    // The first two threads must not both sit on socket 0.
+    try testing.expectEqual(@as(usize, 0), picked[0]);
+    try testing.expectEqual(@as(usize, 8), picked[1]);
+}
+
+test "an Intel layout (siblings far apart) keeps working" {
+    const testing = std.testing;
+
+    // 2 cores / 4 threads where cpu0 and cpu2 are the siblings of core 0.
+    const intel = [_]Cpu{
+        .{ .id = 0, .package = 0, .core = 0 }, .{ .id = 1, .package = 0, .core = 1 },
+        .{ .id = 2, .package = 0, .core = 0 }, .{ .id = 3, .package = 0, .core = 1 },
+    };
+
+    var out: [8]usize = undefined;
+    try testing.expectEqualSlices(usize, &.{ 0, 1 }, selectCpus(.watt, &intel, &out));
+    try testing.expectEqualSlices(usize, &.{ 0, 1, 2, 3 }, selectCpus(.free, &intel, &out));
+}
+
+test "no topology files: every CPU is its own core, nothing is dropped" {
+    const testing = std.testing;
+
+    // What a container without topology/ looks like after cpuMap's fallback.
+    const flat = [_]Cpu{
+        .{ .id = 0, .package = 0, .core = 0 },
+        .{ .id = 1, .package = 0, .core = 1 },
+        .{ .id = 2, .package = 0, .core = 2 },
+    };
+
+    var out: [8]usize = undefined;
+    try testing.expectEqual(@as(usize, 3), selectCpus(.watt, &flat, &out).len);
+    try testing.expectEqual(@as(usize, 3), selectCpus(.free, &flat, &out).len);
+}
+
+test "an empty CPU list produces no threads instead of crashing" {
+    const testing = std.testing;
+
+    var out: [4]usize = undefined;
+    try testing.expectEqual(@as(usize, 0), selectCpus(.free, &.{}, &out).len);
+    try testing.expectEqual(@as(usize, 0), selectCpus(.watt, &.{}, &out).len);
+}
+
+test "cpu list parsing handles ranges, singletons and junk" {
+    const testing = std.testing;
+
+    var buf: [32]u32 = undefined;
+
+    try testing.expectEqualSlices(u32, &.{ 0, 1, 2, 3, 8, 10, 11 }, parseCpuList("0-3,8,10-11\n", &buf));
+    try testing.expectEqualSlices(u32, &.{5}, parseCpuList("5", &buf));
+    try testing.expectEqual(@as(usize, 0), parseCpuList("", &buf).len);
+    // Junk between valid ranges must not stop the parse.
+    try testing.expectEqualSlices(u32, &.{ 0, 2 }, parseCpuList("0,oops,2", &buf));
+    // A backwards range is dropped, not spun on.
+    try testing.expectEqual(@as(usize, 0), parseCpuList("9-3", &buf).len);
+
+    // The buffer is a hard limit, never an overrun.
+    var small: [3]u32 = undefined;
+    try testing.expectEqual(@as(usize, 3), parseCpuList("0-15", &small).len);
 }

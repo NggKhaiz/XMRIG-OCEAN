@@ -64,6 +64,11 @@
       uptime: toNumber(raw.up, 0),
       power: power,
       powerSource: String(raw.pwsrc || "none"),
+      // Optional: older codes have no health field, and a missing one must not
+      // look like a problem.
+      health: typeof raw.health === "string" ? raw.health : "",
+      // Hashes per watt, when the miner could measure power.
+      hashesPerWatt: raw.hw === null || raw.hw === undefined ? null : toNumber(raw.hw, null),
       pool: String(raw.pool || ""),
       ts: toNumber(raw.ts, 0)
     };
