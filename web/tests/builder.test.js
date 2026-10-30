@@ -82,7 +82,7 @@ test('the follow-up commands are available separately and never include the wall
   const window = load();
   const after = window.zmrigCommand.build({ wallet: VALID_WALLET }).commands.after;
 
-  assert.match(after, /systemctl status xmrig-ocean/);
+  assert.match(after, /systemctl status zmrig/);
   assert.match(after, /journalctl/);
   assert.ok(!after.includes(VALID_WALLET), 'no wallet in the log commands');
 });

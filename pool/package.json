@@ -1,5 +1,5 @@
 {
-  "name": "ocean-pool",
+  "name": "zmrig-pool",
   "version": "1.0.0",
   "private": true,
   "description": "Self-hosted Monero (RandomX) pool with a published fee, WebSocket stratum for restrictive networks, and an auditable payout ledger.",
@@ -14,5 +14,11 @@
     "test": "node --test --test-concurrency=1 'tests/*.test.js'"
   },
   "license": "GPL-3.0",
-  "dependencies": {}
+  "dependencies": {},
+  "author": "@nggkhaiz (https://github.com/NggKhaiz)",
+  "homepage": "https://github.com/NggKhaiz/ZMRIG",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NggKhaiz/ZMRIG.git"
+  }
 }

@@ -112,13 +112,13 @@ Tuỳ chọn:
 Trong lúc đang đào, để miner tự cập nhật file:
 
 ```bash
---report-file /var/lib/xmrig-ocean/report.txt --report-interval 60
+--report-file /var/lib/zmrig/report.txt --report-interval 60
 ```
 
 Installer bật sẵn mục này cho engine `zmrig`, nên sau khi cài chỉ cần:
 
 ```bash
-sudo cat /var/lib/xmrig-ocean/report.txt
+sudo cat /var/lib/zmrig/report.txt
 # ZMRIG1.eyJ2IjoxLCJpZCI6...
 ```
 
@@ -152,7 +152,7 @@ Mã còn có trường `"hw"` — số hash trên mỗi watt (hashrate cột 60 
 
 1. Mỗi máy: `--report-id` khác nhau (hoặc `--rig-id`).
 2. Bật `--report-file` trong config (installer làm sẵn).
-3. `sudo cat /var/lib/xmrig-ocean/report.txt` → copy → dán vào bảng tính ở trang chủ, mỗi máy một dòng.
+3. `sudo cat /var/lib/zmrig/report.txt` → copy → dán vào bảng tính ở trang chủ, mỗi máy một dòng.
 4. Bảng tính cộng tổng hashrate, W, kWh, tiền điện, doanh thu, lợi nhuận; xuất JSON để lưu hoặc chia sẻ.
 
 Không có server trung gian nào. Nếu bạn cần giám sát liên tục 24/7, hãy lấy API về Prometheus/Netdata trong VPN nội bộ, đừng mở API ra Internet.

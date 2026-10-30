@@ -33,11 +33,12 @@
 # overwrite an existing config unless --force is passed, and skips a rebuild
 # when the binary is newer than the sources.
 #
+# ZMRIG installer, by @nggkhaiz - https://github.com/NggKhaiz/ZMRIG
 # Licensed under GPL-3.0.
 #
 set -euo pipefail
 
-ONECLICK_VERSION="1.2"
+ONECLICK_VERSION="1.3"
 ZIG_VERSION="${MINER_ZIG_VERSION:-0.13.0}"
 
 SELF="${BASH_SOURCE[0]:-}"
@@ -45,16 +46,16 @@ REPO_URL="${MINER_REPO_URL:-https://github.com/NggKhaiz/ZMRIG.git}"
 REPO_BRANCH="${MINER_BRANCH:-BETA}"
 
 PREFIX="${MINER_PREFIX:-/usr/local}"
-CONFIG_DIR="${MINER_CONFIG_DIR:-/etc/xmrig-ocean}"
-STATE_DIR="${MINER_STATE_DIR:-/var/lib/xmrig-ocean}"
-SERVICE_NAME="xmrig-ocean"
+CONFIG_DIR="${MINER_CONFIG_DIR:-/etc/zmrig}"
+STATE_DIR="${MINER_STATE_DIR:-/var/lib/zmrig}"
+SERVICE_NAME="zmrig"
 # Overridable so the purge safety test can run against a temporary tree
 # instead of the real /etc (a destructive command needs a test that runs it).
 SERVICE_DIR="${MINER_SERVICE_DIR:-/etc/systemd/system}"
 SERVICE_FILE="${SERVICE_DIR}/${SERVICE_NAME}.service"
 TUNE_SERVICE_FILE="${SERVICE_DIR}/${SERVICE_NAME}-tune.service"
 
-BUILD_DIR_DEFAULT="${MINER_BUILD_DIR:-${PREFIX}/src/xmrig-ocean-build}"
+BUILD_DIR_DEFAULT="${MINER_BUILD_DIR:-${PREFIX}/src/zmrig-build}"
 WALLET=""
 POOL="${MINER_POOL:-gulf.moneroocean.stream:10001}"
 # Extra pools the miner falls back to when the first one cannot be reached or
@@ -155,7 +156,7 @@ confirm() {
 }
 
 usage() {
-    sed -n '3,33p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,37p' "$0" | sed 's/^# \{0,1\}//'
     cat <<'EOF'
 
 Options
@@ -203,7 +204,7 @@ Options
   --msr                  write the RandomX MSR preset (root, bare metal)
   --no-msr               never touch the MSR registers (containers, some VMs)
   --nicehash             mask the nonce for a NiceHash/rental pool
-  --build-dir DIR        where to compile        (default: PREFIX/src/xmrig-ocean-build)
+  --build-dir DIR        where to compile        (default: PREFIX/src/zmrig-build)
   --all-backends         also build OpenCL/CUDA support
   --no-tune              skip huge pages/MSR/governor tuning
   --no-service           install and configure, but do not create a service
@@ -389,7 +390,7 @@ fi
 # environment detection
 # ---------------------------------------------------------------------------
 BIN_DIR="${PREFIX}/bin"
-BINARY="${BIN_DIR}/xmrig-ocean"
+BINARY="${BIN_DIR}/zmrig"
 # The engine decides which frontend gets installed and started:
 #   xmrig - the C++ miner, all 34 algorithms (default)
 #   zmrig - the Zig rewrite in zmrig/, RandomX family only
@@ -449,7 +450,7 @@ resolve_root() {
     fi
 
     # Piped through curl/bash: fetch the sources once, then use them.
-    local dest="${PREFIX}/src/xmrig-ocean"
+    local dest="${PREFIX}/src/zmrig"
     step "fetching sources"
     have git || die "git is required to fetch the sources. Install git first."
     if [ -d "${dest}/.git" ]; then
@@ -687,12 +688,15 @@ resolve_engine() {
             ;;
     esac
 
-    # One installed binary per engine, so switching back and forth keeps both.
+    # One installed binary per engine, so switching back and forth keeps both,
+    # and each one is named after what it is. The service, the config directory
+    # and the logs stay under the product name either way.
     if [ "$ENGINE" = "zmrig" ]; then
         ENGINE_BINARY="${BIN_DIR}/zmrig"
     else
-        ENGINE_BINARY="${BIN_DIR}/xmrig-ocean"
+        ENGINE_BINARY="${BIN_DIR}/xmrig"
     fi
+    BINARY="$ENGINE_BINARY"
 }
 
 # zig is not packaged by every distro, so fall back to the PyPI wheel which
@@ -812,7 +816,7 @@ find_binary() {
 
     local candidate
     for candidate in "${BUILD_DIR}/${name}" "${BUILD_DIR_DEFAULT}/${name}" \
-                     "${PREFIX}/src/xmrig-ocean-build/${name}" "${ENGINE_BINARY}" \
+                     "${PREFIX}/src/zmrig-build/${name}" "${ENGINE_BINARY}" \
                      "${BINARY}" "${CONFIGURED_ROOT:-.}/build/${name}" \
                      "${CONFIGURED_ROOT:-.}/zmrig/out/zmrig"; do
         if [ -x "$candidate" ]; then
@@ -1143,13 +1147,13 @@ EOF
     # under systemd means a restart loop.
     local validator
     if validator=$(find_binary); then
-        if ! "$validator" --dry-run -c "$tmp" >/tmp/xmrig-ocean-cfgcheck.$$ 2>&1; then
+        if ! "$validator" --dry-run -c "$tmp" >/tmp/zmrig-cfgcheck.$$ 2>&1; then
             warn "the miner rejected the generated config:"
-            sed 's/\x1b\[[0-9;]*m//g' /tmp/xmrig-ocean-cfgcheck.$$ | tail -5
-            rm -f "$tmp" /tmp/xmrig-ocean-cfgcheck.$$
+            sed 's/\x1b\[[0-9;]*m//g' /tmp/zmrig-cfgcheck.$$ | tail -5
+            rm -f "$tmp" /tmp/zmrig-cfgcheck.$$
             die "fix the wallet/pool arguments and try again"
         fi
-        rm -f /tmp/xmrig-ocean-cfgcheck.$$
+        rm -f /tmp/zmrig-cfgcheck.$$
     else
         warn "no miner binary found to validate the config, writing it anyway"
     fi
@@ -1189,6 +1193,50 @@ run_tune() {
 }
 
 # ---------------------------------------------------------------------------
+# migration from the previous name
+# ---------------------------------------------------------------------------
+#
+# Up to installer 1.2 the product installed itself as `xmrig-ocean`: config in
+# /etc/xmrig-ocean, unit `xmrig-ocean.service`, helpers `xmrig-ocean-tune`.
+# Renaming the paths is right, but doing it silently would leave a rig running
+# with a config nothing reads and a second unit that restarts the old name at
+# every boot. So: move what is worth keeping, disable what would compete, and
+# say both out loud.
+migrate_legacy_install() {
+    local legacy_cfg="/etc/xmrig-ocean" legacy_state="/var/lib/xmrig-ocean"
+
+    if [ -f "${legacy_cfg}/config.json" ] && [ ! -f "${CONFIG_FILE}" ]; then
+        as_root mkdir -p "${CONFIG_DIR}"
+        if as_root cp -a "${legacy_cfg}/config.json" "${CONFIG_FILE}" 2>/dev/null; then
+            as_root chmod 600 "${CONFIG_FILE}" 2>/dev/null || true
+            ok "config: kept the existing one, now at ${CONFIG_FILE}"
+        fi
+    fi
+
+    if [ -d "$legacy_state" ] && [ ! -d "$STATE_DIR" ]; then
+        as_root mkdir -p "$(dirname "$STATE_DIR")"
+        as_root mv "$legacy_state" "$STATE_DIR" 2>/dev/null \
+            && ok "state: moved to ${STATE_DIR}"
+    fi
+
+    if [ -f "${SERVICE_DIR}/xmrig-ocean.service" ]; then
+        if has_systemd; then
+            as_root systemctl disable --now xmrig-ocean.service >/dev/null 2>&1 || true
+            as_root systemctl disable --now xmrig-ocean-tune.service >/dev/null 2>&1 || true
+        fi
+        as_root rm -f "${SERVICE_DIR}/xmrig-ocean.service" "${SERVICE_DIR}/xmrig-ocean-tune.service"
+        as_root systemctl daemon-reload >/dev/null 2>&1 || true
+        ok "unit: the old xmrig-ocean service was removed (zmrig.service replaces it)"
+    fi
+
+    local stale
+    for stale in xmrig-ocean xmrig-ocean-tune xmrig-ocean-bench xmrig-ocean-verify xmrig-ocean-report; do
+        [ -e "${BIN_DIR}/${stale}" ] && as_root rm -f "${BIN_DIR}/${stale}"
+    done
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # install + service
 # ---------------------------------------------------------------------------
 install_binary() {
@@ -1198,21 +1246,18 @@ install_binary() {
 
     if [ "$ENGINE" = "zmrig" ]; then
         as_root install -m 0755 "${BUILD_DIR}/zmrig" "${ENGINE_BINARY}"
-        # xmrig-ocean stays the name used by the service, logs and tooling.
-        as_root ln -sf "${ENGINE_BINARY}" "${BINARY}"
     else
         as_root install -m 0755 "${BUILD_DIR}/xmrig" "${ENGINE_BINARY}"
-        as_root ln -sf "${ENGINE_BINARY}" "${BINARY}"
     fi
 
     ok "binary: ${ENGINE_BINARY} ($("${ENGINE_BINARY}" --version 2>/dev/null | head -1))"
     printf '%s\n' "$ENGINE" | as_root tee "${CONFIG_DIR}/engine" >/dev/null 2>&1 || true
 
     if [ -f "${CONFIGURED_ROOT}/scripts/tune-linux.sh" ]; then
-        as_root install -m 0755 "${CONFIGURED_ROOT}/scripts/tune-linux.sh" "${BIN_DIR}/xmrig-ocean-tune"
-        as_root install -m 0755 "${CONFIGURED_ROOT}/scripts/bench.sh" "${BIN_DIR}/xmrig-ocean-bench"
-        as_root install -m 0755 "${CONFIGURED_ROOT}/scripts/verify-fee-free.sh" "${BIN_DIR}/xmrig-ocean-verify"
-        ok "helpers: xmrig-ocean-tune, xmrig-ocean-bench, xmrig-ocean-verify"
+        as_root install -m 0755 "${CONFIGURED_ROOT}/scripts/tune-linux.sh" "${BIN_DIR}/zmrig-tune"
+        as_root install -m 0755 "${CONFIGURED_ROOT}/scripts/bench.sh" "${BIN_DIR}/zmrig-bench"
+        as_root install -m 0755 "${CONFIGURED_ROOT}/scripts/verify-fee-free.sh" "${BIN_DIR}/zmrig-verify"
+        ok "helpers: zmrig-tune, zmrig-bench, zmrig-verify"
     fi
 }
 
@@ -1230,14 +1275,14 @@ write_service() {
     if [ "$DO_TUNE" = 1 ]; then
     as_root tee "$TUNE_SERVICE_FILE" >/dev/null <<EOF
 [Unit]
-Description=XMRig Ocean host tuning (huge pages, THP, MSR)
+Description=ZMRIG host tuning (huge pages, THP, MSR) - by @nggkhaiz
 Before=${SERVICE_NAME}.service
 After=local-fs.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=${BIN_DIR}/xmrig-ocean-tune --quiet
+ExecStart=${BIN_DIR}/zmrig-tune --quiet
 
 [Install]
 WantedBy=multi-user.target
@@ -1248,7 +1293,7 @@ EOF
 
     as_root tee "$SERVICE_FILE" >/dev/null <<EOF
 [Unit]
-Description=XMRig Ocean - fee-free RandomX miner
+Description=ZMRIG - fee-free RandomX miner by @nggkhaiz
 Documentation=file://${CONFIGURED_ROOT}/README.md
 After=network-online.target
 Wants=network-online.target
@@ -1617,13 +1662,13 @@ self_check() {
                                     || warn "found ${dev_fee} donation related strings, inspect manually"
         fi
     elif [ -x "${CONFIGURED_ROOT}/scripts/verify-fee-free.sh" ]; then
-        if "${CONFIGURED_ROOT}/scripts/verify-fee-free.sh" --binary "$BINARY" >/tmp/xmrig-ocean-verify.$$ 2>&1; then
+        if "${CONFIGURED_ROOT}/scripts/verify-fee-free.sh" --binary "$BINARY" >/tmp/zmrig-verify.$$ 2>&1; then
             ok "fee audit: 0% developer fee"
         else
             warn "fee audit reported a problem:"
-            tail -5 /tmp/xmrig-ocean-verify.$$ || true
+            tail -5 /tmp/zmrig-verify.$$ || true
         fi
-        rm -f /tmp/xmrig-ocean-verify.$$
+        rm -f /tmp/zmrig-verify.$$
     fi
 
     if has_systemd && [ -f "$SERVICE_FILE" ]; then
@@ -1653,7 +1698,7 @@ self_check() {
 summary_card() {
     cat <<EOF
 
-${C_G}${C_B}  XMRig Ocean is ready${C_RESET}
+${C_G}${C_B}  ZMRIG is ready${C_RESET}
 
     binary    ${BINARY}
     config    ${CONFIG_FILE}
@@ -1663,10 +1708,10 @@ ${C_G}${C_B}  XMRig Ocean is ready${C_RESET}
     fee       0% (no donation code in this build)
 
     ${C_B}next${C_RESET}
-      xmrig-ocean status      # or: ./oneclick.sh status
-      xmrig-ocean logs        # or: journalctl -u ${SERVICE_NAME} -f
-      xmrig-ocean-bench       # reproducible RandomX measurement
-      xmrig-ocean-verify      # prove the 0% fee
+      zmrig status      # or: ./oneclick.sh status
+      zmrig logs        # or: journalctl -u ${SERVICE_NAME} -f
+      zmrig-bench       # reproducible RandomX measurement
+      zmrig-verify      # prove the 0% fee
 
 EOF
 }
@@ -1677,7 +1722,7 @@ EOF
 cmd_install() {
     detect_os
     echo
-    printf '%s\n' "${C_B}${C_C}  XMRig Ocean one-click installer ${ONECLICK_VERSION}${C_RESET}"
+    printf '%s\n' "${C_B}${C_C}  ZMRIG installer ${ONECLICK_VERSION} - by @nggkhaiz${C_RESET}"
     printf '%s\n' "  ${C_DIM}$(uname -srm), ${OS_ID:-unknown} ${OS_VER}, $(nproc 2>/dev/null || echo '?') threads, $(awk '/MemTotal/ {printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo '?') GiB RAM${C_RESET}"
 
     ensure_deps
@@ -1690,6 +1735,7 @@ cmd_install() {
         [ -x "${BUILD_DIR}/xmrig" ] || die "no binary in ${BUILD_DIR}"
     fi
 
+    migrate_legacy_install
     maybe_autotune
     run_tune
     write_config
@@ -1722,6 +1768,7 @@ cmd_update() {
     ok "sources at $(git -C "$CONFIGURED_ROOT" rev-parse --short HEAD) (branch ${REPO_BRANCH})"
 
     FORCE_REBUILD=1 build_miner
+    migrate_legacy_install
     install_binary
     svc_ctl restart >/dev/null 2>&1 || true
     wait_ready 60 || true
@@ -1739,8 +1786,9 @@ cmd_uninstall() {
     fi
     # Both engines may be installed side by side, so remove both names and the
     # marker that tells later subcommands which one was in use.
-    as_root rm -f "$BINARY" "${BIN_DIR}/xmrig-ocean" "${BIN_DIR}/zmrig" \
-        "${BIN_DIR}/xmrig-ocean-tune" "${BIN_DIR}/xmrig-ocean-bench" "${BIN_DIR}/xmrig-ocean-verify"
+    as_root rm -f "$BINARY" "${BIN_DIR}/zmrig" "${BIN_DIR}/xmrig" \
+        "${BIN_DIR}/zmrig-tune" "${BIN_DIR}/zmrig-bench" "${BIN_DIR}/zmrig-verify" \
+        "${BIN_DIR}/zmrig-report"
     as_root rm -f "${CONFIG_DIR}/engine"
     ok "service and binaries removed"
     if [ "$FORCE_CONFIG" = 1 ]; then
@@ -1774,14 +1822,23 @@ cmd_uninstall() {
 # restart cannot resurrect a half-deleted install).
 purge_targets() {
     printf '%s\n' "${SERVICE_FILE}" "${TUNE_SERVICE_FILE}"
-    printf '%s\n' "${BIN_DIR}/xmrig-ocean" "${BIN_DIR}/zmrig" "${BIN_DIR}/xmrig" \
-        "${BIN_DIR}/xmrig-ocean-tune" "${BIN_DIR}/xmrig-ocean-bench" \
-        "${BIN_DIR}/xmrig-ocean-verify" "${BIN_DIR}/xmrig-ocean-report"
+    printf '%s\n' "${BIN_DIR}/zmrig" "${BIN_DIR}/xmrig" \
+        "${BIN_DIR}/zmrig-tune" "${BIN_DIR}/zmrig-bench" \
+        "${BIN_DIR}/zmrig-verify" "${BIN_DIR}/zmrig-report"
     printf '%s\n' "${CONFIG_DIR}"
     printf '%s\n' "${STATE_DIR}"
     printf '%s\n' "${BUILD_DIR_DEFAULT}"
-    printf '%s\n' "${PREFIX}/src/xmrig-ocean"
-    printf '%s\n' /var/log/xmrig-ocean /var/log/xmrig-ocean.log
+    printf '%s\n' "${PREFIX}/src/zmrig"
+    printf '%s\n' /var/log/zmrig /var/log/zmrig.log
+
+    # Names used up to installer 1.2. A purge on a machine that was installed
+    # back then has to remove those too, or "purge" means "mostly purge".
+    printf '%s\n' "${SERVICE_DIR}/xmrig-ocean.service" "${SERVICE_DIR}/xmrig-ocean-tune.service" \
+        "${BIN_DIR}/xmrig-ocean" "${BIN_DIR}/xmrig-ocean-tune" \
+        "${BIN_DIR}/xmrig-ocean-bench" "${BIN_DIR}/xmrig-ocean-verify" \
+        "${BIN_DIR}/xmrig-ocean-report" \
+        /etc/xmrig-ocean /var/lib/xmrig-ocean "${PREFIX}/src/xmrig-ocean" \
+        "${PREFIX}/src/xmrig-ocean-build" /var/log/xmrig-ocean /var/log/xmrig-ocean.log
 }
 
 path_size() {

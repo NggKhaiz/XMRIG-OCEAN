@@ -18,7 +18,7 @@ const health = @import("health.zig");
 const verify = @import("verify.zig");
 const util = @import("util.zig");
 
-pub const version = "6.31.0-mo14";
+pub const version = "6.32.0";
 
 var running = std.atomic.Value(bool).init(true);
 
@@ -28,6 +28,12 @@ fn onSignal(_: c_int) callconv(.C) void {
     // a pool that never answers) so shutdown is immediate.
     @import("transport.zig").stop_requested.store(true, .release);
 }
+
+/// Printed above the usage text everywhere it appears: `--help`, a bad option
+/// and a rejected config. One string, so the author line cannot go stale.
+pub const banner =
+    "ZMRIG " ++ version ++ " - RandomX miner by @nggkhaiz\n" ++
+    "0% developer fee, GPL-3.0, https://github.com/NggKhaiz/ZMRIG\n";
 
 fn installSignalHandlers() void {
     const act = std.posix.Sigaction{
@@ -52,6 +58,8 @@ pub fn main() !void {
     var opts = options.parseArgs(allocator, args[1..]) catch |e| {
         var stderr = std.io.getStdErr().writer();
         try stderr.print("zmrig: {s}\n\n", .{@errorName(e)});
+        try stderr.writeAll(banner);
+        try stderr.print("\n", .{});
         try stderr.writeAll(options.usage);
 
         // XMRig exits 1 on a bad command line; scripts (and oneclick.sh's
@@ -94,7 +102,10 @@ pub fn main() !void {
 
     if (opts.help) {
         // `zmrig --help | head` closes the pipe early: that is not an error.
-        std.io.getStdOut().writeAll(options.usage) catch {};
+        const out = std.io.getStdOut();
+        out.writeAll(banner) catch {};
+        out.writeAll("\n") catch {};
+        out.writeAll(options.usage) catch {};
 
         return;
     }
@@ -130,7 +141,7 @@ pub fn main() !void {
             (miner_mod.l3CacheSize() orelse 0) / (1024 * 1024),
         }) catch "?";
 
-        std.io.getStdOut().writer().print("zmrig {s} ({s}, {s})\n", .{ version, api.xmo_engine_name(), cpu }) catch {};
+        std.io.getStdOut().writer().print("zmrig {s} - ZMRIG by @nggkhaiz ({s}, {s})\n", .{ version, api.xmo_engine_name(), cpu }) catch {};
 
         return;
     }
@@ -207,6 +218,8 @@ pub fn main() !void {
     options.validate(&opts) catch |e| {
         var stderr = std.io.getStdErr().writer();
         try stderr.print("zmrig: {s}\n\n", .{@errorName(e)});
+        try stderr.writeAll(banner);
+        try stderr.print("\n", .{});
         try stderr.writeAll(options.usage);
 
         // A rejected configuration must not look like a successful `--check`:
@@ -253,7 +266,7 @@ pub fn main() !void {
     installSignalHandlers();
 
     const logger = &log.global;
-    logger.info("zmrig {s} starting, 0% developer fee", .{version});
+    logger.info("ZMRIG {s} by @nggkhaiz - 0% developer fee", .{version});
     logger.info("engine: {s}", .{api.xmo_engine_name()});
 
     // The workers set their own nice value; this covers the main thread.
