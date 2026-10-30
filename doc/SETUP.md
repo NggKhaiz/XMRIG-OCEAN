@@ -240,7 +240,7 @@ repository still works, with one visible difference in the URL:
 | GitHub Actions | `https://nggkhaiz.github.io/ZMRIG/` | clean URLs, this is what the README links to |
 | Deploy from a branch → `BETA` / (root) | `https://nggkhaiz.github.io/ZMRIG/web/` | `/index.html` and `/404.html` at the root redirect every path into `web/`, so no link 404s, but `/ZMRIG/` becomes `/ZMRIG/web/` |
 
-Both modes are covered by `npm run test:pages` (20 checks): an entry point in
+Both modes are covered by `npm run test:pages` (21 checks): an entry point in
 `web/`, the branch-root redirect executed against eight paths, no root-absolute
 link (the site is served under `/ZMRIG/`, not `/`), every `href`/`src` and
 in-page `#anchor` resolving, the docs manifest and its Markdown files, only

@@ -10,7 +10,7 @@ by **[@nggkhaiz](https://github.com/NggKhaiz)**
 [![licence](https://img.shields.io/badge/licence-GPL--3.0-blue)](LICENSE)
 [![dev fee](https://img.shields.io/badge/developer%20fee-0%25-46b17b)](doc/ZERO_FEE.md)
 [![platform](https://img.shields.io/badge/platform-Linux%20x86--64%20%C2%B7%20macOS%20%C2%B7%20Windows-lightgrey)](#build-from-source)
-[![tests](https://img.shields.io/badge/tests-350%20checks%20%C2%B7%2010%20suites-46b17b)](#tests)
+[![tests](https://img.shields.io/badge/tests-351%20checks%20%C2%B7%2010%20suites-46b17b)](#tests)
 [![stars](https://img.shields.io/github/stars/NggKhaiz/ZMRIG?style=flat&color=f2763f)](https://github.com/NggKhaiz/ZMRIG/stargazers)
 [![last commit](https://img.shields.io/github/last-commit/NggKhaiz/ZMRIG)](https://github.com/NggKhaiz/ZMRIG/commits/BETA)
 
@@ -322,7 +322,7 @@ cd .. && ./zmrig/tests/unit.sh && ./zmrig/tests/cli.sh && ./zmrig/tests/health.s
 | `zmrig/tests/health.sh` | 7 | the watchdog, both directions: an honest pool is not a fault, an all-reject pool is |
 | `tests/oneclick/*.sh` | 56 | plan, config, governor, purge (removes only its own paths), branch switching |
 | `tests/docs/links.sh` | 52 | every relative link and every `#anchor` in the documentation resolves |
-| `tests/docs/pages.sh` | 20 | the site survives the way GitHub Pages serves it: entry point, branch-root redirect, no root-absolute links, every `href`/`src` and `#anchor`, CSP meta, titles, sitemap, workflow |
+| `tests/docs/pages.sh` | 21 | the site survives the way GitHub Pages serves it: entry point, branch-root redirect, no root-absolute links, every `href`/`src` and `#anchor`, CSP meta, titles, sitemap, workflow |
 
 ## Documentation
 
