@@ -1,4 +1,4 @@
-# Website: tài liệu + bảng tính lợi nhuận
+# Website: wizard cài đặt + tài liệu + bảng tính lợi nhuận
 
 Trang tĩnh, không build step, không dependency. Mở là chạy; deploy được nguyên thư mục `web/` lên Cloudflare Pages hoặc Vercel.
 
@@ -6,7 +6,8 @@ Trang tĩnh, không build step, không dependency. Mở là chạy; deploy đư�
 
 ```bash
 python3 -m http.server -d web 8080
-# http://localhost:8080/            trang chủ + bảng tính
+# http://localhost:8080/            trang chủ + builder nhanh + bảng tính
+# http://localhost:8080/wizard.html wizard 4 bước (?pool=c3pool để chọn sẵn)
 # http://localhost:8080/docs.html   tài liệu
 ```
 
@@ -40,7 +41,8 @@ Cả hai đặt CSP `script-src 'self'` (không có inline script), chặn ifram
 ## Cấu trúc
 
 ```
-index.html            trang chủ + bảng tính nhiều máy
+index.html            trang chủ: builder nhanh + bảng tính nhiều máy
+wizard.html           wizard 4 bước (ví → pool → máy → mạng → lệnh)
 docs.html             khung tài liệu (sidebar, tìm kiếm, routing theo #hash)
 404.html
 assets/site.css       toàn bộ style, sáng/tối, in ấn
@@ -49,7 +51,10 @@ assets/md.js          renderer Markdown tối giản (không HTML thô từ nộ
 assets/docs.js        nạp mục lục, render trang, tìm kiếm client-side
 assets/rig.js         giải mã ZMRIG1.*, công thức điện/lợi nhuận (hàm thuần)
 assets/dash.js        giao diện bảng tính, localStorage, xuất/nhập JSON
-assets/builder.js     ghép lệnh cài đặt từ các tuỳ chọn (mục #builder)
+assets/pools.js       bảng pool duy nhất: phí, minimum, endpoint, cổng TLS, lý do
+assets/command.js     ghép lệnh (hàm thuần, không DOM) — nguồn của mọi lệnh
+assets/builder.js     giao diện builder nhanh (mục #builder)
+assets/wizard.js      giao diện wizard 4 bước
 content/vi/index.json danh sách trang
 content/vi/*.md       nội dung tài liệu
 ```
@@ -62,9 +67,24 @@ content/vi/*.md       nội dung tài liệu
 
 Không cần build lại gì.
 
+## Vì sao lệnh không thể "lệch"
+
+Trang chủ và wizard cùng gọi `zmrigCommand.build()` trong `assets/command.js`, và cùng đọc pool từ
+`assets/pools.js`. Không có chỗ nào thứ hai định nghĩa lại `--pool` hay danh sách pool. Ba test giữ
+điều đó đúng:
+
+| Test | Nó chặn cái gì |
+|---|---|
+| `tests/pools.test.js` | bảng pool lệch với `oneclick.sh` (`pool_preset()`), `doc/POOLS.md` hoặc `chon-pool.md` |
+| `tests/wizard.test.js` | wizard và builder ra hai lệnh khác nhau; ví lọt vào URL; TLS trên pool không có cổng 443 |
+| `tests/pages.test.js` | id trùng, hai `h1`, ảnh thiếu `alt`, link trỏ vào file/`#slug` không tồn tại |
+
+Chạy: `cd web && npm install --no-save jsdom && node --test tests/*.test.js`.
+
 ## Ghi chú kỹ thuật
 
-- **Không có framework.** Tổng JS khoảng 30 KB chưa nén, tải một lần, chạy offline sau đó (trừ nút lấy giá).
+- **Không có framework.** Tổng JS khoảng 40 KB chưa nén (10 KB cho `pools.js` + `command.js`), tải một lần, chạy offline sau đó (trừ nút lấy giá).
+- **Không có request ngoài nào khi tải trang.** Nút lấy giá là request duy nhất, chỉ khi bấm, và tự bỏ sau 6 giây.
 - **Không có tracking, không cookie, không analytics.** Trạng thái bảng tính nằm trong `localStorage` của trình duyệt.
 - **Không gửi mã máy đi đâu.** `rig.js` giải mã base64 và tính toán tại chỗ.
 - **Markdown được escape trước khi render**, nên nội dung không thể chèn HTML/script.

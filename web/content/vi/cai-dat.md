@@ -9,6 +9,8 @@
 
 Script cần mạng để tải source (hoặc bạn clone sẵn repo). Không tải binary từ nơi khác: mọi thứ được biên dịch tại máy.
 
+Không muốn nhớ cờ nào? [Wizard bốn bước](wizard.html) hỏi đúng ba thứ installer không tự quyết được — ví, pool, mạng — rồi in một lệnh.
+
 ## Cài một lệnh — chỉ cần địa chỉ ví
 
 ```bash

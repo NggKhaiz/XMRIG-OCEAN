@@ -66,8 +66,25 @@ test('a valid wallet produces a runnable one-liner', () => {
   assert.match(text, /\| sudo bash -s -- install/);
   assert.ok(text.includes(VALID_WALLET), 'the wallet is in the command');
   assert.ok(text.includes('--yes'), 'never waits for a prompt');
-  // The copy-paste block must end with the sudo command, as the design asks.
-  assert.match(text.trim().split('\n').slice(-1)[0], /journalctl|status/);
+
+  // One command, one line of intent: `curl … | sudo bash`. The follow-up
+  // commands (status, journalctl, report) live in their own copy button, so
+  // pasting this block cannot start a second thing by accident.
+  const lines = text.trim().split('\n');
+  assert.strictEqual(lines.length, 2, `expected the two-line pipeline, got: ${text}`);
+  assert.match(lines[0], /^curl -fsSL /);
+  assert.match(lines[1], /^  \| sudo bash -s -- install /);
+  assert.ok(!/^sudo /m.test(text), 'sudo appears only inside the pipeline');
+  assert.ok(text.trim().endsWith('--yes'), 'the command ends with --yes');
+});
+
+test('the follow-up commands are available separately and never include the wallet', () => {
+  const window = load();
+  const after = window.zmrigCommand.build({ wallet: VALID_WALLET }).commands.after;
+
+  assert.match(after, /systemctl status xmrig-ocean/);
+  assert.match(after, /journalctl/);
+  assert.ok(!after.includes(VALID_WALLET), 'no wallet in the log commands');
 });
 
 test('an invalid wallet is refused instead of producing a command', () => {
@@ -111,6 +128,89 @@ test('a quote in a field cannot break out of the shell word', () => {
   const text = command(window);
   assert.ok(text.includes("'rig'\\''; rm -rf / #'"), `unexpected quoting in: ${text}`);
   assert.ok(!/--rig-id rig'; rm/.test(text));
+});
+
+test('the pool list comes from the shared table, not from markup that can rot', () => {
+  const window = load();
+  const select = window.document.getElementById('b-pool');
+  const values = [...select.options].map((option) => option.value);
+
+  for (const pool of window.zmrigPools.list) {
+    assert.ok(values.includes(pool.id), `${pool.id} is offered`);
+  }
+  assert.ok(values.includes('custom'), 'a custom pool is offered');
+  assert.ok(select.selectedOptions[0].textContent.includes('gulf.moneroocean.stream:10001'), 'the default shows its endpoint');
+});
+
+test('choosing a pool changes the endpoint, the fee and the explanation', () => {
+  const window = load();
+  setValue(window, 'b-wallet', VALID_WALLET);
+  setValue(window, 'b-pool', 'supportxmr');
+
+  const text = command(window);
+  assert.ok(text.includes('--pool pool.supportxmr.com:3333'), text);
+  assert.ok(!text.includes('gulf.moneroocean.stream'), 'the previous pool is gone');
+
+  const info = window.document.getElementById('b-pool-info').textContent;
+  assert.match(info, /0,6 %/);
+  assert.match(info, /0,1 XMR/);
+  assert.strictEqual(window.document.getElementById('b-pool-tag').textContent, 'SupportXMR · 0,6 %');
+});
+
+test('the TLS switch uses the published 443 endpoint of the chosen pool', () => {
+  const window = load();
+  setValue(window, 'b-wallet', VALID_WALLET);
+  setValue(window, 'b-pool', 'moneroocean');
+
+  const tls = window.document.getElementById('b-tls');
+  tls.checked = true;
+  tls.dispatchEvent(new window.Event('change', { bubbles: true }));
+
+  assert.ok(command(window).includes('--pool tls://gulf.moneroocean.stream:443'), command(window));
+});
+
+test('a backup pool becomes --failover, and the primary cannot be its own backup', () => {
+  const window = load();
+  setValue(window, 'b-wallet', VALID_WALLET);
+  setValue(window, 'b-pool', 'moneroocean');
+
+  const boxes = [...window.document.querySelectorAll('#b-failover input[data-failover]')];
+  assert.strictEqual(boxes.length, window.zmrigPools.list.length);
+
+  const c3 = boxes.find((box) => box.getAttribute('data-failover') === 'c3pool');
+  const self = boxes.find((box) => box.getAttribute('data-failover') === 'moneroocean');
+  c3.checked = true;
+  self.checked = true;
+  c3.dispatchEvent(new window.Event('change', { bubbles: true }));
+
+  const text = command(window);
+  assert.ok(text.includes('--failover c3pool.com:3333'), text);
+  assert.ok(!text.includes('gulf.moneroocean.stream:10001,c3pool'), 'the primary is not repeated');
+});
+
+test('the preview command is a plan: it changes nothing on the host', () => {
+  const window = load();
+  setValue(window, 'b-wallet', VALID_WALLET);
+
+  const result = window.zmrigCommand.build({ wallet: VALID_WALLET, pool: 'c3pool', failover: ['moneroocean'] });
+
+  assert.match(result.plan, /\| sudo bash -s -- plan /);
+  assert.ok(!result.plan.includes(' install '), 'no install in the preview');
+  assert.ok(result.plan.includes('--failover gulf.moneroocean.stream:10001'));
+});
+
+test('a custom pool must be host:port before the copy button unlocks', () => {
+  const window = load();
+  setValue(window, 'b-wallet', VALID_WALLET);
+  setValue(window, 'b-pool', 'custom');
+  setValue(window, 'b-host', 'nonsense');
+
+  assert.strictEqual(window.document.getElementById('b-copy').disabled, true);
+  assert.match(window.document.getElementById('b-host-hint').textContent, /host:port/i);
+
+  setValue(window, 'b-host', 'pool.internal.example:3333');
+  assert.strictEqual(window.document.getElementById('b-copy').disabled, false);
+  assert.ok(command(window).includes('--pool pool.internal.example:3333'));
 });
 
 test('the dashboard maths still accepts the report the miner prints', () => {

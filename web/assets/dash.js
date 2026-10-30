@@ -167,7 +167,13 @@
     if (button) button.disabled = true;
     setStatus("Đang lấy giá XMR…");
 
-    fetch("https://api.coingecko.com/api/v3/simple/price?ids=monero&vs_currencies=usd")
+    // Six seconds, then give up. Mining networks are exactly the ones that
+    // block or black-hole an API call, and a spinner that never stops looks
+    // like a broken page. The manual field is always there.
+    var stop = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = stop ? setTimeout(function () { stop.abort(); }, 6000) : null;
+
+    fetch("https://api.coingecko.com/api/v3/simple/price?ids=monero&vs_currencies=usd", stop ? { signal: stop.signal } : undefined)
       .then(function (response) {
         if (!response.ok) throw new Error("HTTP " + response.status);
         return response.json();
@@ -182,9 +188,11 @@
         setStatus("Đã cập nhật giá XMR: $" + Number(price).toFixed(2) + ".", "ok");
       })
       .catch(function (error) {
-        setStatus("Không lấy được giá (" + error.message + "). Nhập tay ở ô \"Giá XMR\" — số liệu vẫn tính đúng.", "bad");
+        var reason = error && error.name === "AbortError" ? "quá 6 giây không trả lời" : error.message;
+        setStatus("Không lấy được giá (" + reason + "). Nhập tay ở ô \"Giá XMR\" — số liệu vẫn tính đúng.", "bad");
       })
       .finally(function () {
+        if (timer) clearTimeout(timer);
         if (button) button.disabled = false;
       });
   }
@@ -442,19 +450,19 @@
     var now = Math.floor(Date.now() / 1000);
     var samples = [
       {
-        v: 1, id: "vps-hn-01", ver: "6.30.0-mo13", cpu: "AMD EPYC 7B13 64-Core Processor", arch: "x86_64",
+        v: 1, id: "vps-hn-01", ver: "6.31.0-mo14", cpu: "AMD EPYC 7B13 64-Core Processor", arch: "x86_64",
         cores: 32, thr: 16, algo: "rx/0", mode: "fast", hs: [9620.4, 9588.1, 9510.7, 9712.0],
         hp: [1168, 1168], shares: [412, 1, 0], hash: 8123456789, up: 86400,
         pw: 118.4, pwsrc: "rapl", pool: "gulf.moneroocean.stream", ts: now
       },
       {
-        v: 1, id: "vps-sg-02", ver: "6.30.0-mo13", cpu: "Intel(R) Xeon(R) Gold 6248 CPU @ 2.50GHz", arch: "x86_64",
+        v: 1, id: "vps-sg-02", ver: "6.31.0-mo14", cpu: "Intel(R) Xeon(R) Gold 6248 CPU @ 2.50GHz", arch: "x86_64",
         cores: 20, thr: 8, algo: "rx/0", mode: "fast", hs: [4180.2, 4162.9, 4130.3, 4201.5],
         hp: [1168, 1168], shares: [180, 0, 0], hash: 3214567890, up: 43200,
         pw: 74.0, pwsrc: "hwmon", pool: "gulf.moneroocean.stream", ts: now
       },
       {
-        v: 1, id: "mini-pc", ver: "6.30.0-mo13", cpu: "Intel(R) N100", arch: "x86_64",
+        v: 1, id: "mini-pc", ver: "6.31.0-mo14", cpu: "Intel(R) N100", arch: "x86_64",
         cores: 4, thr: 4, algo: "rx/0", mode: "light", hs: [312.6, 305.8, 301.4, 318.0],
         hp: [0, 0], shares: [21, 0, 0], hash: 18651234, up: 7200,
         pw: null, pwsrc: "none", pool: "gulf.moneroocean.stream", ts: now

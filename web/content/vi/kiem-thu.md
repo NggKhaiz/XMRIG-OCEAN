@@ -30,7 +30,7 @@ Chạy self-test cộng thêm các case so sánh kết quả hash giữa cấu h
 
 Cộng thêm 7 unit test cho máy trạng thái (`health.zig`): tạm dừng không phải lỗi, một hai share stale là bình thường, dip phải kéo dài mới gọi là `degraded`.
 
-## Bộ test mạng — 22 case
+## Bộ test mạng — 29 case
 
 Dựng pool giả, TLS shim, proxy HTTP/SOCKS5 và WebSocket ngay trên máy bạn, rồi bắt miner nói chuyện với chúng:
 
@@ -77,6 +77,7 @@ Log từng case nằm trong `/tmp/zmrig-net.XXXXXX/` (đường dẫn in ở cu�
 
 ### Bẫy khi chạy test
 
+- **Case algorithm cần môi trường riêng.** Hai case `algo auto mining` và `algo pinned mining` trước đây dùng chung pool `--diff 50`, nên trên máy đang tải chúng fail vì "không kịp có share" chứ không phải vì lỗi. Giờ chúng chạy trên một pool riêng `--diff 1` và cho ~85 share một cách ổn định.
 - **Cổng bận.** Bộ test dùng 4800 (pool) và 4801–4813 (các shim). Một process cũ còn giữ cổng sẽ khiến case "cloudflare" fail với `accepted=0` trong khi log miner ghi `login ok`. Script giờ giết process lạ trước khi chạy và từ chối chạy nếu cổng 4800 bị process khác chiếm.
 - **Huge pages.** Test chạy `--mode light` để không cần 2 GiB, nên hashrate khoảng 50–70 H/s. Đó là bình thường.
 - **CPU bận.** Đừng chạy bench song song: sẽ OOM hoặc làm hỏng số đo.

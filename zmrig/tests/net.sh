@@ -206,21 +206,33 @@ fi
 
 # `--algo=auto` has to reach the pool as a list, over a real socket. A unit test
 # can only prove the JSON is built; only this proves it is sent.
+#
+# These two cases get their own pool with --diff 1. At the shared --diff 50 a
+# share needs roughly a second of light-mode hashing, so on a loaded CI box the
+# "it still mines" check failed for lack of luck, not for lack of a feature.
+if selected algo || selected pinned; then
+    ALGO_PORT=$((BASE_PORT + 60))
+    ALGO_LOG="${LOGDIR}/poolalgo.log"
+    python3 "$NET/pool.py" --port "$ALGO_PORT" --mode basic --diff 1 --lifetime 120 >"$ALGO_LOG" 2>&1 &
+    PIDS+=("$!")
+    wait_port "$ALGO_PORT" 10 || record FAIL "algo pool" "could not start on ${ALGO_PORT}"
+fi
+
 if selected algo; then
     log="${LOGDIR}/algo-auto.log"
-    run_miner algo-auto 6 "$log" -o "127.0.0.1:${POOL_PORT}" -t 1 --mode light --algo=auto
-    if grep -q 'LOGIN login .*algo=rx/0,rx/wow,rx/arq,rx/graft,rx/sfx,rx/yada,panthera' "$POOL_LOG"; then
+    run_miner algo-auto 6 "$log" -o "127.0.0.1:${ALGO_PORT}" -t 1 --mode light --algo=auto
+    if grep -q 'LOGIN login .*algo=rx/0,rx/wow,rx/arq,rx/graft,rx/sfx,rx/yada,panthera' "$ALGO_LOG"; then
         record PASS "algo auto" "pool received the full RandomX family"
     else
-        record FAIL "algo auto" "pool did not receive the list (see ${POOL_LOG})"
+        record FAIL "algo auto" "pool did not receive the list (see ${ALGO_LOG})"
     fi
     check_case "algo auto mining" "$log" 1
 fi
 
 if selected pinned; then
     log="${LOGDIR}/algo-pinned.log"
-    run_miner algo-pinned 6 "$log" -o "127.0.0.1:${POOL_PORT}" -t 1 --mode light -a rx/wow
-    if grep -q 'LOGIN login .*algo=rx/wow$' "$POOL_LOG"; then
+    run_miner algo-pinned 6 "$log" -o "127.0.0.1:${ALGO_PORT}" -t 1 --mode light -a rx/wow
+    if grep -q 'LOGIN login .*algo=rx/wow$' "$ALGO_LOG"; then
         record PASS "algo pinned" "one algorithm, no list"
     else
         record FAIL "algo pinned" "the pin did not reach the pool"
