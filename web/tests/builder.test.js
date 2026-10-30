@@ -180,3 +180,30 @@ test('the C++ engine cannot be combined with the WebSocket switches', () => {
   assert.strictEqual(xmrig.disabled, true, 'the option is disabled while it cannot work');
   assert.ok(command(window).includes('--engine zmrig'));
 });
+
+test('the report decoder understands health and hashes per watt, and tolerates their absence', () => {
+  const window = load();
+  const rig = window.zmrigRig;
+  assert.ok(rig && typeof rig.normalise === 'function', 'the decoder is exposed');
+
+  // decodeMany takes the paste buffer and returns {rigs, errors}.
+  const one = (json) =>
+    window.btoa(JSON.stringify(json)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  const withHealth = rig.decodeMany(
+    'ZMRIG1.' +
+      one({
+        v: 1, id: 'rig-1', hs: [1000, 990, 980, 1010], thr: 4, cores: 2,
+        pw: 100, pwsrc: 'hwmon', hw: 9.9, health: 'degraded', pool: 'p:1',
+      })
+  ).rigs[0];
+
+  assert.strictEqual(withHealth.health, 'degraded');
+  assert.strictEqual(withHealth.hashesPerWatt, 9.9);
+
+  const without = rig.decodeMany('ZMRIG1.' + one({ v: 1, id: 'rig-2', hs: [500] })).rigs[0];
+
+  // An old code must decode to an empty health, not to "stalled".
+  assert.strictEqual(without.health, '');
+  assert.strictEqual(without.hashesPerWatt, null);
+});

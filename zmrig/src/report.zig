@@ -43,6 +43,10 @@ pub const Snapshot = struct {
     /// instead of being recomputed (badly) by every consumer.
     hashes_per_watt: ?f64 = null,
     pool: []const u8 = "",
+    /// "ok", "warming", "degraded", "stalled" or "rejected": what the miner
+    /// thinks of its own income right now, so a fleet dashboard can sort by
+    /// "machines that are running but earning nothing".
+    health: []const u8 = "ok",
     timestamp: i64 = 0,
 };
 
@@ -94,6 +98,8 @@ pub fn encode(buf: []u8, snap: Snapshot) ![]const u8 {
         try w.print(",\"hw\":null", .{});
     }
 
+    try w.print(",\"health\":", .{});
+    try writeJsonString(w, snap.health);
     try w.print(",\"pool\":", .{});
     try writeJsonString(w, snap.pool);
     try w.print(",\"ts\":{d}}}", .{snap.timestamp});
@@ -327,7 +333,7 @@ test "encode has the prefix and round trips through base64" {
     var buf: [1200]u8 = undefined;
     const code = try encode(&buf, .{
         .id = "rig \"one\"",
-        .version = "6.27.0-mo10",
+        .version = "6.28.0-mo11",
         .cpu = "Test CPU",
         .rates = .{ 1000, 990, 980, 1010 },
         .shares = .{ 12, 1, 0 },

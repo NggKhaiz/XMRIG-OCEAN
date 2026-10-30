@@ -198,6 +198,27 @@ class Pool:
             pass
 
     def on_line(self, conn, line, state):
+        # A pool that answers every submit with "rejected": a real failure mode
+        # (wrong algorithm after a fork, a wallet the pool does not know, a
+        # pool-side bug) that a hashrate check cannot see.
+        if self.args.mode == "reject":
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                return
+
+            if msg.get("method") == "submit":
+                # params is an object: {"id": <job>, "nonce": ..., "result": ...}
+                params = msg.get("params") or {}
+                submit_id = params.get("id") if isinstance(params, dict) else None
+                # Only the error: replying "OK" as well would make the miner
+                # count the share as accepted, and the whole point of this mode
+                # is a pool that accepts the connection and none of the work.
+                self.fail(conn, submit_id or msg.get("id"), "Low difficulty share")
+                self.log("REJECT %s" % submit_id)
+
+            return
+
         if not line.strip():
             return
         try:
@@ -391,7 +412,7 @@ def main():
     ap = argparse.ArgumentParser(description="fake Stratum pool for the zmrig tests")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=4710)
-    ap.add_argument("--mode", default="basic", choices=["basic", "soak", "hostile", "stall", "deaf", "close"])
+    ap.add_argument("--mode", default="basic", choices=["basic", "soak", "hostile", "stall", "deaf", "close", "reject"])
     ap.add_argument("--diff", type=float, default=2000, help="job difficulty; small values make shares frequent")
     ap.add_argument("--algo", default="rx/0")
     ap.add_argument("--seed", default="1" * 64)

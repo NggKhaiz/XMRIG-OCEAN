@@ -145,6 +145,15 @@ else
     fail "a re-run rewrote an existing config without --force"
 fi
 
+# --- 5. --no-health-restart reaches the config ------------------------
+DIR5="${WORK}/etc-nohealth"
+MINER_HEALTH_RESTART=0 run_config "$DIR5" --engine=zmrig --pool=supportxmr.com:3333
+if [ "$(json_get "${DIR5}/config.json" "health.restart")" = "false" ]; then
+    pass "--no-health-restart is written as health.restart=false"
+else
+    fail "--no-health-restart did not reach the config"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
     echo "config: all checks passed"

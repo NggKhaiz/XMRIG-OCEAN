@@ -14,10 +14,11 @@ const options = @import("options.zig");
 const report = @import("report.zig");
 const stratum = @import("stratum.zig");
 const topology = @import("topology.zig");
+const health = @import("health.zig");
 const verify = @import("verify.zig");
 const util = @import("util.zig");
 
-pub const version = "6.27.0-mo10";
+pub const version = "6.28.0-mo11";
 
 var running = std.atomic.Value(bool).init(true);
 
@@ -293,6 +294,9 @@ pub fn main() !void {
         .idle_timeout_ms = @as(i64, @intCast(opts.idle_timeout)) * 1000,
         .keepalive_ms = @as(i64, @intCast(opts.keepalive_interval)) * 1000,
         .keepalive_enabled = opts.keepalive_interval > 0,
+        .health_restart = opts.health_restart,
+        .health_restart_seconds = @intCast(opts.health_restart_seconds),
+        .health_tracker = .{ .config = .{ .warmup_seconds = opts.health_warmup_seconds } },
     };
     monitor.thread = try std.Thread.spawn(.{ .stack_size = 256 * 1024 }, Monitor.run, .{&monitor});
     defer {
@@ -540,6 +544,13 @@ const Monitor = struct {
     keepalive_ms: i64 = 60_000,
     keepalive_enabled: bool = true,
     last_message: std.atomic.Value(i64) = std.atomic.Value(i64).init(0),
+    /// Restart the process when a fault (stall or all-rejected) has held for
+    /// this long: under systemd `Restart=always`, exiting *is* the recovery.
+    health_restart: bool = true,
+    health_restart_seconds: i64 = 900,
+    health_tracker: health.Tracker = .{},
+    health_state: health.State = .warming,
+    health_logged: bool = false,
     /// Hashrates published to the HTTP API once a second.
     view: api_http.View = .{},
     socket: std.atomic.Value(i32) = std.atomic.Value(i32).init(-1),
@@ -592,6 +603,8 @@ const Monitor = struct {
                 self.miner.shared.totalHashes(),
             );
 
+            self.checkHealth(now);
+
             if (self.report_file) |path| {
                 if (now - self.last_report_write >= self.report_interval_ms) {
                     self.last_report_write = now;
@@ -615,6 +628,65 @@ const Monitor = struct {
                 std.posix.shutdown(@intCast(fd), .both) catch {};
             }
         }
+    }
+
+    /// The numbers the health rules judge, taken from the same counters the
+    /// report uses so the log, the API and the dashboard cannot disagree.
+    fn healthSnapshot(self: *Monitor, now_ms: i64) health.Snapshot {
+        const submitter = &self.miner.submitter;
+
+        return .{
+            .uptime_s = @intCast(@max(@divTrunc(now_ms - self.report_started_ms, 1000), 0)),
+            .rate_10s = self.miner.hashrate(10),
+            .rate_60s = self.miner.hashrate(60),
+            .peak = self.miner.stats.max_rate,
+            .hashes = self.miner.shared.totalHashes(),
+            .accepted = submitter.accepted.load(.monotonic),
+            .rejected = submitter.rejected.load(.monotonic),
+            .submitted = submitter.submitted.load(.monotonic),
+            .paused = self.miner.shared.paused.load(.acquire),
+        };
+    }
+
+    /// Runs the rules, logs every change of state once, and -- only for a
+    /// fault that has held for `health_restart_seconds` -- exits so the
+    /// supervisor can start a clean process.
+    ///
+    /// Exiting is the only remedy that actually works for the failures this
+    /// detects: a stuck engine or a pool that has decided to reject us will not
+    /// fix itself, and a restart costs 16-30 s of hashrate against hours of
+    /// zero. It is on by default, and off with `--no-health-restart`.
+    fn checkHealth(self: *Monitor, now_ms: i64) void {
+        const snapshot = self.healthSnapshot(now_ms);
+        const state = self.health_tracker.update(snapshot, now_ms);
+
+        if (state != self.health_state) {
+            var buf: [256]u8 = undefined;
+            const line = health.describe(&buf, state, snapshot);
+
+            switch (state) {
+                .ok => self.logger.info("{s}", .{line}),
+                .warming => self.logger.debug("{s}", .{line}),
+                .degraded => self.logger.warn("{s}", .{line}),
+                .stalled, .rejected => self.logger.err("{s}", .{line}),
+            }
+
+            self.health_state = state;
+        }
+
+        if (!state.isFault() or !self.health_restart) return;
+
+        const held = self.health_tracker.faultDurationSeconds(state, now_ms);
+        if (held < self.health_restart_seconds) return;
+
+        self.logger.err("health: {s} for {d} s, restarting so the supervisor can start clean (--no-health-restart disables this)", .{
+            state.label(), held,
+        });
+
+        // Flush the log before dying: a buffered "why" that never reaches the
+        // journal is the same as no message at all.
+        std.time.sleep(50 * std.time.ns_per_ms);
+        std.process.exit(3);
     }
 
     /// Writes `ZMRIG1.<...>` to the report file. A failure is logged once and
@@ -666,6 +738,7 @@ const Monitor = struct {
             .power_watts = power,
             .power_source = self.report_power_source,
             .pool = self.report_pool,
+            .health = self.health_state.label(),
             .timestamp = std.time.timestamp(),
         }) catch return;
 
@@ -867,6 +940,42 @@ fn printConfigSummary(opts: *const options.Options) !void {
             try out.print("  affinity 0x{x} ({d} cpu(s))\n", .{ mask, cpus });
         }
     }
+    // Which CPU each thread will actually run on. This is the line that would
+    // have caught the AMD pinning bug: it turns "8 threads" into "8 threads on
+    // 8 distinct cores" or, when something is wrong, into a visible duplicate.
+    if (opts.affinity and opts.affinity_mask == null) {
+        var cpus_buf: [256]topology.Cpu = undefined;
+        const cpus = topology.cpuMap(&cpus_buf);
+
+        // A unit with CPUAffinity= (or a taskset wrapper) can hand us a subset
+        // of the machine. Saying so turns "why is it only using 2 of 16 cores"
+        // from a mystery into one line.
+        var all_buf: [256]topology.Cpu = undefined;
+        const all = topology.cpuMapAll(&all_buf);
+        if (all.len > cpus.len) {
+            try out.print("  affinity process allows {d} of {d} online cpu(s)\n", .{ cpus.len, all.len });
+        }
+
+        var order_buf: [miner_mod.max_threads]usize = undefined;
+        const profile: topology.Profile = switch (opts.profile) {
+            .watt => .watt,
+            .free, .auto => .free,
+        };
+        const threads = @min(opts.threads orelse miner_mod.defaultThreads(miner_mod.cpuCount()), order_buf.len);
+        const order = topology.selectCpus(profile, cpus, &order_buf);
+
+        var line_buf: [256]u8 = undefined;
+        var stream = std.io.fixedBufferStream(&line_buf);
+        const w = stream.writer();
+
+        var i: usize = 0;
+        while (i < threads) : (i += 1) {
+            w.print("{s}{d}", .{ if (i == 0) "" else ",", order[i % @max(order.len, 1)] }) catch break;
+        }
+
+        const cores = if (cpus.len > 0) topology.physicalCores(cpus.len) else cpus.len;
+        try out.print("  cpus    [{s}] on {d} cpu(s), {d} physical core(s)\n", .{ stream.getWritten(), cpus.len, cores });
+    }
     if (opts.init_threads > 0) {
         try out.print("  dataset  built with {d} thread(s)\n", .{opts.init_threads});
     }
@@ -921,6 +1030,19 @@ fn resolveProfile(opts: *options.Options, logger: *@import("log.zig").Logger) to
         // obvious from the hardware itself. Everything else gets max hashrate.
         .auto => if (battery == .discharging) .watt else .free,
     };
+
+    // A profile that asks for threads the machine does not have is a profile
+    // that cannot be honoured. The case is real: `--profile=watt` written into
+    // a config on a 32-core server, then the same config carried to a 4-core
+    // laptop, where `physical` is 4 but the saved `cpu.threads` is 16. Say it
+    // and lower the number instead of failing at startup.
+    if (opts.threads) |wanted| {
+        const usable = topology.threadsFor(.free, logical, physical);
+        if (wanted > usable) {
+            logger.warn("config asks for {d} thread(s) but this machine has {d}; using {d}", .{ wanted, usable, usable });
+            opts.threads = usable;
+        }
+    }
 
     if (opts.profile == .auto) {
         logger.debug("profile auto -> {s} (battery {s}, {d} physical of {d} logical cpu)", .{

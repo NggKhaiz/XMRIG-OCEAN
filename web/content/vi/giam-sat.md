@@ -57,6 +57,37 @@ curl -s 127.0.0.1:18080/1/summary | python3 -c 'import json,sys; d=json.load(sys
 
 Cảnh báo: API là **chỉ đọc**, không có endpoint đổi ví/restart. Đừng bind ra `0.0.0.0` nếu không có token và firewall — dù chỉ đọc, nó vẫn lộ tên máy, pool và ví worker của bạn.
 
+## Sức khoẻ: máy còn kiếm tiền hay chỉ còn chạy?
+
+Đây là câu hỏi khác với "service còn active không", và là chỗ tiền mất một cách im lặng: pool từ chối mọi share thì miner vẫn sống, vẫn kết nối, vẫn in hashrate — và thu nhập bằng 0.
+
+Miner tự đánh giá mỗi giây và báo một trong năm trạng thái:
+
+| Trạng thái | Nghĩa | Chuyện gì xảy ra |
+|---|---|---|
+| `warming` | đang build dataset, hoặc bạn tạm dừng | không làm gì (tạm dừng là tính năng) |
+| `ok` | hashrate gần mức tốt nhất phiên này, có share được nhận | không làm gì |
+| `degraded` | dưới 80% mức đỉnh trong 10 phút (nhiệt, hàng xóm ồn) | ghi cảnh báo |
+| `stalled` | process sống nhưng không hash | ghi lỗi |
+| `rejected` | có gửi share, pool không nhận cái nào | ghi lỗi |
+
+```bash
+sudo ./oneclick.sh status
+#   hashrate: 1042.6 H/s (10s/60s/15m)
+#   shares:   184/0/0 accepted
+#   health:   ok
+```
+
+`stalled` hoặc `rejected` kéo dài **15 phút** thì process tự thoát với mã 3 — `Restart=always` biến nó thành lần khởi động sạch. Đánh đổi nói rõ: mất 16–30 giây hashrate thay vì mất vài giờ thu nhập bằng 0.
+
+```bash
+zmrig ... --no-health-restart     # không bao giờ tự thoát
+zmrig ... --health-restart=1800   # lâu hơn mới bỏ cuộc (giây)
+zmrig ... --health-warmup=300     # không xét gì trong 5 phút đầu
+```
+
+Trạng thái cũng nằm trong mã `ZMRIG1.` ở trường `"health"`, nên bảng nhiều máy có thể lọc đúng những máy "đang chạy nhưng không kiếm được gì".
+
 ## Mã báo cáo
 
 Một lần đo, một dòng:
@@ -114,6 +145,8 @@ Mã **không** chứa địa chỉ ví, token pool hay IP công khai. Nó là ba
 ```bash
 cat report.txt | cut -d. -f2 | tr '_-' '/+' | base64 -d | python3 -m json.tool
 ```
+
+Mã còn có trường `"hw"` — số hash trên mỗi watt (hashrate cột 60 s chia công suất) khi đo được công suất, `null` khi không. Đây là con số chế độ `watt` tối ưu, nên nó nằm sẵn trong mã thay vì để mỗi người tự chia.
 
 ## Từ mã tới nhiều máy
 

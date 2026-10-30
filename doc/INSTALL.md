@@ -75,6 +75,10 @@ sudo ./oneclick.sh purge      # remove everything, config included (asks first)
 | `--autotune[=SEC]` | search for the best thread count after the build, `SEC` seconds per candidate (default 8). On by default for `zmrig`. |
 | `--no-autotune` | keep the built-in `L3 / 2 MiB` heuristic |
 | `--dry-run` | with `purge`: print what would be removed, delete nothing |
+| `--no-health-restart` | never exit to recover from a stalled miner (default: exit after 15 min of `stalled`/`rejected` so systemd restarts it) |
+
+`zmrig` also takes `--health-restart=SEC`, `--health-warmup=SEC`, and reads
+`"health": {"restart": false, "warmup": 180}` from the config.
 | `--tls` | TLS stratum |
 | `--cloudflare[=HOST[:PORT]]` | WebSocket inside TLS on 443 and the `zmrig` engine: the one shape that passes HTTPS-only egress and CDNs. See [doc/NETWORK.md](NETWORK.md). |
 | `--transport KIND` | `tcp`, `tls`, `ws` or `wss`, overriding the scheme in `--pool` |
@@ -124,6 +128,23 @@ be measured here, is in [doc/PERFORMANCE.md](PERFORMANCE.md) §2c.
 
 Both profiles are 0 % fee and both are auditable with
 `sudo ./oneclick.sh verify`.
+
+### Health
+
+`sudo ./oneclick.sh status` ends with a `health:` line, because "the service is
+active" is not the same question as "this machine is earning":
+
+| State | Meaning | Response |
+| --- | --- | --- |
+| `ok` | hashrate near the session peak, shares accepted | none |
+| `warming` | dataset building, or the user paused it | none |
+| `degraded` | under 80 % of peak for ten minutes | look at cooling and neighbours |
+| `stalled` | process alive, zero hashes | restarts itself after 15 min |
+| `rejected` | shares sent, none accepted | restarts itself after 15 min; if it repeats, the wallet/algorithm is wrong |
+
+A restart costs 16–30 s of hashrate and clears a state that would otherwise cost
+hours, which is why it is on by default under systemd. Turn it off with
+`--no-health-restart` on a machine that must stay up regardless.
 
 ### Purging
 

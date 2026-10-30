@@ -218,6 +218,19 @@ A full end-to-end run after all of it: **1058.9 H/s** (`zmrig --report`), agains
 the 1070.0 H/s baseline — inside the ±2.7 % noise band, i.e. no regression, and
 no speedup either. That is the honest result.
 
+### The 2026-10 second round: pinning and health
+
+| Change | What it is | Measured on this box |
+|---|---|---|
+| Thread→CPU order from sysfs (`topology.selectCpus`) | One thread per physical core first, sockets interleaved, SMT siblings last (profile `free` only) | **No measurable change here**, and that is the expected answer: this container has 2 vCPUs numbered 0,1, so the old order (`i % hw_threads`) and the new one produce the identical mapping. The bug it fixes needs AMD or dual-socket bare metal. The size of that bug is measurable in the other direction: forcing both threads onto one CPU (`--cpu-affinity=0x1`) gives **552.6 H/s against 1070.0**, −47 %. |
+| Affinity mask respected | `sched_getaffinity` decides which CPUs are legal; `--check` prints `affinity process allows 1 of 2 online cpu(s)` | Verified with `taskset -c 1`: thread count 1, CPU 1 selected, no silent float. |
+| Health watchdog | Pure state machine (`health.zig`), judged on this machine's own peak and share counters | Not a hashrate change: the hot loop is untouched, the rules run once per second on the monitor thread. **`--report` after the change measured 810–834 H/s against 1058.9 H/s an hour earlier on the same binary** — that is host load on a shared VM (±30 % between runs), not a regression, and it is reported as such rather than dressed up. |
+
+The honest summary of this round: it fixes an income bug on hardware this
+sandbox does not have, and it adds a way to notice income bugs. Neither is a
+speedup, and pretending otherwise would be the thing this document exists to
+prevent.
+
 ### VAES-512: the one "new instruction" that exists, and it loses
 
 RandomX ships a hand-written VAES/AVX-512 implementation of the AES hash

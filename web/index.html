@@ -32,12 +32,13 @@
   <div class="wrap">
 
     <section class="hero">
-      <p class="eyebrow">XMRig Ocean 6.27.0-mo10 · engine Zig</p>
+      <p class="eyebrow">XMRig Ocean 6.28.0-mo11 · engine Zig</p>
       <h1>Đào Monero trên VPS kén chọn, không chia hashrate cho ai.</h1>
       <p class="lede">
         0% phí developer — kiểm chứng được bằng script trong repo. Nói được WebSocket + TLS trên cổng 443,
-        HTTP CONNECT và SOCKS5, nên chạy được cả trên máy chỉ mở HTTPS. Có API giám sát và mã báo cáo
-        để tính điện, lợi nhuận cho từng máy.
+        HTTP CONNECT và SOCKS5, nên chạy được cả trên máy chỉ mở HTTPS. Tự phát hiện khi mình ngừng
+        kiếm tiền (pool từ chối mọi share, hashrate sụp) và tự khởi động lại. Có API giám sát và mã
+        báo cáo để tính điện, lợi nhuận cho từng máy.
       </p>
 
       <div class="btn-row">
@@ -47,7 +48,8 @@
       </div>
 
       <pre><code>curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/BETA/oneclick.sh \
-  | sudo bash -s -- install --wallet YOUR_WALLET --pool gulf.moneroocean.stream:10001 --engine zmrig</code></pre>
+  | sudo bash -s -- --wallet YOUR_WALLET</code></pre>
+      <p class="hint">Chỉ cần địa chỉ ví: engine, chế độ và số thread được tự nhận diện cho máy của bạn.</p>
       <p class="hint">Không chạy script từ mạng? Tải repo rồi chạy <code>sudo ./oneclick.sh install …</code>. Toàn bộ mã nằm trong repo, không tải binary lạ.</p>
     </section>
 
@@ -429,7 +431,7 @@
 
 <footer>
   <div class="wrap">
-    <span>zmrig · XMRig Ocean 6.27.0-mo10 · 0% phí developer</span>
+    <span>zmrig · XMRig Ocean 6.28.0-mo11 · 0% phí developer</span>
     <span>
       <a href="docs.html">Tài liệu</a> ·
       <a href="https://github.com/NggKhaiz/ZMRIG" target="_blank" rel="noreferrer">Mã nguồn</a> ·

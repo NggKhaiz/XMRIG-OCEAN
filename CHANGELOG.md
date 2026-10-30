@@ -1,3 +1,58 @@
+# v6.28.0-mo11 — the miner that knows when it stopped earning
+
+Two changes, both about income that is lost silently.
+
+### Fixed
+- **Threads were pinned to the wrong CPUs on AMD (and some ARM) machines.**
+  `zmrig` pinned thread *i* to cpu *i*, which is correct on most Intel parts and
+  wrong everywhere siblings are numbered adjacently: on AMD Zen, cpu0/cpu1 are
+  the two halves of one core. Profile `watt` asks for exactly one thread per
+  physical core, so on a 8c/16t Zen box it pinned 8 threads onto 4 cores —
+  ~50 % of the hashrate gone, in the profile that was supposed to be careful
+  with power. New `topology.selectCpus()` builds the order from sysfs: one CPU
+  per physical core first, sockets interleaved (a 2-thread run on a 2-socket
+  machine takes one core from each), SMT siblings last and only for profile
+  `free`. `--check` now prints the mapping (`cpus [0,2,4,6] on 16 cpu(s), 8
+  physical core(s)`), which is what makes a wrong pin visible instead of silent.
+- **A CPU subset is respected and reported.** A unit with `CPUAffinity=`, a
+  cgroup cpuset or a `taskset` wrapper used to be ignored: the miner pinned to
+  CPUs the kernel then refused, and every thread silently floated.
+  `sched_getaffinity` is now consulted, and `--check` says
+  `affinity process allows 1 of 2 online cpu(s)`.
+
+### New
+- **Health monitoring and self-recovery.** Three failure modes earn nothing
+  while looking fine: the hashrate collapses (throttle, a stuck engine), the
+  pool rejects every share (wrong algorithm after a fork, a pool-side bug), the
+  pool goes silent. The miner now evaluates its own numbers once a second
+  (`zmrig/src/health.zig`, 7 unit tests) and reports `warming | ok | degraded |
+  stalled | rejected`; a user pause (`--pause-on-battery`) is never a fault, and
+  a dip must persist ten minutes before it is called degraded.
+  - the state goes into the log line `health: ok rate 60s … accepted … rejected …`
+    and into the `ZMRIG1.` code as `"health"`, so a fleet dashboard can sort by
+    "running but earning nothing";
+  - `oneclick.sh status` shows it, with the exact consequence when it is a fault;
+  - after **15 minutes** of `stalled` or `rejected` the process exits with code
+    3, which `Restart=always` turns into a clean start. That trade is deliberate:
+    16-30 s of lost hashrate against hours of zero. `--no-health-restart`, or
+    `"health": {"restart": false}` in the config, turns it off for machines that
+    must stay up regardless; `--health-restart=SEC` and `--health-warmup=SEC`
+    adjust the delays.
+- `zmrig/tests/health.sh`: proves both directions against a real pool — an
+  honest pool never raises a fault, and a pool that rejects everything is caught
+  and produces exit code 3 (7 checks, run in CI).
+
+### Measured
+- The pinning fix cannot show a number on the validation box: it is a 2 vCPU
+  container where the old mapping (`0,1`) and the new one are identical, and the
+  same binary varies by ±30 % between runs because the host is shared. It is
+  reported as **no measurable change here**; the case it fixes needs AMD or
+  dual-socket bare metal, where the old order was measurably wrong
+  (`--cpu-affinity=0x1` on this box: 552.6 vs 1070.0 H/s, −47 %).
+- The health check runs on the monitor thread once per second and the hash loop
+  was not touched; `--report` after the change measured 810-834 H/s against
+  1058.9 H/s an hour earlier on the same binary — host load, not a regression.
+
 # v6.27.0-mo10 — no flags, two profiles, and a way out
 
 The installer now decides everything from the machine it is on, and the miner
