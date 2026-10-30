@@ -17,6 +17,8 @@ Số liệu dưới đây lấy từ chính trang của các pool, bảng port h
 
 Tên ngắn dùng trực tiếp: `--pool=moneroocean`, `supportxmr`, `c3pool`, `xmrpool`, `herominers`, `p2pool`, `p2pool-nano`.
 
+Mở wizard với pool đã chọn sẵn: [MoneroOcean](wizard.html?pool=moneroocean) · [SupportXMR](wizard.html?pool=supportxmr) · [C3Pool](wizard.html?pool=c3pool) · [HeroMiners](wizard.html?pool=herominers) · [xmrpool.eu](wizard.html?pool=xmrpool) · [P2Pool mini](wizard.html?pool=p2pool) · [P2Pool nano](wizard.html?pool=p2pool-nano) — bước tiếp theo trong wizard cho chọn thêm pool dự phòng.
+
 Vì sao thứ tự này:
 
 1. **MoneroOcean trả nhiều nhất trên mỗi hash với CPU**, vì nó chuyển rig sang coin họ RandomX đang đắt nhất rồi trả bằng XMR. Các bài đánh giá độc lập ghi mức chênh 10–30 % so với pool một thuật toán — lớn hơn mọi khác biệt phí trong bảng. Cần `--algo=auto` (mặc định ở đây) để pool biết được phép chuyển.

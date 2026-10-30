@@ -1,3 +1,60 @@
+# v6.31.0-mo14 — a wizard instead of a wall of flags
+
+The installer was already zero-flag, but the site still made a visitor read a
+form with fourteen switches before seeing a command. The site now has two ways
+in, and they provably agree.
+
+### New
+- **`web/wizard.html`** — a four-step wizard: wallet → pool → machine → network
+  → command. Each step is one question, every option carries its reason on
+  screen, and the stepper doubles as navigation. Deep links work
+  (`?pool=c3pool&engine=zmrig&tls=1`), so the pool table and the docs can hand
+  a visitor a pre-answered wizard. The wallet is never written into the URL or
+  a copied link.
+- **`web/assets/pools.js`** — one pool table (fee, minimum, endpoint, TLS port,
+  why, payout cadence) used by the wizard, the builder and the docs links.
+  `web/tests/pools.test.js` fails if it ever disagrees with `oneclick.sh`'s
+  `pool_preset()` or with `doc/POOLS.md`.
+- **`web/assets/command.js`** — the command builder became a pure function, so
+  the quick builder and the wizard cannot produce different commands for the
+  same answers (there is a test that compares them byte for byte).
+- **A `plan` button** next to the install button: the same command with the
+  `plan` subcommand, which resolves the pool and the config and changes nothing
+  on the host.
+- **Pool selection with facts** — fee, minimum, payout cadence, endpoint and a
+  one-sentence reason for each pool; a TLS switch that knows which pools
+  publish a 443 endpoint and refuses to invent one; backup-pool picker that
+  cannot select the primary as its own backup.
+- **Honest warnings**: choosing `zmrig` for an algorithm-switching pool now says
+  that the rig will only be offered the RandomX family, which gives up the
+  largest single advantage of that pool.
+
+### Fixed
+- Stale link: three places pointed at `docs.html#benchmark`, which is
+  `docs.html#hieu-nang` — the page has never had that slug. Found by the new
+  link checker, not by a visitor.
+- The price lookup (`api.coingecko.com`) had no timeout. On a mining network
+  that black-holes the API the button spun forever; now it gives up after six
+  seconds and says so, and the manual field is unchanged.
+- A form on the wizard could implicitly submit on Enter, which would have put
+  the wallet in the address bar. Enter now advances a step, and submit is
+  prevented outright.
+
+### Fixed (tests)
+- `zmrig/tests/net.sh`'s two algorithm cases were flaky on a loaded machine:
+  they shared the main pool's `--diff 50`, so "a share arrived within 6 s" was
+  a coin toss (0 accepted shares, twice in a row, while the CPU was busy with
+  the web suite). They now get their own pool at `--diff 1` and produce ~85
+  shares deterministically.
+
+### Tests
+- `web` **57 pass, 0 fail**, including new `pools.test.js` (table consistency
+  across four files), `wizard.test.js` (12 cases: gating, deep links, TLS,
+  failover, wallet never in the URL, wizard == builder) and `pages.test.js`
+  (duplicate ids, one `h1` per page, alt text on images, every local link
+  resolves, both pages load the shared files in the right order).
+- No miner code changed: `zmrig/tests/*` and `proxy` counts are unchanged.
+
 # v6.30.0-mo13 — do not get banned, and do not be blocked
 
 Two ways to lose an evening of income that no hashrate chart shows: a pool that

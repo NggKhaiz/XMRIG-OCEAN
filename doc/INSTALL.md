@@ -81,9 +81,7 @@ sudo ./oneclick.sh purge      # remove everything, config included (asks first)
 | `--no-autotune` | keep the built-in `L3 / 2 MiB` heuristic |
 | `--dry-run` | with `purge`: print what would be removed, delete nothing |
 | `--no-health-restart` | never exit to recover from a stalled miner (default: exit after 15 min of `stalled`/`rejected` so systemd restarts it) |
-
-`zmrig` also takes `--health-restart=SEC`, `--health-warmup=SEC`, and reads
-`"health": {"restart": false, "warmup": 180}` from the config.
+| `--ban-cooldown N` | seconds a pool is left alone after it bans this IP (default `900`). A wrong wallet is clamped to at least 30 minutes, because waiting does not fix it. |
 | `--tls` | TLS stratum |
 | `--cloudflare[=HOST[:PORT]]` | WebSocket inside TLS on 443 and the `zmrig` engine: the one shape that passes HTTPS-only egress and CDNs. See [doc/NETWORK.md](NETWORK.md). |
 | `--transport KIND` | `tcp`, `tls`, `ws` or `wss`, overriding the scheme in `--pool` |
@@ -103,6 +101,14 @@ sudo ./oneclick.sh purge      # remove everything, config included (asks first)
 | `--prefix DIR` | install prefix (default `/usr/local`) |
 | `--force` | regenerate the config even if it exists |
 | `--yes` | never prompt |
+
+`zmrig` also takes `--health-restart=SEC`, `--health-warmup=SEC`, and reads
+`"health": {"restart": false, "warmup": 180}` from the config.
+
+Do not want to remember any of these? The published site has a four-step
+[wizard](https://nggkhaiz.github.io/ZMRIG/wizard.html) that produces the same
+command, plus a `plan`-only variant that changes nothing on the host. Every
+short pool name above is a clickable card there.
 
 Environment variables for unusual setups: `UV_INCLUDE_DIR`, `UV_LIBRARY`
 (locally built libuv), `MINER_REPO_URL`, `MINER_BRANCH`, `MINER_POOL`,
