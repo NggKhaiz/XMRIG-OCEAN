@@ -45,6 +45,12 @@
       "group": "Vận hành"
     },
     {
+      "slug": "proxy",
+      "title": "Proxy cho cả farm",
+      "file": "proxy.md",
+      "group": "Vận hành"
+    },
+    {
       "slug": "loi-nhuan",
       "title": "Lợi nhuận và điện",
       "file": "loi-nhuan.md",

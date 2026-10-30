@@ -36,6 +36,23 @@ test('target is sent little-endian, the way miners parse it', () => {
   assert.strictEqual(bytes.readBigUInt64LE(0), targetForDifficulty(2000));
 });
 
+test('a target from the wire reads back as the same difficulty', () => {
+  // The hex a pool sends is little-endian; reading it big-endian made a proxy
+  // believe difficulty 1000 was 1.07 and forward shares that had not cleared
+  // the pool at all.
+  for (const difficulty of [1, 100, 1000, 2000, 50000.5]) {
+    const wire = targetHex(difficulty);
+    const back = difficultyFromTarget(wire);
+    assert.ok(Math.abs(back - difficulty) / difficulty < 1e-5, `${difficulty} -> ${wire} -> ${back}`);
+  }
+
+  assert.strictEqual(difficultyFromTarget('efa7c64b37894100'), 1000);
+  assert.strictEqual(difficultyFromTarget('0x' + targetHex(2000)), 2000);
+  // A 32-byte target compares on its low 64 bits.
+  assert.strictEqual(difficultyFromTarget(targetHex(1000) + '00'.repeat(24)), 1000);
+  assert.strictEqual(difficultyFromTarget('not hex'), 1);
+});
+
 test('share test compares the last 8 bytes of the hash', () => {
   const low = Buffer.alloc(32, 0);
   const high = Buffer.alloc(32, 0xff);
@@ -50,11 +67,15 @@ test('share test compares the last 8 bytes of the hash', () => {
 });
 
 test('vardiff moves slowly and respects the limits', () => {
-  const slower = nextDifficulty(1000, 60, 15, { min: 1, max: 1e9 });
-  assert.ok(slower > 1000 && slower <= 1000 * 2.1, `got ${slower}`);
+  // A miner taking 60 s per share wants 15: it needs an EASIER target (lower
+  // difficulty) so it submits more often. Four times too slow is capped at one
+  // halving per round.
+  const slow = nextDifficulty(1000, 60, 15, { min: 1, max: 1e9 });
+  assert.ok(slow < 1000 && slow >= 1000 * 0.49, `a slow miner must get an easier target, got ${slow}`);
 
-  const faster = nextDifficulty(1000, 1, 15, { min: 1, max: 1e9 });
-  assert.ok(faster < 1000 && faster >= 1000 * 0.49, `got ${faster}`);
+  // A miner taking 1 s per share is four times too fast: harder target.
+  const fast = nextDifficulty(1000, 1, 15, { min: 1, max: 1e9 });
+  assert.ok(fast > 1000 && fast <= 1000 * 2.1, `a fast miner must get a harder target, got ${fast}`);
 
   assert.strictEqual(nextDifficulty(2, 1000, 15, { min: 10, max: 100 }), 10);
   assert.strictEqual(nextDifficulty(2, 1, 15, { min: 0.001, max: 1 }), 1);

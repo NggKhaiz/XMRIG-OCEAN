@@ -15,3 +15,7 @@ scripts/deps
 
 # local tooling for the web tests (npm install --no-save jsdom)
 /node_modules
+
+# proxy: generated WireGuard keys and per-rig configs (private keys)
+/proxy/wg
+/wg
