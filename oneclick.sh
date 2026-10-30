@@ -57,6 +57,10 @@ TUNE_SERVICE_FILE="${SERVICE_DIR}/${SERVICE_NAME}-tune.service"
 BUILD_DIR_DEFAULT="${MINER_BUILD_DIR:-${PREFIX}/src/xmrig-ocean-build}"
 WALLET=""
 POOL="${MINER_POOL:-gulf.moneroocean.stream:10001}"
+# Extra pools the miner falls back to when the first one cannot be reached or
+# refuses this IP. Empty by default: switching pools behind an operator's back
+# would split payouts, so it is a decision, not a default. `--failover` sets it.
+FAILOVER="${MINER_FAILOVER:-}"
 POOL_PASS="${MINER_PASS:-x}"
 RIG_ID=""
 ALGO=""
@@ -157,6 +161,10 @@ usage() {
 Options
   --wallet ADDR          Monero/pool wallet or login (asked interactively if omitted)
   --pool HOST:PORT       pool endpoint            (default: gulf.moneroocean.stream:10001)
+                         a short name also works: moneroocean, supportxmr, c3pool,
+                         xmrpool, p2pool, herominers
+  --failover LIST        comma-separated backup pools, used only when the first one
+                         is unreachable, bans this IP, or refuses the wallet
   --pass VALUE           pool password            (default: x)
   --rig-id NAME          rig identifier shown on the pool dashboard
   --profile NAME         auto | free | watt. Default auto: free (max hashrate,
@@ -227,6 +235,8 @@ while [ $# -gt 0 ]; do
         --wallet=*)      WALLET="${1#*=}" ;;
         --pool)          POOL="${2:?}"; shift ;;
         --pool=*)        POOL="${1#*=}" ;;
+        --failover)      FAILOVER="${2:?}"; shift ;;
+        --failover=*)    FAILOVER="${1#*=}" ;;
         --pass)          POOL_PASS="${2:?}"; shift ;;
         --pass=*)        POOL_PASS="${1#*=}" ;;
         --rig-id)        RIG_ID="${2:?}"; shift ;;
@@ -300,6 +310,57 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$COMMAND" ] || COMMAND="install"
+
+# ---------------------------------------------------------------------------
+# pool names
+# ---------------------------------------------------------------------------
+# A pool is three facts a person should not have to memorise: its hostname, its
+# port, and whether that port wants TLS. A short name resolves to the pool's
+# default endpoint; anything with a colon is passed through untouched. The
+# endpoints are the ones each pool publishes (see doc/POOLS.md for the sources
+# and for the alternate ports that survive filtered networks).
+pool_preset() {
+    case "${1,,}" in
+        moneroocean|ocean)     echo "gulf.moneroocean.stream:10001" ;;
+        supportxmr|sxmr)       echo "pool.supportxmr.com:3333" ;;
+        c3pool|c3)             echo "c3pool.com:3333" ;;
+        xmrpool|xmrpool.eu)    echo "xmrpool.eu:3333" ;;
+        herominers|hero)       echo "monero.herominers.com:10191" ;;
+        p2pool|p2pool-mini)    echo "pool.xmr.pub:3333" ;;
+        p2pool-nano)           echo "pool.xmr.pub:3334" ;;
+        *) return 1 ;;
+    esac
+}
+
+# resolve_pool <name-or-host:port> -> host:port (or tls://host:port)
+resolve_pool() {
+    local value="$1"
+
+    if [ -z "$value" ]; then
+        echo ""
+        return 0
+    fi
+
+    case "$value" in
+        *:*) echo "$value" ;;
+        *)   pool_preset "$value" || echo "$value" ;;
+    esac
+}
+
+POOL="$(resolve_pool "$POOL")"
+
+FAILOVER_LIST=""
+if [ -n "$FAILOVER" ]; then
+    IFS=',' read -r -a _failover_parts <<< "$FAILOVER"
+    for _part in "${_failover_parts[@]}"; do
+        _part="$(printf '%s' "$_part" | tr -d '[:space:]')"
+        [ -z "$_part" ] && continue
+        _resolved="$(resolve_pool "$_part")"
+        [ "$_resolved" = "$POOL" ] && continue
+        FAILOVER_LIST="${FAILOVER_LIST} ${_resolved}"
+    done
+    unset _failover_parts _part _resolved
+fi
 
 # The C++ engine has no WebSocket client, so any WebSocket transport means the
 # Zig front end. Fail loudly instead of writing a config nothing can use.
@@ -880,6 +941,34 @@ write_config() {
         esac
     fi
 
+    # Backup pools: same wallet, same rig id, used only when the first pool is
+    # unreachable or refuses this IP. The miner cools a refusing pool down
+    # instead of hammering it (zmrig/src/stratum.zig), so a backup costs nothing
+    # while the primary is healthy.
+    local extra_pools=""
+    local failover_entry
+    for failover_entry in ${FAILOVER_LIST:-}; do
+        local fo_url="$failover_entry" fo_tls="false"
+        case "$failover_entry" in
+            tls://*) fo_url="stratum+ssl://${failover_entry#tls://}"; fo_tls="true" ;;
+        esac
+        extra_pools="${extra_pools},
+        {
+            \"algo\": ${algo_json},
+            \"coin\": null,
+            \"url\": \"${fo_url}\",
+            \"user\": \"${WALLET}\",
+            \"pass\": \"${POOL_PASS}\",
+            \"rig-id\": \"${rig}\",
+            \"nicehash\": ${nicehash_flag},
+            \"keepalive\": true,
+            \"enabled\": true,
+            \"tls\": ${fo_tls},
+            \"daemon\": false,
+            \"submit-to-origin\": false
+        }"
+    done
+
     local extra_pool=""
     [ -n "$NET_TRANSPORT" ] && extra_pool="${extra_pool},
             \"transport\": \"${NET_TRANSPORT}\""
@@ -1023,7 +1112,7 @@ ${cpu_threads_json}
             "socks5": null,
             "self-select": null,
             "submit-to-origin": false${extra_pool}
-        }
+        }${extra_pools}
     ],
     "print-time": 60,
     "health-print-time": 60,
@@ -1984,6 +2073,9 @@ cmd_plan() {
         algo_note="$ALGO"
     fi
     printf '    %-14s %s\n' "algo" "$algo_note"
+    if [ -n "${FAILOVER_LIST# }" ]; then
+        printf '    %-14s %s\n' "failover" "$(printf '%s' "${FAILOVER_LIST# }" | tr ' ' ',')"
+    fi
     printf '    %-14s %s  (%s)\n' "profile" "${PROFILE_EFFECTIVE}" "$(profile_reason)"
     printf '    %-14s %s\n' "mode" "$( [ "$ENGINE" = zmrig ] && echo "auto (fast when RAM allows)" || echo "pool default")"
     printf '    %-14s %s\n' "huge pages" "$(huge_page_plan)"

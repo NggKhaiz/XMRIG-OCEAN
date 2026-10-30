@@ -66,7 +66,10 @@ function fakePool(options = {}) {
 
         if (message.method === 'login') {
           if (options.rejectLogin) {
-            socket.write(`${JSON.stringify({ id: message.id, jsonrpc: '2.0', error: { code: -1, message: 'nope' }, result: null })}\n`);
+            // A string is the message the pool would send, so a test can
+            // reproduce "your IP is banned" or "invalid address".
+            const reason = typeof options.rejectLogin === 'string' ? options.rejectLogin : 'nope';
+            socket.write(`${JSON.stringify({ id: message.id, jsonrpc: '2.0', error: { code: -1, message: reason }, result: null })}\n`);
             continue;
           }
 

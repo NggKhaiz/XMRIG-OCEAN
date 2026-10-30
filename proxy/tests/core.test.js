@@ -209,3 +209,18 @@ test('the nonce offset follows the algorithm, not a constant', () => {
   assert.strictEqual(patched.blob.slice(0, 147 * 2), blob.slice(0, 147 * 2), 'the header is untouched');
   assert.strictEqual(patched.blob.slice(150 * 2, 150 * 2 + 2), '07', 'the prefix lands at byte 150');
 });
+
+test('a refusal is classified, because a retried ban is a longer ban', () => {
+  const { Refusal, classifyRefusal } = require('../src/upstream');
+
+  assert.strictEqual(classifyRefusal('your IP is banned'), Refusal.banned);
+  assert.strictEqual(classifyRefusal('BLOCKED'), Refusal.banned);
+  assert.strictEqual(classifyRefusal('Low difficulty share'), Refusal.invalidShare);
+  assert.strictEqual(classifyRefusal('invalid address'), Refusal.credentials);
+  assert.strictEqual(classifyRefusal('Unauthenticated'), Refusal.credentials);
+  assert.strictEqual(classifyRefusal('too many connections'), Refusal.throttled);
+  assert.strictEqual(classifyRefusal('pool is full'), Refusal.full);
+  assert.strictEqual(classifyRefusal('something else'), Refusal.unknown);
+  assert.strictEqual(classifyRefusal(undefined), Refusal.unknown);
+});
+

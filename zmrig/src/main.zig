@@ -18,7 +18,7 @@ const health = @import("health.zig");
 const verify = @import("verify.zig");
 const util = @import("util.zig");
 
-pub const version = "6.29.0-mo12";
+pub const version = "6.30.0-mo13";
 
 var running = std.atomic.Value(bool).init(true);
 
@@ -347,13 +347,50 @@ pub fn main() !void {
 
     var pool_index: usize = 0;
     var failures: u32 = 0;
+    // Per-pool cooldown after a refusal. A pool that banned this IP, or that
+    // does not know the wallet, is not retried every few seconds: repeated
+    // logins are what turns one refusal into a ban on every pool at once.
+    const cooldown = try allocator.alloc(i64, opts.pools.items.len);
+    defer allocator.free(cooldown);
+    @memset(cooldown, 0);
     // Consecutive failures since the last successful login, used only to
     // shape the retry delay. It is not reset when the pool list wraps around,
     // otherwise a dead pool would be hammered every few seconds forever.
     var attempts: u32 = 0;
 
     while (running.load(.acquire)) {
-        const pool = opts.pools.items[pool_index % opts.pools.items.len];
+        const now_ms = std.time.milliTimestamp();
+        var chosen: ?usize = null;
+        var earliest: i64 = std.math.maxInt(i64);
+        var earliest_index: usize = 0;
+
+        var probe: usize = 0;
+        while (probe < opts.pools.items.len) : (probe += 1) {
+            const candidate = (pool_index + probe) % opts.pools.items.len;
+            if (cooldown[candidate] <= now_ms) {
+                chosen = candidate;
+                break;
+            }
+            if (cooldown[candidate] < earliest) {
+                earliest = cooldown[candidate];
+                earliest_index = candidate;
+            }
+        }
+
+        if (chosen == null) {
+            // Every pool refused recently: wait for the first one to come back
+            // instead of knocking on all of them.
+            const wait_ms = @min(@max(earliest - now_ms, 250), 60_000);
+            logger.info("all pools are cooling down ({s} next), waiting {d} s", .{
+                opts.pools.items[earliest_index].host,
+                @divTrunc(wait_ms, 1000),
+            });
+            sleepInterruptibleMs(@intCast(wait_ms));
+            continue;
+        }
+
+        pool_index = chosen.?;
+        const pool = opts.pools.items[pool_index];
 
         logger.info("connecting to {s}://{s}:{d}{s}", .{
             pool.transport.label(),
@@ -373,7 +410,7 @@ pub fn main() !void {
                 pool_index += 1;
             }
             attempts +|= 1;
-            sleepInterruptibleMs(retryDelayMs(opts.retry_pause, attempts));
+            sleepInterruptibleMs(jittered(retryDelayMs(opts.retry_pause, attempts), @as(u64, @bitCast(std.time.microTimestamp()))));
             continue;
         };
         defer session.close();
@@ -388,13 +425,47 @@ pub fn main() !void {
         var first_job = job_mod.Job.init();
         session.login(algos, &first_job) catch |e| {
             logger.err("login failed: {s}", .{@errorName(e)});
-            failures += 1;
-            if (failures >= opts.retries) {
-                failures = 0;
-                pool_index += 1;
+
+            const base_ms: i64 = @as(i64, opts.ban_cooldown) * 1000;
+            switch (session.last_failure) {
+                .credentials => {
+                    const wait = @max(base_ms * 2, 1_800_000);
+                    cooldown[pool_index] = std.time.milliTimestamp() + wait;
+                    logger.err("{s} does not accept this wallet or password; it will not be retried for {d} min. Check the address (95 characters, starts with 4) and the port (TLS pools need tls:// or --tls), because repeating a bad login is what gets an IP banned", .{
+                        pool.host,
+                        @divTrunc(wait, 60_000),
+                    });
+                    pool_index = (pool_index + 1) % opts.pools.items.len;
+                },
+                .banned => {
+                    cooldown[pool_index] = std.time.milliTimestamp() + base_ms;
+                    logger.err("{s} banned this IP; cooling down for {d} min before trying it again", .{
+                        pool.host,
+                        @divTrunc(base_ms, 60_000),
+                    });
+                    pool_index = (pool_index + 1) % opts.pools.items.len;
+                },
+                .throttled, .full => {
+                    const wait = @max(@divTrunc(base_ms, 8), 1000);
+                    cooldown[pool_index] = std.time.milliTimestamp() + wait;
+                    logger.warn("{s} is not taking connections right now ({s}); pausing it for {d} s", .{
+                        pool.host,
+                        session.last_failure.label(),
+                        @divTrunc(wait, 1000),
+                    });
+                    pool_index = (pool_index + 1) % opts.pools.items.len;
+                },
+                else => {
+                    failures += 1;
+                    if (failures >= opts.retries) {
+                        failures = 0;
+                        pool_index = (pool_index + 1) % opts.pools.items.len;
+                    }
+                },
             }
+
             attempts +|= 1;
-            sleepInterruptibleMs(retryDelayMs(opts.retry_pause, attempts));
+            sleepInterruptibleMs(jittered(retryDelayMs(opts.retry_pause, attempts), @as(u64, @bitCast(std.time.microTimestamp()))));
             continue;
         };
 
@@ -414,7 +485,7 @@ pub fn main() !void {
             logger.err("cannot start mining: {s}", .{@errorName(e)});
             miner.submitter.detach();
             attempts +|= 1;
-            sleepInterruptibleMs(retryDelayMs(opts.retry_pause, attempts));
+            sleepInterruptibleMs(jittered(retryDelayMs(opts.retry_pause, attempts), @as(u64, @bitCast(std.time.microTimestamp()))));
             continue;
         };
 
@@ -437,12 +508,22 @@ pub fn main() !void {
             .disconnected => |e| logger.warn("connection lost: {s}", .{@errorName(e)}),
             .shutdown => {},
             .failed => {},
+            .banned => {
+                const wait: i64 = @as(i64, opts.ban_cooldown) * 1000;
+                cooldown[pool_index] = std.time.milliTimestamp() + wait;
+                logger.err("{s} banned this IP; cooling down for {d} min and moving on", .{
+                    pool.host,
+                    @divTrunc(wait, 60_000),
+                });
+                pool_index = (pool_index + 1) % opts.pools.items.len;
+            },
         }
 
         if (!running.load(.acquire)) break;
 
-        // A session that worked and then dropped is retried almost at once.
-        sleepInterruptibleMs(retryDelayMs(opts.retry_pause, 0));
+        // A session that worked and then dropped is retried almost at once --
+        // still with jitter, because a pool restart drops every rig at once.
+        sleepInterruptibleMs(jittered(retryDelayMs(opts.retry_pause, 0), @as(u64, @bitCast(std.time.microTimestamp()))));
     }
 
     logger.info("shutting down", .{});
@@ -462,6 +543,9 @@ const SessionEnd = union(enum) {
     disconnected: anyerror,
     shutdown,
     failed,
+    /// The pool refused the work itself and named a ban. Retrying it at once
+    /// is how a 10-minute ban becomes an hour.
+    banned,
 };
 
 fn runSession(
@@ -508,8 +592,18 @@ fn runSession(
                     _ = miner.submitter.accepted.fetchAdd(1, .monotonic);
                     logger.info("share accepted ({d} total)", .{miner.submitter.accepted.load(.monotonic)});
                 } else {
+                    const reason = reply.message orelse "unknown reason";
+                    const refusal = stratum.classify(reason);
+
+                    if (refusal == .banned) {
+                        logger.err("the pool banned this IP: {s}", .{reason});
+
+                        return .banned;
+                    }
+
                     _ = miner.submitter.rejected.fetchAdd(1, .monotonic);
-                    logger.warn("share rejected: {s}", .{reply.message orelse "unknown reason"});
+                    logger.warn("share rejected: {s}", .{reason});
+                    miner.submitter.noteRejection(refusal, logger);
                 }
             },
             .keepalive => {},
@@ -650,6 +744,7 @@ const Monitor = struct {
             .accepted = submitter.accepted.load(.monotonic),
             .rejected = submitter.rejected.load(.monotonic),
             .submitted = submitter.submitted.load(.monotonic),
+            .quarantined = submitter.quarantined(),
             .paused = self.miner.shared.paused.load(.acquire),
         };
     }
@@ -1259,6 +1354,18 @@ fn daemonise() !void {
 /// How long to wait before the next connection attempt. A dropped connection
 /// comes back in 200 ms instead of `--retry-pause` seconds, and repeated
 /// failures back off to the configured pause instead of hammering a dead pool.
+/// ±20 % on every retry. A farm that restarts together must not arrive at the
+/// pool in the same millisecond: from the other side that is a login flood, and
+/// a login flood is exactly what gets an IP banned. Returns `delay_ms` unchanged
+/// when the window is too small to matter, so short pauses stay short.
+fn jittered(delay_ms: u64, entropy: u64) u64 {
+    if (delay_ms < 100) return delay_ms;
+
+    const spread = delay_ms / 5;
+
+    return delay_ms - spread + (entropy % (spread * 2 + 1));
+}
+
 fn retryDelayMs(configured_seconds: u32, failures: u32) u64 {
     const configured: u64 = @as(u64, configured_seconds) * 1000;
 
@@ -1536,6 +1643,24 @@ fn benchmark(allocator: std.mem.Allocator, opts: *const options.Options, cap_sec
         .steady_rate = steady_rate,
         .huge_pages = huge_pages,
     };
+}
+
+test "retry delays are jittered, so a farm does not arrive at once" {
+    const testing = std.testing;
+
+    // Always inside ±20 % of the nominal delay, for any entropy.
+    var entropy: u64 = 0;
+    while (entropy < 20_000) : (entropy += 997) {
+        const delay = jittered(5000, entropy);
+        try testing.expect(delay >= 4000 and delay <= 6000);
+    }
+
+    // Different entropy must actually spread the value, or it is not jitter.
+    try testing.expect(jittered(5000, 0) != jittered(5000, 9999));
+
+    // Pauses under 100 ms stay exact: spreading a 50 ms retry buys nothing.
+    try testing.expectEqual(@as(u64, 50), jittered(50, 12345));
+    try testing.expectEqual(@as(u64, 99), jittered(99, 12345));
 }
 
 test "reconnect backoff: quick first tries, then the configured pause" {

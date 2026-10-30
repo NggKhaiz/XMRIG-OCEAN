@@ -333,7 +333,7 @@ test "encode has the prefix and round trips through base64" {
     var buf: [1200]u8 = undefined;
     const code = try encode(&buf, .{
         .id = "rig \"one\"",
-        .version = "6.29.0-mo12",
+        .version = "6.30.0-mo13",
         .cpu = "Test CPU",
         .rates = .{ 1000, 990, 980, 1010 },
         .shares = .{ 12, 1, 0 },

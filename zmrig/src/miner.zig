@@ -36,6 +36,12 @@ pub const Share = struct {
 };
 
 /// Hands shares to the pool connection from worker threads.
+/// A pool that validates every share bans the IP for it (xmrpool.eu: 10
+/// minutes, an hour if it keeps happening). Three in a row is enough to know
+/// the rig, not the pool, is wrong -- so stop sending before the ban lands.
+pub const INVALID_SHARE_LIMIT: u64 = 3;
+pub const INVALID_QUARANTINE_MS: i64 = 600_000;
+
 pub const Submitter = struct {
     mutex: std.Thread.Mutex = .{},
     session: ?*stratum.Session = null,
@@ -50,6 +56,11 @@ pub const Submitter = struct {
     /// counts answers, this counts questions, so "sent 500, answered 0" is
     /// visible -- which is what a pool that goes silent looks like.
     submitted: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    /// Shares the pool called invalid since the last accepted one, and the
+    /// moment submissions may resume. See INVALID_SHARE_LIMIT.
+    invalid: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    quarantine_until: std.atomic.Value(i64) = std.atomic.Value(i64).init(0),
+    last_quarantine_warn: std.atomic.Value(i64) = std.atomic.Value(i64).init(0),
 
     pub fn attach(self: *Submitter, session: *stratum.Session) void {
         self.mutex.lock();
@@ -85,8 +96,40 @@ pub const Submitter = struct {
         self.session = null;
     }
 
+    /// Counts a rejected share and quarantines submissions when the pool keeps
+    /// calling them invalid. Silence here costs the whole IP: pools that
+    /// validate every share escalate a stream of bad ones to an hour-long ban.
+    pub fn noteRejection(self: *Submitter, refusal: stratum.Refusal, logger: *log.Logger) void {
+        if (refusal != .invalid_share) return;
+
+        const count = self.invalid.fetchAdd(1, .monotonic) + 1;
+        if (count < INVALID_SHARE_LIMIT) return;
+
+        self.invalid.store(0, .monotonic);
+        self.quarantine_until.store(std.time.milliTimestamp() + INVALID_QUARANTINE_MS, .monotonic);
+
+        logger.err("the pool called {d} shares invalid in a row; pausing submissions for {d} s, because a stream of bad shares is what gets an IP banned. Check overclocking, huge pages and `zmrig --self-test`; mining resumes on its own", .{ count, INVALID_QUARANTINE_MS / 1000 });
+    }
+
+    pub fn quarantined(self: *const Submitter) bool {
+        return std.time.milliTimestamp() < self.quarantine_until.load(.monotonic);
+    }
+
     pub fn submit(self: *Submitter, share: *const Share, logger: *log.Logger) void {
         _ = self.submitted.fetchAdd(1, .monotonic);
+
+        if (self.quarantined()) {
+            _ = self.failed.fetchAdd(1, .monotonic);
+
+            // One line per minute is enough to see it in a log.
+            const now = std.time.milliTimestamp();
+            if (now - self.last_quarantine_warn.load(.monotonic) > 60_000) {
+                self.last_quarantine_warn.store(now, .monotonic);
+                logger.warn("not submitting: still in the invalid-share quarantine ({d} s left)", .{@divTrunc(self.quarantine_until.load(.monotonic) - now, 1000)});
+            }
+
+            return;
+        }
 
         self.mutex.lock();
         defer self.mutex.unlock();

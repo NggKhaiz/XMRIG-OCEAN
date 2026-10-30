@@ -226,5 +226,18 @@ else
 fi
 rm -f "$auto_cfg"
 
+# --ban-cooldown is the anti-ban knob: it must be accepted, documented, and
+# visible in --help next to the other reconnect flags.
+expect_exit 0 "--ban-cooldown is accepted" -- \
+    "$BIN" -o pool.example.com:3333 -u "$WALLET" --ban-cooldown=60 --check
+expect_exit 1 "--ban-cooldown rejects junk" -- \
+    "$BIN" -o pool.example.com:3333 -u "$WALLET" --ban-cooldown=soon --check
+
+if "$BIN" --help | grep -qF -- "--ban-cooldown=N"; then
+    record PASS "--ban-cooldown is documented" ""
+else
+    record FAIL "--ban-cooldown is documented" "not in --help"
+fi
+
 printf '\n    %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

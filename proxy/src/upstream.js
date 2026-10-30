@@ -20,6 +20,42 @@ const net = require('node:net');
 const tls = require('node:tls');
 const { EventEmitter } = require('node:events');
 
+/// Why a pool said no, and how long to leave it alone. A wrong wallet retried
+/// every five seconds is how a farm's public IP gets banned on every pool it
+/// knows; a ban retried immediately is how a ten-minute ban becomes an hour.
+const Refusal = {
+  banned: 'banned',
+  credentials: 'credentials',
+  throttled: 'throttled',
+  full: 'full',
+  invalidShare: 'invalid share',
+  unknown: 'unknown',
+};
+
+const REFUSAL_COOLDOWN_MS = {
+  banned: 900_000,
+  credentials: 1_800_000,
+  throttled: 60_000,
+  full: 60_000,
+  'invalid share': 60_000,
+  unknown: 0,
+};
+
+/** Turns a pool's error text into a refusal. Order matters: "invalid share"
+ *  also contains "invalid", so shares are matched before credentials. */
+function classifyRefusal(text) {
+  const reason = String(text || '').toLowerCase();
+  if (!reason) return Refusal.unknown;
+
+  if (/(ban|blocked|blacklist|not allowed|denied)/.test(reason)) return Refusal.banned;
+  if (/(invalid share|low difficulty|bad share|invalid result|invalid nonce|invalid hash)/.test(reason)) return Refusal.invalidShare;
+  if (/(too many|rate limit|ratelimit|slow down|throttl|retry later)/.test(reason)) return Refusal.throttled;
+  if (/(full|no slots|busy)/.test(reason)) return Refusal.full;
+  if (/(invalid login|invalid address|invalid user|invalid wallet|unauthenticated|unauthorized|unauthorised|wrong password|bad login)/.test(reason)) return Refusal.credentials;
+
+  return Refusal.unknown;
+}
+
 const KEEPALIVE_MS = 60_000;
 
 class Upstream extends EventEmitter {
@@ -51,6 +87,8 @@ class Upstream extends EventEmitter {
     this.buffer = '';
     this.poolIndex = 0;
     this.attempt = 0;
+    // Pool string -> timestamp before which it is not contacted again.
+    this.cooldowns = new Map();
     this.closed = false;
     this.loggedIn = false;
     this.job = null;            // the raw job object, as the pool sent it
@@ -70,6 +108,7 @@ class Upstream extends EventEmitter {
       rejected: 0,
       stale: 0,
       lastError: null,
+      lastRefusal: null,
       lastJobAt: 0,
     };
   }
@@ -93,7 +132,20 @@ class Upstream extends EventEmitter {
       return;
     }
 
-    const pool = this.pools[this.poolIndex % this.pools.length];
+    const chosen = this.nextPool();
+
+    if (!chosen) {
+      // Every pool refused recently. Knocking on all of them is what turns one
+      // refusal into a ban on all of them, so wait for the first one to expire.
+      const { waitMs, pool: cooling } = this.earliestCooldown();
+      this.log('warn', `all pools are cooling down (${cooling.host} next); waiting ${Math.ceil(waitMs / 1000)} s`);
+      this.reconnectTimer = setTimeout(() => this.connect(), Math.max(250, Math.min(waitMs, 60_000)));
+      this.reconnectTimer.unref?.();
+      return;
+    }
+
+    this.poolIndex = chosen.index;
+    const pool = chosen.pool;
     this.log('info', `connecting upstream to ${pool.tls ? 'tls://' : 'tcp://'}${pool.host}:${pool.port}`);
 
     const onConnect = () => {
@@ -225,13 +277,60 @@ class Upstream extends EventEmitter {
     this.write({ id: this.loginId, jsonrpc: '2.0', method: 'login', params });
   }
 
-  /** The pool refused the credentials. Rotate: a stale pool, a changed
-   *  password or an IP ban all look the same from here. */
+  /** First pool, from the current index on, that is not cooling down. */
+  nextPool() {
+    const now = Date.now();
+
+    for (let offset = 0; offset < this.pools.length; offset++) {
+      const index = (this.poolIndex + offset) % this.pools.length;
+      const pool = this.pools[index];
+      const until = this.cooldowns.get(poolKey(pool)) || 0;
+
+      if (until <= now) return { index, pool };
+    }
+
+    return null;
+  }
+
+  earliestCooldown() {
+    const now = Date.now();
+    let best = { pool: this.pools[0], waitMs: 0 };
+
+    for (const pool of this.pools) {
+      const until = this.cooldowns.get(poolKey(pool)) || 0;
+      const waitMs = Math.max(250, until - now);
+
+      if (!best.pool || waitMs < best.waitMs) best = { pool, waitMs };
+    }
+
+    return best;
+  }
+
+  cool(pool, ms) {
+    if (ms <= 0) return;
+    this.cooldowns.set(poolKey(pool), Date.now() + ms);
+  }
+
+  /** The pool refused the login. Rotate now, and leave that pool alone for a
+   *  while: repeating a refusal is what gets the farm's IP banned. */
   onLoginError(error) {
     const reason = error?.message || JSON.stringify(error);
+    const refusal = classifyRefusal(reason);
     this.stats.lastError = reason;
-    this.log('warn', `pool refused the login: ${reason}`);
 
+    const pool = this.pools[this.poolIndex % this.pools.length];
+    const wait = REFUSAL_COOLDOWN_MS[refusal] || 0;
+    this.cool(pool, wait);
+
+    if (refusal === Refusal.credentials) {
+      this.log('error', `${pool.host} rejected the wallet or password: ${reason}. Pausing it for ${Math.round(wait / 60_000)} min instead of retrying every few seconds, because repeated logins are what gets an IP banned`);
+    } else if (refusal === Refusal.banned) {
+      this.log('error', `${pool.host} banned this IP: ${reason}. Pausing it for ${Math.round(wait / 60_000)} min`);
+    } else {
+      this.log('warn', `pool refused the login (${refusal}): ${reason}`);
+    }
+
+    this.stats.lastRefusal = refusal;
     this.poolIndex += 1;
     this.attempt = 0;
     this.drop('login rejected');
@@ -340,7 +439,11 @@ class Upstream extends EventEmitter {
     // A pool that accepted the login and then died is worth retrying at once;
     // one that never answered gets an exponential pause.
     this.attempt = wasLoggedIn ? 0 : this.attempt + 1;
-    const pause = Math.min(this.retryPauseMs * 2 ** Math.min(this.attempt, 4), this.maxRetryPauseMs);
+    const nominal = Math.min(this.retryPauseMs * 2 ** Math.min(this.attempt, 4), this.maxRetryPauseMs);
+
+    // ±20 %, so a farm that restarts together does not arrive at the pool in
+    // the same millisecond -- from the other side that is a login flood.
+    const pause = nominal < 100 ? nominal : Math.round(nominal * (0.8 + Math.random() * 0.4));
 
     if (!wasLoggedIn && this.attempt >= 3) {
       this.poolIndex += 1;
@@ -379,6 +482,12 @@ class Upstream extends EventEmitter {
   }
 }
 
+/** Identity of a pool for the cooldown table: TLS or not is a different
+ *  endpoint, and treating them as one would cool down the wrong one. */
+function poolKey(pool) {
+  return `${pool.tls ? 'tls' : 'tcp'}://${pool.host}:${pool.port}`;
+}
+
 function parsePool(text) {
   const value = String(text).trim();
   const tls = /^(tls|ssl|stratum\+ssl):\/\//.test(value);
@@ -390,4 +499,4 @@ function parsePool(text) {
   return { host, port: Number.isFinite(port) ? port : 3333, tls };
 }
 
-module.exports = { Upstream, parsePool };
+module.exports = { REFUSAL_COOLDOWN_MS, Refusal, Upstream, classifyRefusal, parsePool };
