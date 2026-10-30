@@ -18,7 +18,7 @@ const health = @import("health.zig");
 const verify = @import("verify.zig");
 const util = @import("util.zig");
 
-pub const version = "6.32.0";
+pub const version = "6.32.1";
 
 var running = std.atomic.Value(bool).init(true);
 

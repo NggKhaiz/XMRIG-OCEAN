@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZMRIG — chuyển trang</title>
+<meta name="robots" content="noindex">
+<!--
+  GitHub Pages serves this file for every path it cannot find.
+
+  Why it exists: Pages can publish the repository root (Settings → Pages →
+  Source: "Deploy from a branch"), and the site itself lives one directory
+  down, in web/. Every URL that looks like /ZMRIG/wizard.html then misses. This
+  rewrites it to /ZMRIG/web/wizard.html, which is where the file actually is.
+
+  With Source: "GitHub Actions" the published artifact *is* web/, so this file
+  is never served, and web/404.html answers instead.
+
+  The repository name below is the first path segment on a project page. On a
+  custom domain there is no such segment, so a path that does not start with it
+  is treated as root-relative and gets web/ in front.
+-->
+<noscript><meta http-equiv="refresh" content="0; url=/ZMRIG/web/"></noscript>
+<script>
+(function () {
+  var REPO = "/ZMRIG/";
+  var path = location.pathname;
+
+  // Already inside the site: the page really is missing. Do not loop.
+  if (path.indexOf(REPO + "web/") === 0 || path.indexOf("/web/") === 0) {
+    return;
+  }
+
+  var target = path.indexOf(REPO) === 0
+    ? REPO + "web/" + path.slice(REPO.length)
+    : "/web/" + path.replace(/^\/+/, "");
+
+  location.replace(target + location.search + location.hash);
+})();
+</script>
+<style>body{font:16px/1.6 system-ui,sans-serif;margin:3rem auto;max-width:34rem;padding:0 1.25rem;color:#1c1b1a}a{color:#c2410c}</style>
+</head>
+<body>
+<p>Đang chuyển tới <a href="web/">trang chủ ZMRIG</a>…</p>
+<p><a href="https://github.com/NggKhaiz/ZMRIG#install-in-one-command">Cài đặt bằng một lệnh</a> · <a href="https://github.com/NggKhaiz/ZMRIG">mã nguồn</a></p>
+</body>
+</html>
