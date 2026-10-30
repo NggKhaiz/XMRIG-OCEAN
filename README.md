@@ -289,6 +289,33 @@ node src/index.js --config config.json           # stratum + HTTP
 npm test                                         # 28 tests, includes a real miner
 ```
 
+## Several rigs, one address: `proxy/`
+
+A farm loses money in three ways that never show up in a miner log: two rigs
+computing the same nonce, one difficulty that starves the smallest machine, and a
+login storm that gets the public IP rate-limited. `proxy/` fixes all three and
+needs nothing installed:
+
+```bash
+sudo ./proxy/install.sh --user=<wallet> --pool=gulf.moneroocean.stream:10001
+```
+
+* **one upstream connection** for the whole farm, one login at the pool;
+* **one nonce byte per rig** (255 rigs), so no two machines can find the same
+  share — the byte order lives in `proxy/src/blob.js` and is unit-tested, because
+  getting it wrong looks completely healthy from the outside;
+* **per-rig difficulty**, ~15 s between shares on a 500 H/s box and a 20 kH/s one;
+* **rigs survive the pool dying**: sockets stay open, the last job is replayed, a
+  pool that refuses the login is left behind immediately;
+* **one flag for the network**: `--tunnel=wireguard` (fixed `10.66.66.x`, UDP, no
+  third party), `--tunnel=tailscale`, `--tunnel=cf`, `--tunnel=cf-quick`;
+* **43 tests**, including real sockets and a WebSocket rig: `cd proxy && npm test`.
+
+Cloudflare quick tunnels are **demo only** — random hostname that changes on every
+restart, 200 concurrent requests, no authentication, and Cloudflare says so. The
+reasoning, the WireGuard recipe and the pool choice are in
+[`doc/PROXY.md`](doc/PROXY.md).
+
 ## Restrictive networks
 
 `--cloudflare` switches the miner to WebSocket over TLS on 443, dials a specific
@@ -389,6 +416,8 @@ npm run test:pool                    # pool unit + protocol + end-to-end (28 tes
 * [`doc/DONATE.md`](doc/DONATE.md) — the one donation address, how to check it,
   and what a donation does and does not buy.
 * [`doc/NETWORK.md`](doc/NETWORK.md) — 443-only VPS, proxies, edge dialling.
+* [`doc/PROXY.md`](doc/PROXY.md) — `proxy/`: one pool connection for a farm,
+  extranonce, per-rig difficulty, and the honest tunnel comparison.
 * [`doc/ALTERNATIVES.md`](doc/ALTERNATIVES.md) — measured comparison with
   Rust/Go miners, and why the C++ RandomX JIT stays.
 * [`web/content/vi/`](web/content/vi/) — the same material as a browsable site.

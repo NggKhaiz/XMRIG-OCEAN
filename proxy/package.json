@@ -1,0 +1,30 @@
+{
+  "name": "zmrig-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "One pool connection for every rig: extranonce allocation, per-rig difficulty, tunnels.",
+  "type": "commonjs",
+  "main": "src/main.js",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "start": "node src/main.js start",
+    "test": "node --test --test-concurrency=1 --test-timeout=30000 'tests/*.test.js'",
+    "doctor": "node src/main.js doctor"
+  },
+  "license": "MIT",
+  "bin": {
+    "zmrig-proxy": "src/main.js"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "keywords": [
+    "monero",
+    "stratum",
+    "proxy",
+    "mining"
+  ]
+}
