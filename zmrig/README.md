@@ -104,8 +104,8 @@ right `Host` and path. `tests/net/cert.sh` makes the throwaway CA the `tls` and
 
 ```sh
 zmrig -o pool.example.org:10001 -u <wallet> --rig-id rig1
-zmrig -c /etc/xmrig-ocean/config.json --no-color
-zmrig --check -c /etc/xmrig-ocean/config.json   # validate config, do not mine
+zmrig -c /etc/zmrig/config.json --no-color
+zmrig --check -c /etc/zmrig/config.json   # validate config, do not mine
 ```
 
 Supported flags mirror XMRig (`-o/-u/-p/-a/-t/-k/--cpu-affinity/--huge-pages/
@@ -142,7 +142,7 @@ including a Cloudflare Worker that turns any pool into a `wss` endpoint.
 ## Monitoring API
 
 ```sh
-zmrig -c /etc/xmrig-ocean/config.json --http-port 18080 --http-access-token SECRET
+zmrig -c /etc/zmrig/config.json --http-port 18080 --http-access-token SECRET
 curl -H "Authorization: Bearer SECRET" http://127.0.0.1:18080/1/summary
 ```
 
@@ -154,7 +154,7 @@ read only, binds to `127.0.0.1` by default, and every number it serves comes
 from atomics the monitor already publishes — polling it costs nothing.
 
 The installer writes `"http": {"enabled": true, "port": 18080}` into the
-config, so `xmrig-ocean status` works out of the box.
+config, so `zmrig status` works out of the box.
 
 ## Machine report (`--report`)
 
@@ -175,7 +175,7 @@ zmrig ... --report-file /run/zmrig.report --report-interval 60   # keep a file f
 records the source in the payload (`pwsrc`: `rapl`, `hwmon`, `user` or `none`).
 
 The installer enables the report file for the `zmrig` engine, so after an
-install `cat /var/lib/xmrig-ocean/report.txt` gives a code to paste into the
+install `cat /var/lib/zmrig/report.txt` gives a code to paste into the
 dashboard in `web/` (`zmrig --report` also works with no pool configured).
 
 Power sampling is what makes the code useful: the web calculator turns

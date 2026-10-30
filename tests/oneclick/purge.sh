@@ -31,21 +31,25 @@ fail() { printf ' FAIL %s\n' "$*"; FAILED=1; }
 # A sandbox that looks like a real install: binaries, config with a wallet,
 # state, build cache, service units, and one file the tool does not own.
 PREFIX="${WORK}/usr-local"
-CONFIG="${WORK}/etc-xmrig-ocean"
+CONFIG="${WORK}/etc-zmrig"
 STATE="${WORK}/var-lib"
 BUILD="${WORK}/build"
 UNITS="${WORK}/systemd"
 KEEP="${WORK}/wallet-backup.txt"
 
 mkdir -p "${PREFIX}/bin" "${CONFIG}" "${STATE}" "${BUILD}" "${UNITS}"
-printf '#!/bin/sh\n' > "${PREFIX}/bin/xmrig-ocean"
 printf '#!/bin/sh\n' > "${PREFIX}/bin/zmrig"
+printf '#!/bin/sh\n' > "${PREFIX}/bin/zmrig-tune"
+# The helper name and the unit name used by installer 1.2, so a purge also has
+# to clean up after an install that predates the rename.
+printf '#!/bin/sh\n' > "${PREFIX}/bin/xmrig-ocean-verify"
+printf '[Unit]\n' > "${UNITS}/xmrig-ocean.service"
 printf '{"pools":[{"user":"4AdUndXHHZ6cfufTMvppY6JwXNouMBzSkbLYfpAV5Usx3skxNgYeYTRj5UzqtReoS44qo9mtmXCqY45DJ852K5Jv2684Rge"}]}\n' > "${CONFIG}/config.json"
 printf 'zmrig\n' > "${CONFIG}/engine"
 printf '{"shares":1}\n' > "${STATE}/state.json"
 printf 'object code\n' > "${BUILD}/miner.o"
-printf '[Unit]\n' > "${UNITS}/xmrig-ocean.service"
-printf '[Unit]\n' > "${UNITS}/xmrig-ocean-tune.service"
+printf '[Unit]\n' > "${UNITS}/zmrig.service"
+printf '[Unit]\n' > "${UNITS}/zmrig-tune.service"
 printf 'my wallet, in a place the tool does not own\n' > "$KEEP"
 
 run_purge() {
@@ -99,8 +103,10 @@ fi
 
 gone=0
 missing=0
-for path in "${PREFIX}/bin/xmrig-ocean" "${PREFIX}/bin/zmrig" "${CONFIG}" "${STATE}" "${BUILD}" \
-            "${UNITS}/xmrig-ocean.service" "${UNITS}/xmrig-ocean-tune.service"; do
+for path in "${PREFIX}/bin/zmrig" "${PREFIX}/bin/zmrig-tune" \
+            "${PREFIX}/bin/xmrig-ocean-verify" "${CONFIG}" "${STATE}" "${BUILD}" \
+            "${UNITS}/zmrig.service" "${UNITS}/zmrig-tune.service" \
+            "${UNITS}/xmrig-ocean.service"; do
     if [ -e "$path" ]; then
         missing=$((missing + 1))
         printf '      still present: %s\n' "$path"

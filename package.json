@@ -1,7 +1,7 @@
 {
-  "name": "xmrig",
-  "version": "3.0.0",
-  "description": "RandomX, CryptoNight and Argon2 miner",
+  "name": "zmrig",
+  "version": "6.32.0",
+  "description": "ZMRIG - RandomX miner with 0% developer fee, by @nggkhaiz",
   "main": "index.js",
   "directories": {
     "doc": "doc"
@@ -11,19 +11,27 @@
     "test": "node run_tests.js",
     "test:web": "node --test web/tests/*.test.js",
     "test:pool": "node --test pool/tests/*.test.js",
-    "test:oneclick": "bash tests/oneclick/plan.sh && bash tests/oneclick/config.sh && bash tests/oneclick/governor.sh && bash tests/oneclick/purge.sh"
+    "test:oneclick": "bash tests/oneclick/plan.sh && bash tests/oneclick/config.sh && bash tests/oneclick/governor.sh && bash tests/oneclick/purge.sh",
+    "test:docs": "bash tests/docs/links.sh"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/xmrig/xmrig.git"
+    "url": "git+https://github.com/NggKhaiz/ZMRIG.git"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "monero",
+    "randomx",
+    "miner",
+    "pool",
+    "zig",
+    "gpl-3.0"
+  ],
+  "author": "@nggkhaiz (https://github.com/NggKhaiz)",
   "license": "GPLv3",
   "bugs": {
-    "url": "https://github.com/xmrig/xmrig/issues"
+    "url": "https://github.com/NggKhaiz/ZMRIG/issues"
   },
-  "homepage": "https://github.com/xmrig/xmrig#readme",
+  "homepage": "https://nggkhaiz.github.io/ZMRIG/",
   "devDependencies": {
     "jsdom": "^30.1.3"
   }

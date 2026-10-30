@@ -41,13 +41,13 @@ End state:
 
 | Path | What |
 |---|---|
-| `/usr/local/bin/xmrig-ocean` | the miner |
-| `/usr/local/bin/xmrig-ocean-tune` | host tuning (`--status`, `--hugepages 1G`, …) |
-| `/usr/local/bin/xmrig-ocean-bench` | reproducible hashrate measurement |
-| `/usr/local/bin/xmrig-ocean-verify` | proves the binary has no developer fee |
-| `/etc/xmrig-ocean/config.json` | configuration (rewritten by autosave) |
-| `xmrig-ocean.service` | supervised miner, `Restart=always`, `Nice=-10` |
-| `xmrig-ocean-tune.service` | oneshot tuner, runs before the miner at boot |
+| `/usr/local/bin/zmrig` | the miner (the C++ engine installs as `xmrig`) |
+| `/usr/local/bin/zmrig-tune` | host tuning (`--status`, `--hugepages 1G`, …) |
+| `/usr/local/bin/zmrig-bench` | reproducible hashrate measurement |
+| `/usr/local/bin/zmrig-verify` | proves the binary has no developer fee |
+| `/etc/zmrig/config.json` | configuration (rewritten by autosave) |
+| `zmrig.service` | supervised miner, `Restart=always`, `Nice=-10` |
+| `zmrig-tune.service` | oneshot tuner, runs before the miner at boot |
 | `http://127.0.0.1:18080/2/summary` | live read-only monitoring API (XMRig JSON; `"http"` in the config) |
 
 ```bash
@@ -97,7 +97,7 @@ sudo ./oneclick.sh purge      # remove everything, config included (asks first)
 | `--no-tune` | do not touch huge pages / MSR / governor |
 | `--no-service` | configure only, do not install a service |
 | `--no-build` | reuse an existing build directory |
-| `--build-dir DIR` | where to compile (default `/usr/local/src/xmrig-ocean-build`) |
+| `--build-dir DIR` | where to compile (default `/usr/local/src/zmrig-build`) |
 | `--prefix DIR` | install prefix (default `/usr/local`) |
 | `--force` | regenerate the config even if it exists |
 | `--yes` | never prompt |
@@ -189,13 +189,13 @@ Differences worth knowing:
 |---|---|---|
 | algorithms | all backends/algorithms in this fork | RandomX family only (`rx/0`, `rx/2`, `rx/wow`, `rx/arq`, `rx/graft`, `rx/sfx`, `rx/yada`, `panthera`) |
 | build deps | cmake, libuv, OpenSSL, hwloc | `g++`, `ar`, zig 0.13 (installed automatically) |
-| binary | `/usr/local/bin/xmrig-ocean` | `/usr/local/bin/zmrig` + `xmrig-ocean` symlink |
+| binary | `/usr/local/bin/xmrig` (service: `zmrig.service`) | `/usr/local/bin/zmrig` |
 | measured | 1075.7 H/s (`scripts/bench.sh`) | 1084–1089 H/s installed, 1.08–1.10 kH/s `--bench` |
 | TLS | full (including `--tls-insecure`) | full verification, private CA via `--tls-ca` (Zig 0.13 has no "skip verify") |
 | transports | TCP, TLS | TCP, TLS, WebSocket, WebSocket+TLS, HTTP CONNECT, SOCKS5 |
 | self-test | — | `zmrig --self-test` (vectors + 2 GiB dataset) |
 
-The chosen engine is recorded in `/etc/xmrig-ocean/engine`, so the subcommands
+The chosen engine is recorded in `/etc/zmrig/engine`, so the subcommands
 that run later (`status`, `logs`, `bench`, `verify`, `start`, …) pick the same
 binary without repeating `--engine`. Passing `--engine` again overrides it.
 
@@ -224,8 +224,8 @@ The result is stored in `config.json` under `algo-perf`, so later starts are
 instant. Re-calibrate only after a hardware change:
 
 ```bash
-sudo systemctl stop xmrig-ocean
-sudo /usr/local/bin/xmrig-ocean -c /etc/xmrig-ocean/config.json --rebench-algo
+sudo systemctl stop zmrig
+sudo /usr/local/bin/zmrig -c /etc/zmrig/config.json --rebench-algo
 ```
 
 ---
@@ -250,12 +250,12 @@ installed and running".
 | Symptom | Cause | Fix |
 |---|---|---|
 | `libuv headers were not found` | no `libuv1-dev` and no network for the package manager | install it, or build libuv and pass `UV_INCLUDE_DIR`/`UV_LIBRARY` |
-| `the miner rejected the generated config` | wallet contains an unescaped character | re-run with a clean wallet, or edit `/etc/xmrig-ocean/config.json` and `systemctl restart xmrig-ocean` |
+| `the miner rejected the generated config` | wallet contains an unescaped character | re-run with a clean wallet, or edit `/etc/zmrig/config.json` and `systemctl restart zmrig` |
 | `no hashrate after …s` and the log shows `connect error` | pool unreachable / firewall | `sudo ./oneclick.sh config --force --pool another.pool:port ...` |
-| `huge pages are not fully allocated` in the log | tuning did not run (non-root, container) | `sudo /usr/local/bin/xmrig-ocean-tune` then restart the service |
+| `huge pages are not fully allocated` in the log | tuning did not run (non-root, container) | `sudo /usr/local/bin/zmrig-tune` then restart the service |
 | `FAILED TO APPLY MSR MOD` | kernel module missing or a hypervisor that blocks MSR writes | run `modprobe msr`; inside VMs this is expected and harmless |
-| service restarts in a loop | config or binary replaced while running | `sudo ./oneclick.sh logs` then `systemctl status xmrig-ocean` |
-| systemd is not available (container) | — | the installer falls back to a background process with a pidfile in `/var/lib/xmrig-ocean/` |
+| service restarts in a loop | config or binary replaced while running | `sudo ./oneclick.sh logs` then `systemctl status zmrig` |
+| systemd is not available (container) | — | the installer falls back to a background process with a pidfile in `/var/lib/zmrig/` |
 
 `./oneclick.sh status` prints service state, live hashrate, accepted shares, huge
 page count and the log tail, which covers most of the table above.

@@ -201,7 +201,7 @@ cd pool/worker
 npx wrangler deploy --var POOL_HOST:pool.example.com --var POOL_PORT:3333
 ```
 
-Then: `zmrig -o wss://ocean-pool.<account>.workers.dev/stratum -u …`.
+Then: `zmrig -o wss://zmrig-pool.<account>.workers.dev/stratum -u …`.
 
 ### Vercel
 

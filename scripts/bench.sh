@@ -55,7 +55,7 @@ fi
 
 # A miner that is already running owns the huge pages, which silently degrades
 # this measurement. Detect it instead of reporting a wrong number.
-if pgrep -x xmrig >/dev/null 2>&1 || pgrep -x xmrig-ocean >/dev/null 2>&1 || pgrep -x xmrig-notls >/dev/null 2>&1; then
+if pgrep -x xmrig >/dev/null 2>&1 || pgrep -x zmrig >/dev/null 2>&1 || pgrep -x xmrig-notls >/dev/null 2>&1; then
     warn "another miner process is running - stop it first or the huge pages are shared"
 fi
 

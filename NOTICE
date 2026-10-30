@@ -1,0 +1,66 @@
+ZMRIG
+=====
+
+Copyright (C) 2026 @nggkhaiz <https://github.com/NggKhaiz>
+
+ZMRIG is a fee-free RandomX miner, a self-hosted Monero pool, a proxy for a
+farm of rigs, and the documentation site that ties them together. It is
+maintained by @nggkhaiz and released under the GNU General Public License
+version 3. The full licence text is in LICENSE; this file records what that
+licence requires to be attributed.
+
+Upstream
+--------
+
+ZMRIG is a fork of XMRig and keeps XMRig's RandomX engine, its memory
+allocator, its configuration format and its command line. The C++ miner in
+src/ is XMRig with the developer-donation code removed; the Zig miner in
+zmrig/ links the same engine.
+
+  XMRig           Copyright (C) 2016-2026 xmrig.com
+                  Copyright (C) 2018-2026 SChernykh
+                  GPL-3.0, https://github.com/xmrig/xmrig
+
+  RandomX         Copyright (C) 2018-2026 tevador and the RandomX contributors
+                  BSD-3-Clause, https://github.com/tevador/RandomX
+
+  MoneroOcean     Copyright (C) MoneroOcean
+                  https://github.com/MoneroOcean/xmrig
+                  The -mo version suffix and the algorithm-switching pool
+                  behaviour follow their work.
+
+  Monero          Copyright (C) 2014-2026 The Monero Project
+                  https://github.com/monero-project/monero
+
+  libuv, hwloc, base58, rapidjson, fmt: see src/3rdparty/ and the headers of
+  each vendored copy. Every copyright notice in those files is intact.
+
+What was removed from upstream
+------------------------------
+
+The donation strategy: its time slicing, its wallet, its endpoint, and the
+code paths that switched mining to a developer pool. `donate-level` and
+`donate-over-proxy` are still accepted so existing scripts do not break, then
+ignored. `sudo ./oneclick.sh verify` greps the built binary for the upstream
+endpoints and wallets and prints what it found; doc/ZERO_FEE.md explains the
+method and what it can and cannot prove.
+
+What is new here
+----------------
+
+The Zig miner, the installer, the proxy, the pool, the website, the pool
+selection and anti-ban logic, and the documentation. Files created for ZMRIG
+carry the same GPL-3.0 licence and are Copyright (C) 2026 @nggkhaiz.
+
+Trademarks
+----------
+
+"Monero" and the Monero logo belong to The Monero Project. "XMRig" refers to
+the upstream project. ZMRIG is not affiliated with or endorsed by either; the
+names are used only to say what this software is compatible with.
+
+Contact
+-------
+
+Issues:  https://github.com/NggKhaiz/ZMRIG/issues
+Site:    https://nggkhaiz.github.io/ZMRIG/

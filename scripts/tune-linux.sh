@@ -335,7 +335,7 @@ cat <<'EOF'
 Next steps:
   1. Run the miner as root (or with CAP_SYS_RAWIO + CAP_IPC_LOCK + CAP_SYS_NICE) so
      huge pages, MSR writes and thread priorities are applied:
-         sudo zmrig -c /etc/xmrig-ocean/config.json --msr
+         sudo zmrig -c /etc/zmrig/config.json --msr
   2. Verify what the miner actually got, without mining:
          zmrig -o POOL:PORT -u WALLET --check
      The memory line says "huge pages reserved" when the reservation worked,

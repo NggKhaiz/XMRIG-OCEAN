@@ -14,7 +14,7 @@
 
 const os = require('node:os');
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 
 const DEFAULTS = {
   bind: '127.0.0.1',

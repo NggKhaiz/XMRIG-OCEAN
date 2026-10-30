@@ -1,4 +1,4 @@
-/* XMRig Ocean - hash engine C API
+/* ZMRIG (by @nggkhaiz) - hash engine C API
  *
  * Exposes the RandomX implementation that ships in this repository
  * (src/crypto/randomx, the MoneroOcean fork with all coin configurations) to

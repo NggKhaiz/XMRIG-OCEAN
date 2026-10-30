@@ -48,7 +48,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
 
   if (args.help) {
-    process.stdout.write(`ocean-pool - self-hosted Monero pool (RandomX)
+    process.stdout.write(`zmrig-pool - ZMRIG's self-hosted Monero pool (by @nggkhaiz)
 
   node pool/src/index.js --config pool/config.json
   node pool/src/index.js --check          validate the configuration and exit
@@ -56,14 +56,14 @@ async function main() {
 Environment overrides: PORT, HTTP_PORT, BIND, DAEMON, POOL_MODE, POOL_FEE_PERCENT,
 OPERATOR_ADDRESS, WALLET_RPC, PAYOUT_MODE, VERIFY_SHARES, STATE_FILE, LOG_LEVEL.
 
-Docs: pool/README.md
+Docs: pool/README.md - https://github.com/NggKhaiz/ZMRIG
 `);
     return;
   }
 
   if (args.version) {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-    process.stdout.write(`ocean-pool ${pkg.version}\n`);
+    process.stdout.write(`zmrig-pool ${pkg.version} - ZMRIG by @nggkhaiz\n`);
 
     return;
   }

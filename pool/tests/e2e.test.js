@@ -61,7 +61,7 @@ function waitForLine(child, pattern, timeoutMs = 15000) {
 async function startPool(extraEnv = {}) {
   const port = await freePort();
   const httpPort = await freePort();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ocean-pool-e2e-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zmrig-pool-e2e-'));
 
   const child = spawn(process.execPath, [POOL_ENTRY, '--config', path.join(ROOT, 'pool', 'config.example.json')], {
     env: {

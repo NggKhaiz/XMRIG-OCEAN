@@ -120,7 +120,7 @@ Dùng khi DNS trả về IP ngoài dải được phép, hoặc khi bạn muốn
 sudo ./oneclick.sh install ... --tls-ca /path/to/ca.pem
 ```
 
-Installer copy file vào `/etc/xmrig-ocean/tls-ca.pem` và trỏ pool tới đó. Lý do phải copy: unit chạy với `PrivateTmp=true`, nên file trong `/tmp` có thể biến mất sau khi restart.
+Installer copy file vào `/etc/zmrig/tls-ca.pem` và trỏ pool tới đó. Lý do phải copy: unit chạy với `PrivateTmp=true`, nên file trong `/tmp` có thể biến mất sau khi restart.
 
 `--tls-insecure` được nhận để tương thích dòng lệnh cũ nhưng **không bật**: TLS client của Zig 0.13 không có tuỳ chọn bỏ kiểm tra. Với relay tự ký, hãy dùng `--tls-ca`.
 

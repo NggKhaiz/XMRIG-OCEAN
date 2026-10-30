@@ -35,7 +35,10 @@ function makeLogger(level = 'info', stream = process.stdout) {
   };
 }
 
-const HELP = `zmrig-proxy ${VERSION} -- one connection to the pool for every rig
+const HELP = `zmrig-proxy ${VERSION} - ZMRIG proxy by @nggkhaiz
+one connection to the pool for every rig
+
+https://github.com/NggKhaiz/ZMRIG
 
   zmrig-proxy start [flags]          run the proxy (default command)
   zmrig-proxy doctor [flags]         test the pool, the wallet and the network
@@ -119,7 +122,7 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   if (parsed.version) {
-    process.stdout.write(`zmrig-proxy ${VERSION}\n`);
+    process.stdout.write(`zmrig-proxy ${VERSION} - ZMRIG by @nggkhaiz\n`);
 
     return 0;
   }
