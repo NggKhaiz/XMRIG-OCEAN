@@ -1,3 +1,52 @@
+# v6.30.0-mo13 — do not get banned, and do not be blocked
+
+Two ways to lose an evening of income that no hashrate chart shows: a pool that
+bans the IP, and a network that cannot resolve the pool at all.
+
+### New
+- **A pool refusal is now a decision, not a loop** (`zmrig/src/stratum.zig`,
+  `proxy/src/upstream.js`). The reply is classified — `banned`, `credentials`,
+  `invalid share`, `throttled`, `full` — and each gets its own reaction:
+  - a **wrong wallet or password** stops retrying that pool for **30 minutes**
+    and prints the fix (95-character address? TLS port?) instead of knocking
+    every five seconds, which is how one typo becomes a ban on every pool;
+  - **`your IP is banned`** cools that pool for **15 minutes** (`--ban-cooldown`,
+    default 900 s) and moves to the next one;
+  - **full / rate-limited** pools are paused for a minute rather than hammered.
+- **Invalid-share circuit breaker** (`zmrig/src/miner.zig`). Three shares the
+  pool calls invalid in a row and the miner stops submitting for 10 minutes and
+  says why (overclock, huge pages, `--self-test`). Pools that validate every
+  share ban the IP for this: `xmrpool.eu` 10 minutes, an hour if it continues.
+- **Jittered reconnects** (±20 %). Twenty rigs rebooting together used to arrive
+  in the same millisecond, which from the pool side is a login flood.
+- **`--pool=<name>`** (`oneclick.sh`): `moneroocean`, `supportxmr`, `c3pool`,
+  `xmrpool`, `herominers`, `p2pool`, `p2pool-nano` resolve to the right host,
+  port and TLS mode. `--failover=<list>` writes backup pools into
+  `config.json`, used only when the first is unreachable or refuses this IP.
+- **`doc/POOLS.md`**: the pool table with fees, minimums and endpoints checked
+  in October 2026, plus the part nobody tests — Quad9 returns NXDOMAIN for
+  `gulf.moneroocean.stream`, Cloudflare's malware resolver does the same for
+  `pool.supportxmr.com`, and what to do instead (backup domain, regional
+  hostname, TLS on 443, `--connect-to`).
+
+### Measured
+- No hashing code changed: the hashrate figures in `doc/BENCHMARKS.md` still
+  describe this engine.
+- `zmrig/tests/net.sh` proves the three behaviours over a real socket: a bad
+  wallet produces **one** connection attempt, a banned IP produces **one**, and
+  a pool that rejects every share gets exactly **3** submissions before the
+  quarantine line appears.
+
+### Tests
+- `zmrig/tests/unit.sh` 16 modules OK (added: refusal classification, jitter
+  bounds).
+- `zmrig/tests/net.sh` **29 passed** (was 26).
+- `zmrig/tests/cli.sh` **40 passed** (was 37).
+- `tests/oneclick/plan.sh` **18 checks** (was 14): pool names, failover,
+  and an explicit `host:port` is never rewritten.
+- `proxy/` **60 passed** (was 57).
+- Version: `6.30.0-mo13`.
+
 # v6.29.0-mo12 — get paid for the coin that pays best
 
 The income lever here is not hashrate. It is whether the pool is allowed to move

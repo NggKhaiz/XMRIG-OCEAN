@@ -70,7 +70,7 @@ nên trong chế độ `--quick` cửa sổ chạy là 90 giây chứ không ph�
 Kết quả lần chạy gần nhất trên VM 2 vCPU:
 
 ```
-26 passed, 0 failed, 0 skipped
+29 passed, 0 failed, 0 skipped
 ```
 
 Log từng case nằm trong `/tmp/zmrig-net.XXXXXX/` (đường dẫn in ở cuối). Khi một case fail, đọc file log của case đó trước: `cloudflare.log`, `shim-cf.log`, `pool.log`.

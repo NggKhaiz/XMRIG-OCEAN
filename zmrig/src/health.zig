@@ -78,6 +78,10 @@ pub const Snapshot = struct {
     hashes: u64 = 0,
     accepted: u64 = 0,
     rejected: u64 = 0,
+    /// Submissions are paused because the pool kept calling shares invalid.
+    /// A quarantined miner hashes and earns nothing, which is exactly the
+    /// silent fault this file exists to catch.
+    quarantined: bool = false,
     /// Shares handed to the submitter, accepted or not.
     submitted: u64 = 0,
     /// The user paused mining (`pause-on-battery`, `--pause-on-active`): the
@@ -95,6 +99,7 @@ pub fn evaluate(snapshot: Snapshot, config: Config) State {
     // Rejections first: a pool that refuses every share is a fault even while
     // the hashrate looks perfect, and that is exactly the case a hashrate
     // check would miss.
+    if (snapshot.quarantined) return .rejected;
     if (snapshot.rejected >= config.min_rejections and snapshot.accepted == 0) return .rejected;
 
     // A stall is measured on the 10 s window, so recovery is visible within
@@ -306,4 +311,26 @@ test "a stall is reported immediately, a recovery clears it" {
 
     // Back to normal: the next good sample clears it.
     try testing.expectEqual(State.ok, tracker.update(base(), 201_000));
+}
+
+test "a quarantined miner is a fault, even though it is still hashing" {
+    const testing = std.testing;
+
+    // Three invalid shares stop submissions for ten minutes. The hashrate is
+    // unchanged and only three rejects were counted, so neither of the other
+    // rules can see it -- and the rig is earning nothing.
+    const snapshot = Snapshot{
+        .uptime_s = 600,
+        .rate_10s = 800,
+        .rate_60s = 800,
+        .peak = 800,
+        .hashes = 1_000_000,
+        .accepted = 0,
+        .rejected = 3,
+        .submitted = 3,
+        .quarantined = true,
+    };
+
+    try testing.expectEqual(State.rejected, evaluate(snapshot, .{}));
+    try testing.expect(State.rejected.isFault());
 }

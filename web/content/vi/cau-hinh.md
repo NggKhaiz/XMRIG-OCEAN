@@ -117,6 +117,8 @@ Khoá trong `pools[]`: `url`, `user`, `pass`, `rig-id`, `algo`, `keepalive`, `tl
     --proxy=URL          http://user:pass@host:port hoặc socks5://host:port
     --retries=N          số lần thử mỗi pool (5)
     --retry-pause=N      giây giữa hai lần thử (5)
+    --ban-cooldown=N     giây nghỉ pool sau khi nó ban IP, từ chối ví, hoặc báo full
+                         (mặc định 900; sai ví bị kẹp tối thiểu 30 phút)
     --idle-timeout=N     ngắt nếu pool im lặng N giây (300, 0 = tắt)
     --keepalive-interval=N  (60, 0 = tắt)
 ```

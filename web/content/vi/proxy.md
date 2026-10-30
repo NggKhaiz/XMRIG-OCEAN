@@ -188,7 +188,7 @@ node proxy/src/main.js start --user=ĐỊA_CHỈ_VÍ \
 
 ## Đã đo, và chưa đo
 
-`node --test proxy/tests/` — **57 test, pass 57**: 15 test cho nonce/extranonce/vardiff, 7 test cho phần quy đổi H/s → XMR/ngày, 12 test dựng socket thật (hai rig một kết nối pool, share chuyển tiếp đúng job id của pool, pool chết giữa phiên, failover), 16 test cho cờ (kể cả cờ tiền tệ), danh sách IP và CIDR IPv6, 3 test cho layout cài đặt, 4 test chạy đúng binary (TCP, WebSocket, token, `/status`, `doctor`, SIGTERM không để lại listener). Trên VM 2 vCPU: khởi động → rig TCP có job → rig WebSocket có job → đọc status = **213 ms**; `doctor` tới pool nội bộ = **83 ms**.
+`node --test proxy/tests/` — **60 test, pass 60**: 16 test cho nonce/extranonce/vardiff và phân loại từ chối của pool, 7 test cho phần quy đổi H/s → XMR/ngày, 14 test dựng socket thật (hai rig một kết nối pool, share chuyển tiếp đúng job id của pool, pool chết giữa phiên, failover, pool ban IP thì bị bỏ qua chứ không thử lại, ví sai không thành login storm), 16 test cho cờ (kể cả cờ tiền tệ), danh sách IP và CIDR IPv6, 3 test cho layout cài đặt, 4 test chạy đúng binary (TCP, WebSocket, token, `/status`, `doctor`, SIGTERM không để lại listener). Trên VM 2 vCPU: khởi động → rig TCP có job → rig WebSocket có job → đọc status = **213 ms**; `doctor` tới pool nội bộ = **83 ms**.
 
 **Chưa đo**: thông lượng 10.000 share/giây. Mỗi share là một phép so sánh BigInt và một lần ghi chuỗi, round-trip tới pool lớn hơn hai bậc, nhưng chưa load-test. Một tiến trình phục vụ 255 rig (255 prefix dùng được); hơn nữa thì chạy thêm một tiến trình, đó là câu trả lời tốt hơn một bảng cấp phát dài hơn.
 

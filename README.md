@@ -225,7 +225,7 @@ Xeon at 2.6 GHz with 3.9 GiB of RAM, `--mode fast`, 4000 hashes per run.
 | `--scratchpad-prefetch=0..3` | 1 | Prefetch hint baked into the JIT. All four modes landed in 795–832 H/s on this box: no measurable difference, so the documented default stays. |
 | `--no-jit` | off | Interpreter only, ~6x slower. Kept for CPUs without x86-64/ARM64, never for mining. |
 | `--nicehash` | auto | Masks the nonce to the 24 bits a NiceHash/rental pool owns, so the top extranonce byte survives. Off unless the pool's job carries a non-zero nonce. |
-| `--user-agent=UA` | `zmrig/6.29.0-mo12` | Sent in the WebSocket upgrade; some relays and Cloudflare routes only accept known miner strings. |
+| `--user-agent=UA` | `zmrig/6.30.0-mo13` | Sent in the WebSocket upgrade; some relays and Cloudflare routes only accept known miner strings. |
 | `--donate-level=N` | — | Accepted so XMRig scripts keep working, then ignored with a log line: the developer fee is 0 %, never 1 %. |
 | *nothing below this line* | — | Prefetch mode, `--no-huge-pages-jit`, `--no-affinity`, `--randomx-init`, `--no-optimized-init` and `--priority` all measured inside ±3 % noise on the same box. They exist for hosts where they matter; do not expect a number. VAES-512 was tried and is **3.5 % slower** here — see [`doc/PERFORMANCE.md`](doc/PERFORMANCE.md). |
 
@@ -318,6 +318,41 @@ The proxy advertises the same list for the whole farm (`--algo=auto`, the
 default there) and writes the extranonce at the right nonce offset for each
 algorithm — 39 for Monero, 147 for panthera ([`doc/PROXY.md`](doc/PROXY.md)).
 
+## Which pool, and why the IP matters
+
+Fees are a percentage; an IP that cannot connect is 100 % of the income. Two
+things follow from that: pick the pool that pays most per hash, and never let a
+refusal turn into a ban.
+
+| | Pool | Fee | Min payout | Endpoint |
+|---|---|---:|---:|---|
+| **1** | MoneroOcean | 0 % | 0.003 XMR | `gulf.moneroocean.stream:10001` |
+| **2** | SupportXMR | 0.6 % | 0.1 XMR | `pool.supportxmr.com:3333` |
+| 3 | C3Pool | 0 % | 0.003 XMR | `c3pool.com:3333` |
+| — | P2Pool (`xmr.pub`) | 0 % | ~0.0004 XMR | `pool.xmr.pub:3334` |
+
+`./oneclick.sh install --pool=moneroocean --failover=supportxmr,c3pool` is the
+whole configuration: short names resolve to the right host, port and TLS mode,
+and the backups go into `config.json` as extra pools that are only used when the
+first one is unreachable or refuses this IP.
+
+What the miner now refuses to do, because each of these is how an IP gets banned:
+
+* retry a **wrong wallet** every five seconds — it identifies the refusal and
+  leaves that pool alone for 30 minutes, with the fix printed;
+* reconnect immediately after `your IP is banned` — 15 minutes per pool, then the
+  next pool;
+* keep submitting after the pool calls three shares **invalid** — a 10-minute
+  pause instead of the hour-long ban `xmrpool.eu` hands out for it;
+* let twenty rebooting rigs reconnect in the same millisecond — every retry is
+  jittered ±20 %.
+
+DNS filters, not pools, are the usual reason a rig stops: Quad9 blocks
+`gulf.moneroocean.stream` and Cloudflare's malware resolver blocks
+`pool.supportxmr.com`. A backup pool with a different domain, a regional
+hostname, or TLS on port 443 gets around it. Details, sources and the
+`--connect-to` workaround: [`doc/POOLS.md`](doc/POOLS.md).
+
 ## Several rigs, one address: `proxy/`
 
 A farm loses money in three ways that never show up in a miner log: two rigs
@@ -340,7 +375,7 @@ sudo ./proxy/install.sh --user=<wallet> --pool=gulf.moneroocean.stream:10001
   third party), `--tunnel=tailscale`, `--tunnel=cf`, `--tunnel=cf-quick`;
 * **H/s and XMR/day per rig** in `/status`, measured from accepted shares, not
   guessed from a CPU name — and `null` when the network difficulty is unknown;
-* **57 tests**, including real sockets and a WebSocket rig: `cd proxy && npm test`.
+* **60 tests**, including real sockets and a WebSocket rig: `cd proxy && npm test`.
 
 Cloudflare quick tunnels are **demo only** — random hostname that changes on every
 restart, 200 concurrent requests, no authentication, and Cloudflare says so. The
@@ -447,6 +482,8 @@ npm run test:pool                    # pool unit + protocol + end-to-end (28 tes
 * [`doc/DONATE.md`](doc/DONATE.md) — the one donation address, how to check it,
   and what a donation does and does not buy.
 * [`doc/NETWORK.md`](doc/NETWORK.md) — 443-only VPS, proxies, edge dialling.
+* [`doc/POOLS.md`](doc/POOLS.md) — which pool, what it charges, how its IP
+  policy works, and how to keep mining when DNS or a firewall says no.
 * [`doc/PROXY.md`](doc/PROXY.md) — `proxy/`: one pool connection for a farm,
   extranonce, per-rig difficulty, and the honest tunnel comparison.
 * [`doc/ALTERNATIVES.md`](doc/ALTERNATIVES.md) — measured comparison with
