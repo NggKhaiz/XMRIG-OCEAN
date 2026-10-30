@@ -1,3 +1,43 @@
+# v6.32.1 — the 404 on the published site
+
+The site worked and the URL was dead, because GitHub Pages was publishing the
+branch root instead of `web/`. A branch root has no site in it, and Pages
+answers with the "does not contain the requested file" page.
+
+### Fixed
+- **`/index.html` and `/404.html` at the repository root.** If Pages publishes
+  `BETA` as-is, `/ZMRIG/` now forwards to the real site in `web/`, and any deep
+  link (`/ZMRIG/wizard.html`, `/ZMRIG/docs.html#cai-dat`) is rewritten to
+  `/ZMRIG/web/…` by the 404 page. The rewrite is executed by
+  `tests/docs/pages.sh`, not read: the first version turned `/ZMRIG/` into
+  `/web/ZMRIG`, which is exactly the kind of bug a regex assertion misses.
+- **`.nojekyll`** at the root and in `web/`, so nothing is passed through
+  Jekyll in either mode.
+- **`doc/SETUP.md` says what to click** (Settings → Pages → Source: GitHub
+  Actions) and what each mode costs in the URL, with the mode-aware workflow
+  written out for a one-off paste. The workflow files themselves are unchanged:
+  the automation token this release was prepared with has no `workflows`
+  permission, so a CI change could not be pushed — and a documented one-off
+  beats an undocumented red X on every push.
+- **CSP meta tags** on all four pages. GitHub Pages ignores `web/_headers`, so
+  the policy only existed for Cloudflare; without the header the deployed site
+  had no CSP at all. `tests/docs/pages.sh` fails if a page gains an inline
+  `<script>` that its own `script-src 'self'` would block.
+- Action versions: `configure-pages` v6, `upload-pages-artifact` v5,
+  `deploy-pages` v5 (the previous three were forced onto Node 24 anyway).
+
+### Changed
+- Version **6.32.1** across the miner, the report codes, the agent string, the
+  packages and the pages, so the number on the site matches the number on the
+  binary.
+
+### Added
+- **`tests/docs/pages.sh`** (`npm run test:pages`, 18 checks): an entry point in
+  `web/`, the branch-root redirect for JavaScript and no-JS, no root-absolute
+  link, every `href`/`src` (45) and every in-page `#anchor` (17) resolving, the
+  docs manifest and its Markdown files, only real pages in the sitemap, CSP
+  meta, and the deploy workflow itself.
+
 # v6.32.0 — the name on the binary
 
 The project is called ZMRIG everywhere except in the places a user actually

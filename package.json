@@ -1,6 +1,6 @@
 {
   "name": "zmrig",
-  "version": "6.32.0",
+  "version": "6.32.1",
   "description": "ZMRIG - RandomX miner with 0% developer fee, by @nggkhaiz",
   "main": "index.js",
   "directories": {
@@ -12,7 +12,8 @@
     "test:web": "node --test web/tests/*.test.js",
     "test:pool": "node --test pool/tests/*.test.js",
     "test:oneclick": "bash tests/oneclick/plan.sh && bash tests/oneclick/config.sh && bash tests/oneclick/governor.sh && bash tests/oneclick/purge.sh",
-    "test:docs": "bash tests/docs/links.sh"
+    "test:docs": "bash tests/docs/links.sh",
+    "test:pages": "bash tests/docs/pages.sh"
   },
   "repository": {
     "type": "git",
