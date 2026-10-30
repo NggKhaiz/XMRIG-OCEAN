@@ -112,7 +112,7 @@
     loadPage(page).then(function (entry) {
       current = page;
       article.innerHTML = entry.html;
-      document.title = page.title + " — zmrig";
+      document.title = page.title + " — ZMRIG";
       window.zmrigAddCopyButtons(article);
       scrollToAnchor(anchor);
     }).catch(function (error) {
