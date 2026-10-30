@@ -16,6 +16,7 @@ const path = require('node:path');
 
 const { ConfigError, VERSION, build, lanAddress, missingBinaries } = require('./config');
 const { Downstream } = require('./downstream');
+const { NetworkFeed } = require('./network');
 const { Upstream } = require('./upstream');
 const { startServers } = require('./server');
 const { generateKeys, publicEndpoint, startTunnel, writeWireguard } = require('./tunnel');
@@ -60,12 +61,22 @@ Security (off by default because the default bind is localhost):
   --token=<secret>           the stratum password every rig must send
   --max-rigs=<n>             default 255 (the extranonce space)
 
+Pool-side income:
+  --algo=auto|none|<name[,name]>  which coins the pool may switch this farm to
+                                  (default auto: the RandomX family). A pool that
+                                  pays the best coin per hash needs this list.
+
 Tuning:
   --local-difficulty=<f>     local difficulty as a multiple of the pool's (default 1:
                              every accepted share is forwarded)
   --target-share=<sec>       seconds between a rig's shares (default 15)
   --no-workers               do not report each rig as its own pool worker
   --log-level=<level>        debug|info|warn|error|silent
+
+What the rigs earn (optional; /status reports hashrate and shares/hour either way):
+  --network-difficulty=<n>   the coin's network difficulty; enables XMR/day
+  --network-url=<url>        ...or fetch it every --network-interval (default 600 s)
+  --block-reward=<xmr>       default 0.6 (Monero tail emission)
 
 Reaching rigs in another building (one flag):
   --tunnel=none              default
@@ -150,10 +161,22 @@ async function start(config, log) {
     user: config.user,
     password: config.password,
     agent: config.agent,
+    algos: config.algos,
     keepaliveMs: config.keepAliveMs,
     retryPauseMs: config.retryPauseMs,
     logger: log,
   });
+
+  // Priced only when asked: a proxy that fetches a URL nobody configured is a
+  // proxy that fails on an air-gapped network for no reason.
+  const network = new NetworkFeed({
+    difficulty: config.networkDifficulty,
+    url: config.networkUrl,
+    intervalMs: config.networkIntervalMs,
+    reward: config.blockReward,
+    logger: log,
+  });
+  network.start();
 
   const downstream = new Downstream({
     upstream,
@@ -162,6 +185,7 @@ async function start(config, log) {
     targetShareSeconds: config.targetShare,
     localFactor: config.localFactor,
     token: config.token,
+    network,
     logger: log,
   });
 
@@ -180,7 +204,8 @@ async function start(config, log) {
 
   const interval = setInterval(() => {
     const snapshot = downstream.status();
-    log('info', `${snapshot.rigs} rigs, ${snapshot.forwarded} forwarded, ${snapshot.absorbed} absorbed, ${snapshot.rejected} rejected, pool ${snapshot.upstream?.pool || '?'}`);
+    const money = snapshot.xmrPerDay === null ? '' : `, ~${snapshot.xmrPerDay} XMR/day`;
+    log('info', `${snapshot.rigs} rigs, ${Math.round(snapshot.hashrate)} H/s${money}, ${snapshot.forwarded} forwarded, ${snapshot.absorbed} absorbed, ${snapshot.rejected} rejected, pool ${snapshot.upstream?.pool || '?'}`);
   }, 60_000);
   interval.unref?.();
 
@@ -190,6 +215,7 @@ async function start(config, log) {
     log('info', 'shutting down');
     clearInterval(vardiffTimer);
     clearInterval(interval);
+    network.stop();
     downstream.close();
     upstream.close();
     await tunnel.stop();
@@ -223,6 +249,13 @@ function banner(config, ports, log) {
     log('info', '');
     log('info', `${config.wss ? 'WSS' : 'WS'} (Cloudflare, browser, or a reverse proxy):`);
     log('info', `  url: ${config.wss ? 'wss' : 'ws'}://${host}:${ports.ws}${config.wsPath}`);
+  }
+
+  if (config.algos.length > 1) {
+    log('info', '');
+    log('info', `The pool may switch these rigs between ${config.algos.join(', ')}.`);
+    log('info', '  A pool that pays the best coin per hash (MoneroOcean) needs that list to do it;');
+    log('info', '  pin one coin with --algo=rx/0 if a rig behind this proxy is older than that list.');
   }
 
   if (config.tunnel === 'wireguard') {

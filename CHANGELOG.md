@@ -1,3 +1,81 @@
+# v6.29.0-mo12 — get paid for the coin that pays best
+
+The income lever here is not hashrate. It is whether the pool is allowed to move
+a rig to a coin that is worth more per hash at that moment — and until now the
+miner never said it could.
+
+### New
+- **`--algo=auto`** (`zmrig/src/options.zig`, `zmrig/src/stratum.zig`). The engine
+  has implemented seven RandomX variants all along, each with its own named
+  configuration (`src/crypto/rx/RxAlgo.cpp`: Monero, Wownero, Arqma, Graft,
+  Safex, Yada, Scala), but the login request advertised nothing, so a pool that
+  pays the best coin per hash (MoneroOcean and forks) treated every rig as
+  Monero-only and left it on `rx/0`.
+  - `-a auto` now sends
+    `"algo":["rx/0","rx/wow","rx/arq","rx/graft","rx/sfx","rx/yada","panthera"]`;
+  - `-a rx/0` still sends one entry — a pin stays a promise;
+  - no flag stays exactly as before: no list, the pool decides;
+  - `"algo": "auto"` also works in the JSON config;
+  - `--check` prints what will be advertised, because a list a pool ignores is
+    otherwise invisible.
+  - `rx/2` is deliberately **not** advertised: its parameters differ between pool
+    forks, and guessing wrong means every share is rejected.
+- **The proxy advertises the same family** (`proxy/src/upstream.js`,
+  `--algo=auto` is its default). The proxy holds the pool connection, so a rig
+  behind a silent proxy never gets switched no matter what the rig supports.
+  `--algo=none|<name>[,<name>]` controls it, and a typo is refused at startup.
+- **Per-algorithm nonce offset in the proxy** (`proxy/src/blob.js`). Panthera
+  blobs carry the nonce at byte 147, not 39 (`zmrig/src/job.zig:88`). Writing the
+  extranonce at 39 for a panthera job corrupts the header and every share comes
+  back rejected while the log still looks normal. The offset now follows the
+  algorithm, a forwarded share carries the algo of the job it was found for, and
+  a test switches a live fake pool to panthera to prove both.
+
+### Also in this release
+- **A rig behind the proxy now knows what it earns.** `/status` publishes
+  `hashrate`, `sharesPerHour` and `xmrPerDay` per rig and for the fleet, measured
+  from accepted shares at the difficulty the proxy handed out
+  (`proxy/src/network.js`). Money needs the network difficulty, which is an
+  input (`--network-difficulty=` or `--network-url=`), never a guess: with
+  neither flag set the column is `null` and `estimate.source` says why.
+- **A switching pool keeps the fee-free engine.** `--pool=gulf.moneroocean.stream`
+  used to select the C++ engine because `zmrig` could not advertise more than one
+  algorithm. It can now, so `oneclick.sh` writes `"algo": "auto"` for the pool
+  (`oneclick.sh`, `zmrig/src/options.zig`) and `./oneclick.sh plan` prints the
+  list it will advertise. An explicit `--algo` still pins, and a non-RandomX
+  `--algo` (cn/2, …) still selects the C++ engine.
+- `--algo` in the JSON config accepts `"auto"` *per pool*, so one file can serve a
+  Monero-only rig and a switching rig.
+
+### Measured
+- The binary's own hashrate is unchanged: this release adds no hashing code.
+  What changes is *which coin* the pool is allowed to point the rigs at.
+- `zmrig/tests/net.sh` gained four cases that speak over a real socket: the
+  pool receives the family with `-a auto`, receives exactly `rx/wow` with a pin,
+  and both configurations still mine and submit accepted shares. **26 passed, 0
+  failed** (was 22).
+
+### Fixed
+- `--check` now states what is at stake on the MSR line (`--msr` is worth 5-15 %
+  on Zen 3/4 per `doc/PERFORMANCE.md` §3) instead of just "off".
+
+### Tests
+- `zmrig/tests/unit.sh` 16 modules OK (added: login JSON with no list, one
+  algorithm, the full family, a quote in a password; algo resolution and the JSON
+  config; `auto` is not `rx/2`).
+- `zmrig/tests/cli.sh` **37 passed** (was 32): `--algo=auto` accepted,
+  documented, shown in `--check`; a pool object with `"algo": "auto"` in the
+  config file produces the same advertisement; an unknown name still exits 1.
+- `zmrig/tests/net.sh` **26 passed** (was 22).
+- `tests/oneclick/plan.sh` **14 checks**: a switching pool now resolves to
+  `zmrig`, the plan prints `algo auto  (RandomX family: …)`, an explicit
+  `--algo=rx/wow` still pins, and the C++ path is still covered through a
+  non-RandomX pool.
+- `proxy/` **57 passed** (was 43): 7 for the money column, 2 that drive it
+  end-to-end through `/status`, 1 for the new flags.
+- Version: `6.29.0-mo12`. `doc/BENCHMARKS.md` still says `6.28.0-mo11` on
+  purpose — those numbers were measured with that binary.
+
 # zmrig-proxy 1.0.0 — one address for every rig
 
 A new program in `proxy/`, not a fork. The miner binary is unchanged at

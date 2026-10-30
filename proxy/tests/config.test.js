@@ -56,6 +56,27 @@ test('a tunnel is chosen with one flag and its token comes from the flag or the 
   assert.strictEqual(env.tunnelToken, 'tskey-xyz');
 });
 
+test('the money column is off by default and switched on with one flag', () => {
+  const off = build(base()).config;
+  assert.strictEqual(off.networkDifficulty, 0);
+  assert.strictEqual(off.networkUrl, '');
+  assert.strictEqual(off.blockReward, 0.6, 'Monero tail emission');
+
+  const on = build(base(['--network-difficulty=3.01e11'])).config;
+  assert.strictEqual(on.networkDifficulty, 3.01e11);
+
+  const feed = build(base(['--network-url=https://example.com/stats', '--network-interval=120'])).config;
+  assert.strictEqual(feed.networkUrl, 'https://example.com/stats');
+  assert.strictEqual(feed.networkIntervalMs, 120_000);
+
+  const env = build(base(), { OCEAN_PROXY_NETWORK_URL: 'https://example.com/stats' }).config;
+  assert.strictEqual(env.networkUrl, 'https://example.com/stats');
+
+  assert.throws(() => build(base(['--network-difficulty=0'])), ConfigError);
+  assert.throws(() => build(base(['--network-interval=5'])), ConfigError);
+  assert.throws(() => build(base(['--block-reward=0'])), ConfigError);
+});
+
 test('dangerous combinations are refused, with the reason', () => {
   const cases = [
     [[`--user=${WALLET}`], /--pool=.* is required/],
@@ -100,6 +121,20 @@ test('a flag that needs a value says so instead of eating the next word', () => 
     /--port needs a value/,
     '`--port 3333` must be an error, not a pool named 3333',
   );
+});
+
+test('the pool is told which coins the farm can mine, and a typo is an error', () => {
+  const { config } = build(base());
+  assert.deepStrictEqual(config.algos, ['rx/0', 'rx/wow', 'rx/arq', 'rx/graft', 'rx/sfx', 'rx/yada', 'panthera'],
+    'auto is the default: every miner behind this proxy implements the family');
+
+  assert.deepStrictEqual(build(base(['--algo=none'])).config.algos, []);
+  assert.deepStrictEqual(build(base(['--algo=rx/wow'])).config.algos, ['rx/wow']);
+  assert.deepStrictEqual(build(base(['--algo=rx/0,rx/wow'])).config.algos, ['rx/0', 'rx/wow']);
+
+  assert.throws(() => build(base(['--algo=rx/typo'])), /is not one of/);
+  assert.throws(() => build(base(['--algo=rx/2'])), /is not one of/,
+    'rx/2 means different parameters on different pool forks; advertising it risks 100% rejects');
 });
 
 // --- access ---------------------------------------------------------------

@@ -142,8 +142,15 @@ class Pool:
             return
 
         params = login.get("params") or {}
-        self.log("LOGIN %s agent=%s user=%s" % (
-            login.get("method"), login.get("agent", "-"), str(params.get("login"))[:16]))
+        # The advertised algorithm list is the difference between a rig the pool
+        # leaves on rx/0 and one it mines the best-paying coin with, so record it
+        # where a test can assert on it.
+        advertised = params.get("algo")
+        self.log("LOGIN %s agent=%s user=%s algo=%s" % (
+            login.get("method"),
+            login.get("agent", "-"),
+            str(params.get("login"))[:16],
+            ",".join(advertised) if isinstance(advertised, list) else "-"))
 
         if self.args.reject_login:
             self.reply(conn, login.get("id"), None)

@@ -20,6 +20,19 @@
 
 const NONCE_OFFSET = 39;
 const MAX_PREFIX = 255;
+
+/// Scala/Panthera carries a much larger blob and its nonce sits at 147
+/// (`zmrig/src/job.zig:88` sets exactly this). Writing the extranonce at 39 for
+/// a panthera job would corrupt the header and every share the rig finds would
+/// be rejected -- silently, because the rig only sees "share rejected".
+const NONCE_OFFSET_PANTHERA = 147;
+
+/** Where the nonce lives for a given pool algorithm name. */
+function nonceOffsetFor(algo) {
+  const name = String(algo || '').toLowerCase();
+
+  return name === 'panthera' || name === 'rx/xla' ? NONCE_OFFSET_PANTHERA : NONCE_OFFSET;
+}
 /// Prefix 0 is not a valid allocation: a blob whose nonce is 0 is exactly the
 /// signal that switches extranonce support *off* in the miner (`detectNicehash`
 /// in zmrig/src/job.zig). Handing 0 to a miner would silently put it back in
@@ -121,8 +134,10 @@ module.exports = {
   FIRST_PREFIX,
   MAX_PREFIX,
   NONCE_OFFSET,
+  NONCE_OFFSET_PANTHERA,
   applyExtranonce,
   honoursPrefix,
+  nonceOffsetFor,
   nonceValue,
   prefixOf,
   readNonce,

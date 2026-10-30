@@ -35,6 +35,8 @@ pub const Pool = struct {
     user_port: bool = false,
     /// Optional per-pool algorithm pin; null means "whatever the pool sends".
     algo: ?api.Algo = null,
+    /// `"algo":"auto"` on this pool: advertise the whole RandomX family.
+    algo_all: bool = false,
 
     pub fn proxy(self: *const Pool) transport.Proxy {
         return self.proxy_spec;
@@ -166,6 +168,11 @@ pub const Options = struct {
     pools: std.ArrayListUnmanaged(Pool) = .{},
     seen: Seen = .{},
     algo: ?api.Algo = null,
+    /// `--algo=auto`: advertise every RandomX variant this engine can hash
+    /// correctly, so a pool that pays for the most profitable coin per hash
+    /// (MoneroOcean and forks) may switch this rig between them. Without it the
+    /// pool sees a single-algorithm rig and leaves it on rx/0.
+    algo_all: bool = false,
     threads: ?usize = null,
     mode: Mode = .auto,
     huge_pages: bool = true,
@@ -279,6 +286,31 @@ pub const Options = struct {
     pub fn poolAlgo(self: *const Options, pool: *const Pool) ?api.Algo {
         return pool.algo orelse self.algo;
     }
+
+    /// What to announce in the login request, in priority order.
+    ///
+    ///   pinned algo   one entry -- the rig refuses anything else
+    ///   --algo=auto   every variant the engine implements (api.auto_algos)
+    ///   neither       empty: the miner says nothing and mines whatever job the
+    ///                 pool sends, which is what `zmrig` has always done
+    ///
+    /// `buf` is owned by the caller so this stays allocation-free; the returned
+    /// slice points into it.
+    pub fn loginAlgos(self: *const Options, pool: *const Pool, buf: *[api.auto_algos.len]api.Algo) []const api.Algo {
+        if (self.poolAlgo(pool)) |algo| {
+            buf[0] = algo;
+
+            return buf[0..1];
+        }
+
+        if (self.algo_all or pool.algo_all) {
+            @memcpy(buf[0..api.auto_algos.len], api.auto_algos[0..]);
+
+            return buf[0..api.auto_algos.len];
+        }
+
+        return buf[0..0];
+    }
 };
 
 pub const ParseError = error{
@@ -306,6 +338,9 @@ pub const usage =
     \\  -u, --user=USER          wallet address (login)
     \\  -p, --pass=PASS          password / worker name (default: x)
     \\  -a, --algo=ALGO          rx/0, rx/2, rx/wow, rx/arq, rx/graft, rx/sfx, rx/yada, panthera
+    \\                           'auto' advertises all RandomX variants, so a pool that
+    \\                           pays the best coin per hash (MoneroOcean) can switch
+    \\                           this rig between them instead of leaving it on rx/0
     \\      --rig-id=ID          rig identifier sent to the pool
     \\      --keepalive          send keepalive (default: on)
     \\      --no-keepalive       never send keepalive
@@ -517,7 +552,15 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8) ParseEr
             }
         } else if (std.mem.eql(u8, name, "-a") or std.mem.eql(u8, name, "--algo")) {
             const value = try needValue(args, &i, inline_value);
-            opts.algo = api.Algo.fromName(value) orelse return error.UnknownOption;
+            // `auto` is the one value that is not an algorithm name: it is the
+            // instruction to advertise all of them.
+            if (std.ascii.eqlIgnoreCase(value, "auto")) {
+                opts.algo = null;
+                opts.algo_all = true;
+            } else {
+                opts.algo = api.Algo.fromName(value) orelse return error.UnknownOption;
+                opts.algo_all = false;
+            }
         } else if (std.mem.eql(u8, name, "--rig-id")) {
             const value = try needValue(args, &i, inline_value);
             pending.rig_id = value;
@@ -977,7 +1020,14 @@ fn applyPoolObject(allocator: std.mem.Allocator, opts: *Options, obj: std.json.O
         pool.rig_id = allocator.dupe(u8, id) catch return error.OutOfMemory;
     }
     if (jsonString(obj, "algo")) |algo| {
-        pool.algo = api.Algo.fromName(algo) orelse return error.InvalidConfig;
+        // A pool may say "auto": announce the family for this pool only, which
+        // is what the installer writes when it picks the zmrig engine for a
+        // pool that pays for more than one coin.
+        if (std.ascii.eqlIgnoreCase(algo, "auto")) {
+            pool.algo_all = true;
+        } else {
+            pool.algo = api.Algo.fromName(algo) orelse return error.InvalidConfig;
+        }
     }
     if (jsonBool(obj, "tls")) |tls| {
         if (tls) {
@@ -1034,7 +1084,15 @@ pub fn parseConfigFile(allocator: std.mem.Allocator, opts: *Options, path: []con
     };
 
     if (root.get("algo")) |value| {
-        if (value == .string) opts.algo = api.Algo.fromName(value.string) orelse opts.algo;
+        if (value == .string) {
+            if (std.ascii.eqlIgnoreCase(value.string, "auto")) {
+                opts.algo = null;
+                opts.algo_all = true;
+            } else {
+                opts.algo = api.Algo.fromName(value.string) orelse opts.algo;
+                opts.algo_all = false;
+            }
+        }
     }
     if (jsonInt(u32, root, "print-time")) |v| opts.print_time = v;
     if (jsonInt(u32, root, "retries")) |v| opts.retries = v;
@@ -1405,6 +1463,50 @@ test "an explicit thread array becomes a cpu mask, -1 means anywhere" {
     try testing.expectEqual(@as(?u64, null), any.affinity_mask);
 }
 
+test "a pool may advertise the RandomX family on its own" {
+    const testing = std.testing;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // What the installer writes for a pool that pays for several coins.
+    try tmp.dir.writeFile(.{ .sub_path = "auto.json", .data =
+        \\{"pools":[{"url":"pool.example.com:3333","user":"w","algo":"auto"}]}
+    });
+    // A pin still pins, and is not turned into the family.
+    try tmp.dir.writeFile(.{ .sub_path = "pin.json", .data =
+        \\{"pools":[{"url":"pool.example.com:3333","user":"w","algo":"rx/wow"}]}
+    });
+
+    var auto = Options{};
+    defer auto.deinit(testing.allocator);
+    const auto_path = try tmp.dir.realpathAlloc(testing.allocator, "auto.json");
+    defer testing.allocator.free(auto_path);
+    try parseConfigFile(testing.allocator, &auto, auto_path);
+
+    const auto_pool = &auto.pools.items[0];
+    try testing.expect(auto_pool.algo_all);
+    try testing.expectEqual(@as(?api.Algo, null), auto_pool.algo);
+
+    var buf: [api.auto_algos.len]api.Algo = undefined;
+    const algos = auto.loginAlgos(auto_pool, &buf);
+    try testing.expectEqual(api.auto_algos.len, algos.len);
+    try testing.expectEqualStrings("panthera", algos[algos.len - 1].label());
+
+    // The pool-level auto must not leak into an explicit --algo pin.
+    var pinned = Options{ .algo_all = false };
+    defer pinned.deinit(testing.allocator);
+    const pin_path = try tmp.dir.realpathAlloc(testing.allocator, "pin.json");
+    defer testing.allocator.free(pin_path);
+    try parseConfigFile(testing.allocator, &pinned, pin_path);
+
+    const pin_pool = &pinned.pools.items[0];
+    try testing.expect(!pin_pool.algo_all);
+    const pinned_list = pinned.loginAlgos(pin_pool, &buf);
+    try testing.expectEqual(@as(usize, 1), pinned_list.len);
+    try testing.expectEqualStrings("rx/wow", pinned_list[0].label());
+}
+
 test "the installer's profile key is read from the config file" {
     const testing = std.testing;
 
@@ -1492,4 +1594,104 @@ test "the health block in the config is honoured" {
     try testing.expectEqual(@as(u32, 30), opts.health_warmup_seconds);
     // Untouched keys keep their defaults.
     try testing.expectEqual(@as(u32, 900), opts.health_restart_seconds);
+}
+
+test "algo: pinned, auto, and the default are three different logins" {
+    const testing = std.testing;
+    const wallet = "4AdUndXHHZ6cfufTMvppY6JwXNouMBzSkbLYfpAV5Usx3skxNgYeYTRj5UzqtReoS44qo9mtmXCqY45DJ852K5Jv2684Rge";
+    var buf: [api.auto_algos.len]api.Algo = undefined;
+
+    // Default: announce nothing, the pool keeps deciding. This is what every
+    // existing configuration does and it must not change.
+    {
+        const args = [_][]const u8{ "-u", wallet, "-o", "pool.example.com:3333" };
+        var opts = try parseArgs(testing.allocator, &args);
+        defer opts.deinit(testing.allocator);
+
+        try testing.expect(!opts.algo_all);
+        try testing.expectEqual(@as(usize, 0), opts.loginAlgos(&opts.pools.items[0], &buf).len);
+    }
+
+    // --algo=auto: the whole RandomX family, in a stable order.
+    {
+        const args = [_][]const u8{ "-u", wallet, "-o", "pool.example.com:3333", "--algo=auto" };
+        var opts = try parseArgs(testing.allocator, &args);
+        defer opts.deinit(testing.allocator);
+
+        try testing.expect(opts.algo_all);
+        try testing.expectEqual(@as(?api.Algo, null), opts.algo);
+
+        const list = opts.loginAlgos(&opts.pools.items[0], &buf);
+        try testing.expectEqual(api.auto_algos.len, list.len);
+        try testing.expectEqual(api.Algo.rx_0, list[0]);
+        try testing.expectEqual(api.Algo.rx_wow, list[1]);
+        // Never advertise rx/2: its parameters differ per pool fork.
+        for (list) |algo| try testing.expect(algo != .rx_2);
+    }
+
+    // -a rx/wow: one entry, and it wins over auto. A pin is a promise.
+    {
+        const args = [_][]const u8{ "-u", wallet, "-o", "pool.example.com:3333", "-a", "rx/wow" };
+        var opts = try parseArgs(testing.allocator, &args);
+        defer opts.deinit(testing.allocator);
+
+        const list = opts.loginAlgos(&opts.pools.items[0], &buf);
+        try testing.expectEqual(@as(usize, 1), list.len);
+        try testing.expectEqual(api.Algo.rx_wow, list[0]);
+    }
+
+    // A typo is an error, not a silent rx/0. The bad flag comes *first*: parseArgs
+    // leaves a half-built Options behind when it fails, and a test that leaks is
+    // a test that teaches the wrong pattern.
+    {
+        const args = [_][]const u8{ "-a", "rx/typo" };
+        try testing.expectError(error.UnknownOption, parseArgs(testing.allocator, &args));
+    }
+}
+
+test "algo: auto is also readable from the JSON config" {
+    const testing = std.testing;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "config.json",
+        .data =
+        \\{"algo":"auto","pools":[{"url":"pool.example.com:3333","user":"WALLET"}]}
+        ,
+    });
+
+    // The wallet has to be a real one for the pool to be accepted.
+    const path = try tmp.dir.realpathAlloc(testing.allocator, "config.json");
+    defer testing.allocator.free(path);
+
+    var opts = Options{};
+    defer opts.deinit(testing.allocator);
+
+    try parseConfigFile(testing.allocator, &opts, path);
+
+    try testing.expect(opts.algo_all);
+
+    var buf: [api.auto_algos.len]api.Algo = undefined;
+    try testing.expectEqual(api.auto_algos.len, opts.loginAlgos(&opts.pools.items[0], &buf).len);
+
+    // An explicit algorithm in the same key turns auto back off: the two are
+    // one setting, not two that can both be true.
+    try tmp.dir.writeFile(.{
+        .sub_path = "pinned.json",
+        .data =
+        \\{"algo":"rx/wow","pools":[{"url":"pool.example.com:3333","user":"W"}]}
+        ,
+    });
+
+    const pinned_path = try tmp.dir.realpathAlloc(testing.allocator, "pinned.json");
+    defer testing.allocator.free(pinned_path);
+
+    var pinned = Options{};
+    defer pinned.deinit(testing.allocator);
+    try parseConfigFile(testing.allocator, &pinned, pinned_path);
+
+    try testing.expect(!pinned.algo_all);
+    try testing.expectEqual(@as(?api.Algo, .rx_wow), pinned.algo);
 }

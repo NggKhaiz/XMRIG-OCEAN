@@ -15,11 +15,32 @@ const { Upstream } = require('../src/upstream');
 const { Downstream } = require('../src/downstream');
 const { SocketConnection } = require('../src/conn');
 const { difficultyFromTarget } = require('../../pool/src/target');
-const { Rig, WALLET, ZERO_HASH, fakePool, sleep } = require('./helpers');
+const { BLOB_PANTHERA, Rig, WALLET, ZERO_HASH, fakePool, sleep } = require('./helpers');
+const { NetworkFeed } = require('../src/network');
+
+/** A hash that clears the given difficulty (with a 100x margin), as hex. */
+function hashUnder(difficulty) {
+  const hash = Buffer.alloc(32);
+  hash.writeBigUInt64LE((2n ** 64n) / (BigInt(Math.max(1, difficulty)) * 100n), 24);
+
+  return hash.toString('hex');
+}
+
+/** Sends one share that the pool target accepts. */
+async function submitAcceptedShare(rig, job, id) {
+  rig.send({
+    id,
+    jsonrpc: '2.0',
+    method: 'submit',
+    params: { id: 'x', job_id: job.job_id, nonce: '01000001', result: hashUnder(1000) },
+  });
+
+  return rig.waitFor((m) => m.id === id);
+}
 
 /** Builds a proxy on a random port and returns the pieces. */
-async function startProxy({ pools, downstreamOptions = {} } = {}) {
-  const upstream = new Upstream({ pools, user: WALLET, password: 'x', retryPauseMs: 50, maxRetryPauseMs: 200 });
+async function startProxy({ pools, downstreamOptions = {}, upstreamOptions = {} } = {}) {
+  const upstream = new Upstream({ pools, user: WALLET, password: 'x', retryPauseMs: 50, maxRetryPauseMs: 200, ...upstreamOptions });
   const downstream = new Downstream({ upstream, user: WALLET, ...downstreamOptions });
   const timer = setInterval(() => downstream.tick(), 20);
   timer.unref?.();
@@ -167,6 +188,55 @@ test('a share below the pool target is accepted locally and counted, not forward
 
 });
 
+test('/status turns each rig\'s shares into H/s and XMR/day', async (t) => {
+  const pool = await withPool(t, { difficulty: 1000 });
+  const network = new NetworkFeed({ difficulty: 3e11, reward: 0.6 });
+  const proxy = await withProxy(t, {
+    pools: [`127.0.0.1:${pool.port}`],
+    downstreamOptions: { network },
+  });
+
+  const rig = await new Rig(proxy.port).connect();
+  const login = await rig.login(`${WALLET}.rigA`);
+  const reply = await submitAcceptedShare(rig, login.result.job, 2);
+  assert.strictEqual(reply.result.status, 'OK');
+
+  // Pin the window, or the estimate is dominated by however long the test took
+  // to start: one share of difficulty 1000 in 60 s is 1000 * 2^32 / 60 H/s.
+  for (const conn of proxy.downstream.connections) conn.connectedAt -= 60;
+
+  const status = proxy.downstream.status();
+  const rigStatus = status.connections[0];
+
+  assert.ok(rigStatus.uptime >= 60, `uptime was ${rigStatus.uptime}`);
+  assert.ok(Math.abs(rigStatus.hashrate - 71582788267) / 71582788267 < 0.01, `hashrate ${rigStatus.hashrate}`);
+  assert.ok(rigStatus.sharesPerHour > 59 && rigStatus.sharesPerHour < 61, `shares/hour ${rigStatus.sharesPerHour}`);
+  assert.ok(rigStatus.xmrPerDay > 0);
+
+  // The fleet total is the same single rig, and the network figures are published
+  // so an operator can see where the money column came from.
+  assert.strictEqual(status.xmrPerDay, rigStatus.xmrPerDay);
+  assert.strictEqual(status.hashrate, rigStatus.hashrate);
+  assert.strictEqual(status.estimate.source, 'flag');
+  assert.strictEqual(status.estimate.difficulty, 3e11);
+});
+
+test('/status refuses to price a rig when the network figure is unknown', async (t) => {
+  const pool = await withPool(t, { difficulty: 1000 });
+  const proxy = await withProxy(t, { pools: [`127.0.0.1:${pool.port}`] });
+
+  const rig = await new Rig(proxy.port).connect();
+  const login = await rig.login(`${WALLET}.rigA`);
+  await submitAcceptedShare(rig, login.result.job, 2);
+
+  const status = proxy.downstream.status();
+
+  assert.strictEqual(status.estimate, null);
+  assert.strictEqual(status.xmrPerDay, null);
+  assert.ok(status.connections[0].hashrate > 0, 'hashrate is measurable without the network');
+  assert.strictEqual(status.connections[0].xmrPerDay, null, 'money is not');
+});
+
 test('rigs stay connected when the pool dies, and a new rig still gets the last job', async (t) => {
   const pool = await withPool(t, { difficulty: 1000 });
   const proxy = await withProxy(t, { pools: [`127.0.0.1:${pool.port}`] });
@@ -287,4 +357,63 @@ test('vardiff hands a fast rig a harder target and a slow rig an easier one', as
   assert.ok(slowAfter !== null, 'the slow rig must be re-targeted');
   assert.ok(slowAfter < 1000, `slow rig went to ${slowAfter}, expected easier than 1000`);
 
+});
+
+test('the proxy tells the pool which coins the farm can mine', async (t) => {
+  const pool = await withPool(t, { difficulty: 1000 });
+  const proxy = await withProxy(t, {
+    pools: [`127.0.0.1:${pool.port}`],
+    upstreamOptions: { algos: ['rx/0', 'rx/wow', 'rx/arq', 'rx/graft', 'rx/sfx', 'rx/yada', 'panthera'] },
+  });
+
+  const rig = await new Rig(proxy.port).connect();
+  t.after(() => rig.close());
+  assert.ok((await rig.login(`${WALLET}.rigA`)).result.job);
+
+  const login = pool.logins.find((message) => message.method === 'login');
+  assert.deepStrictEqual(login.params.algo, ['rx/0', 'rx/wow', 'rx/arq', 'rx/graft', 'rx/sfx', 'rx/yada', 'panthera']);
+});
+
+test('a pool that switches the farm to panthera gets a nonce at offset 147', async (t) => {
+  const pool = await withPool(t, { difficulty: 1000 });
+  const proxy = await withProxy(t, { pools: [`127.0.0.1:${pool.port}`] });
+
+  const rig = await new Rig(proxy.port).connect();
+  t.after(() => rig.close());
+  const first = await rig.login(`${WALLET}.rigA`);
+  const prefix = Number.parseInt(first.result.job.blob.slice(39 * 2 + 6, 39 * 2 + 8), 16);
+  assert.ok(prefix >= 1);
+
+  // The pool moves to Scala. Writing the extranonce at 39 here would corrupt the
+  // header and every share would come back rejected.
+  pool.pushJob({ jobId: 'job-panthera', algo: 'panthera', blob: BLOB_PANTHERA, difficulty: 1000 });
+
+  const job = await rig.waitFor((m) => m.method === 'job' && m.params.algo === 'panthera');
+  assert.strictEqual(job.params.job_id.startsWith('p'), true, 'the rig gets a proxy-owned job id');
+
+  const bytes = job.params.blob;
+  const at147 = Number.parseInt(bytes.slice(147 * 2 + 6, 147 * 2 + 8), 16);
+  const at39 = Number.parseInt(bytes.slice(39 * 2 + 6, 39 * 2 + 8), 16);
+
+  assert.strictEqual(at147, prefix, 'the extranonce belongs at byte 150 of a panthera blob');
+  assert.strictEqual(at39, 0, 'nothing may be written at the Monero offset');
+
+  rig.send({
+    id: 7,
+    jsonrpc: '2.0',
+    method: 'submit',
+    params: { id: 'x', job_id: job.params.job_id, nonce: ((prefix << 24) | 9).toString(16).padStart(8, '0'), result: ZERO_HASH },
+  });
+  assert.strictEqual((await rig.waitFor((m) => m.id === 7)).result.status, 'OK');
+
+  const forwarded = await (async () => {
+    for (let i = 0; i < 200; i++) {
+      if (pool.submits.length) return pool.submits[0];
+      await sleep(10);
+    }
+    throw new Error('the panthera share never reached the pool');
+  })();
+
+  assert.strictEqual(forwarded.params.job_id, 'job-panthera');
+  assert.strictEqual(forwarded.params.algo, 'panthera', 'the pool must be told which coin the share is for');
 });

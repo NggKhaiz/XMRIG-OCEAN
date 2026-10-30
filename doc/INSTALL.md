@@ -28,10 +28,14 @@ That single command:
 7. starts it, waits for the first real hashrate, runs the 0 %-fee audit and
    prints a summary card.
 
-Only the wallet is required. The engine comes from the pool (a switching pool
-like MoneroOcean gets the C++ engine with its 34 algorithms; a RandomX-only pool
-gets `zmrig`), and the profile comes from the battery state. `./oneclick.sh plan`
-prints every decision with its reason and touches nothing.
+Only the wallet is required. The engine is `zmrig` unless the hardware cannot
+run it or `--algo` names a non-RandomX algorithm: on a pool that switches coins
+(MoneroOcean and its clones) the config advertises the whole RandomX family
+(`"algo": "auto"`), so the pool can still move the rig to whichever coin pays
+best while the rig keeps the fee-free engine. A non-RandomX `--algo` (cn/2, …)
+or `--engine=xmrig` selects the C++ engine, which speaks all 34 algorithms. The
+profile comes from the battery state. `./oneclick.sh plan` prints every decision
+with its reason and touches nothing.
 
 End state:
 
@@ -70,7 +74,7 @@ sudo ./oneclick.sh purge      # remove everything, config included (asks first)
 | `--pass VALUE` | pool password, default `x` |
 | `--rig-id NAME` | name shown on the pool dashboard |
 | `--algo NAME` | pin one algorithm (`rx/0`, `cn/r`, …). Also **skips the 2-minute calibration**, see below. |
-| `--engine NAME` | `auto` (default), `xmrig` (every algorithm) or `zmrig` (the Zig miner, RandomX only). `auto` uses the pool: switching pools need all 34 algorithms, RandomX-only pools are best served by `zmrig`. See [The Zig engine](#the-zig-engine). |
+| `--engine NAME` | `auto` (default), `xmrig` (every algorithm) or `zmrig` (the Zig miner, RandomX family). `auto` picks `zmrig` and advertises the RandomX family at login, which is what a switching pool needs to move this rig between coins; a non-RandomX `--algo` picks the C++ engine. See [The Zig engine](#the-zig-engine). |
 | `--profile NAME` | `auto` (default), `free` (maximum hashrate, watts ignored) or `watt` (maximum hashrate per watt). `auto` is `free`, except on a laptop on battery. See [profiles](#profiles-free-vs-watt). |
 | `--autotune[=SEC]` | search for the best thread count after the build, `SEC` seconds per candidate (default 8). On by default for `zmrig`. |
 | `--no-autotune` | keep the built-in `L3 / 2 MiB` heuristic |

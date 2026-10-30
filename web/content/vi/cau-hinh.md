@@ -102,6 +102,8 @@ Khoá trong `pools[]`: `url`, `user`, `pass`, `rig-id`, `algo`, `keepalive`, `tl
 -u, --user=USER          ví hoặc login
 -p, --pass=PASS          password (mặc định x)
 -a, --algo=ALGO          rx/0, rx/2, rx/wow, rx/arq, rx/graft, rx/sfx, rx/yada, panthera
+                         'auto' khai toàn bộ họ RandomX để pool trả theo coin đắt nhất
+                         có thể chuyển rig sang (MoneroOcean) thay vì giữ rig ở rx/0
     --rig-id=ID          tên máy gửi pool
     --keepalive / --no-keepalive
     --transport=NAME     tcp | tls | ws | wss

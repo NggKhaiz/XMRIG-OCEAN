@@ -12,7 +12,7 @@ const options = @import("options.zig");
 const transport = @import("transport.zig");
 const util = @import("util.zig");
 
-pub const agent = "zmrig/6.28.0-mo11";
+pub const agent = "zmrig/6.29.0-mo12";
 
 /// `--user-agent`: some pools and relays only accept a known miner string, and
 /// Cloudflare Workers can route on it. Null keeps the default.
@@ -163,6 +163,46 @@ fn setKeepAlive(fd: std.posix.socket_t) void {
     std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.KEEPALIVE, std.mem.asBytes(&on)) catch {};
 }
 
+/// The login `params` object, built the same way every time.
+///
+/// Split out of `Session.login` so it can be tested without a socket: the
+/// `algo` array is the difference between a rig a pool leaves on rx/0 and a rig
+/// it mines the most profitable coin with, and a typo there is silent -- the pool
+/// simply ignores an extension it does not understand.
+pub const LoginParams = struct {
+    user: []const u8,
+    password: []const u8,
+    agent: []const u8,
+    rig_id: ?[]const u8 = null,
+    algos: []const api.Algo = &.{},
+};
+
+pub fn writeLoginParams(w: anytype, params: LoginParams) !void {
+    // The wallet, password and rig id are user input: escape them, or a quote in
+    // a password turns the login into malformed JSON.
+    try w.writeAll("{\"login\":\"");
+    try util.writeJsonString(w, params.user);
+    try w.writeAll("\",\"pass\":\"");
+    try util.writeJsonString(w, params.password);
+    try w.writeAll("\",\"agent\":\"");
+    try util.writeJsonString(w, params.agent);
+    try w.writeByte('"');
+    if (params.rig_id) |rig| {
+        try w.writeAll(",\"rigid\":\"");
+        try util.writeJsonString(w, rig);
+        try w.writeByte('"');
+    }
+    if (params.algos.len > 0) {
+        try w.writeAll(",\"algo\":[");
+        for (params.algos, 0..) |algo, index| {
+            if (index > 0) try w.writeByte(',');
+            try w.print("\"{s}\"", .{algo.label()});
+        }
+        try w.writeByte(']');
+    }
+    try w.writeAll(",\"extensions\":[\"algo\",\"keepalive\"]}");
+}
+
 /// `{"id":N,"jsonrpc":"2.0","method":"submit","params":{...}}`
 pub const Session = struct {
     allocator: std.mem.Allocator,
@@ -196,28 +236,22 @@ pub const Session = struct {
     }
 
     /// Sends the login request and waits for the first job.
-    pub fn login(self: *Self, algo: ?api.Algo, out_job: *job.Job) !void {
+    ///
+    /// `algos` is what the pool is told this rig can hash. Empty means "no
+    /// preference" and is what a rig without `--algo` has always sent; more than
+    /// one entry is `--algo=auto`, and it is the only way a pool that pays for
+    /// the most profitable coin per hash can move this rig off rx/0.
+    pub fn login(self: *Self, algos: []const api.Algo, out_job: *job.Job) !void {
         var params: std.ArrayListUnmanaged(u8) = .{};
         defer params.deinit(self.allocator);
 
-        const w = params.writer(self.allocator);
-
-        // The wallet, password and rig id are user input: escape them, or a
-        // quote in a password turns the login into malformed JSON.
-        try w.writeAll("{\"login\":\"");
-        try util.writeJsonString(w, self.pool.user);
-        try w.writeAll("\",\"pass\":\"");
-        try util.writeJsonString(w, self.pool.password);
-        try w.writeAll("\",\"agent\":\"");
-        try util.writeJsonString(w, user_agent orelse agent);
-        try w.writeByte('"');
-        if (self.pool.rig_id) |rig| {
-            try w.writeAll(",\"rigid\":\"");
-            try util.writeJsonString(w, rig);
-            try w.writeByte('"');
-        }
-        if (algo) |a| try w.print(",\"algo\":[\"{s}\"]", .{a.label()});
-        try w.writeAll(",\"extensions\":[\"algo\",\"keepalive\"]}");
+        try writeLoginParams(params.writer(self.allocator), .{
+            .user = self.pool.user,
+            .password = self.pool.password,
+            .agent = user_agent orelse agent,
+            .rig_id = self.pool.rig_id,
+            .algos = algos,
+        });
 
         const line = try std.fmt.allocPrint(self.allocator, "{{\"id\":{d},\"jsonrpc\":\"2.0\",\"method\":\"login\",\"params\":{s}}}", .{ self.allocId(), params.items });
         defer self.allocator.free(line);
@@ -526,6 +560,74 @@ test "a login reply carries the first job, the id and the session id" {
     try testing.expect(message.reply.ok);
     try testing.expectEqualStrings("job-7", message.reply.job.?.idSlice());
     try testing.expectEqual(@as(u64, 3000000), message.reply.job.?.height);
+}
+
+test "the login advertises nothing, one algorithm, or the whole family" {
+    const testing = std.testing;
+
+    // No -a: unchanged behaviour for every existing rig. The pool decides.
+    {
+        var buf: [512]u8 = undefined;
+        var stream = std.io.fixedBufferStream(&buf);
+        try writeLoginParams(stream.writer(), .{ .user = "W", .password = "x", .agent = "zmrig/test" });
+        const text = stream.getWritten();
+
+        // No `"algo":[...]` array; the word still appears in `extensions`.
+        try testing.expect(std.mem.indexOf(u8, text, "\"algo\":[") == null);
+        try testing.expect(std.mem.indexOf(u8, text, "\"extensions\":[\"algo\",\"keepalive\"]") != null);
+        try testing.expect(std.mem.endsWith(u8, text, "}"));
+    }
+
+    // -a rx/0: one entry, exactly as before (pools that only accept a list still work).
+    {
+        var buf: [512]u8 = undefined;
+        var stream = std.io.fixedBufferStream(&buf);
+        try writeLoginParams(stream.writer(), .{
+            .user = "W",
+            .password = "x",
+            .agent = "zmrig/test",
+            .algos = &.{.rx_0},
+        });
+        const text = stream.getWritten();
+
+        try testing.expect(std.mem.indexOf(u8, text, "\"algo\":[\"rx/0\"]") != null);
+    }
+
+    // --algo=auto: the full list, comma separated, every label a pool knows.
+    {
+        var buf: [512]u8 = undefined;
+        var stream = std.io.fixedBufferStream(&buf);
+        try writeLoginParams(stream.writer(), .{
+            .user = "W",
+            .password = "x",
+            .agent = "zmrig/test",
+            .algos = &api.auto_algos,
+        });
+        const text = stream.getWritten();
+
+        try testing.expect(std.mem.indexOf(u8, text, "\"algo\":[\"rx/0\",\"rx/wow\",\"rx/arq\",\"rx/graft\",\"rx/sfx\",\"rx/yada\",\"panthera\"]") != null);
+        // No trailing comma, and the JSON still closes: a pool that rejects a
+        // malformed login closes the socket and the rig mines nothing.
+        try testing.expect(std.mem.indexOf(u8, text, ",]") == null);
+        try testing.expect(std.mem.endsWith(u8, text, "}"));
+    }
+}
+
+test "a quote in a password cannot break the login JSON" {
+    const testing = std.testing;
+
+    var buf: [512]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    try writeLoginParams(stream.writer(), .{ .user = "W", .password = "a\"b\\c", .agent = "zmrig/test" });
+
+    const text = try testing.allocator.dupe(u8, stream.getWritten());
+    defer testing.allocator.free(text);
+
+    // Must still parse, and the password must come back byte for byte.
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, text, .{});
+    defer parsed.deinit();
+
+    try testing.expectEqualStrings("a\"b\\c", parsed.value.object.get("pass").?.string);
 }
 
 test "pool errors are reported, not swallowed" {

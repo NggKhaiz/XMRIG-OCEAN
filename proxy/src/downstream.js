@@ -17,9 +17,10 @@
 
 'use strict';
 
-const { applyExtranonce, honoursPrefix } = require('./blob');
+const { applyExtranonce, honoursPrefix, nonceOffsetFor } = require('./blob');
 const { ExtranonceAllocator } = require('./extranonce');
 const { Vardiff } = require('./vardiff');
+const { hashrateFromShares, xmrPerDay } = require('./network');
 const { difficultyFromTarget, meetsTarget, targetHex } = require('../../pool/src/target');
 const { hexToBytes, isHex, isHexOf, nowSeconds, looksLikeAddress, splitLogin } = require('../../pool/src/util');
 
@@ -47,6 +48,10 @@ class Downstream {
     // has a password field, so this needs no client change and no custom header
     // a tunnel provider could strip.
     this.token = String(options.token || '');
+    // Optional: turns the per-rig share counts into H/s and XMR/day. Without
+    // it /status still reports hashrate and shares/hour -- it just refuses to
+    // price them.
+    this.network = options.network || null;
     this.log = options.logger || (() => {});
 
     this.allocator = new ExtranonceAllocator();
@@ -96,11 +101,14 @@ class Downstream {
 
     const changed = job.job_id !== this.job?.job_id;
     const retargeted = difficulty !== this.upstreamDifficulty;
+    const switched = (job.algo || 'rx/0') !== (this.job?.algo || 'rx/0');
     this.job = job;
     this.upstreamDifficulty = difficulty;
 
-    if (this.upstreamPrefix === null) {
-      const offset = job.nonce_offset ?? 39;
+    if (this.upstreamPrefix === null || switched) {
+      // A new algorithm can move the nonce (panthera: 147), so the byte the pool
+      // already owns has to be read again from the new position.
+      const offset = nonceOffsetFor(job.algo);
       this.upstreamPrefix = readPrefix(job.blob, offset);
       if (this.upstreamPrefix !== 0) {
         this.log('warn', `upstream already uses nonce byte 0x${byteHex(this.upstreamPrefix)}; rigs share that space`);
@@ -112,7 +120,7 @@ class Downstream {
       if (retargeted) conn.vardiff.setUpstream(difficulty, false);
       // A new difficulty is useless to the rig until it arrives in a job, so
       // either change is announced.
-      if (changed || retargeted) this.sendJob(conn, changed);
+      if (changed || retargeted || switched) this.sendJob(conn, changed || switched);
     }
 
     // A rig that logged in during the seconds before this job existed is
@@ -400,6 +408,9 @@ class Downstream {
 
     conn.prefix = prefix;
     conn.authorised = true;
+    // The estimate divides by this, so it must be the moment the rig started
+    // producing shares, not the moment the TCP socket opened.
+    conn.connectedAt = nowSeconds();
     conn.login = login;
     conn.address = address;
     conn.worker = worker;
@@ -441,7 +452,9 @@ class Downstream {
     if (!job) return null;
 
     const difficulty = conn.vardiff.current;
-    const offset = job.nonce_offset ?? 39;
+    // Read the offset from the algorithm: a panthera job has its nonce at 147,
+    // and patching 39 instead yields a blob no miner can produce a valid hash for.
+    const offset = nonceOffsetFor(job.algo);
     const { blob, mode } = applyExtranonce(job.blob, {
       offset,
       upstreamPrefix: this.upstreamPrefix || 0,
@@ -454,6 +467,7 @@ class Downstream {
       difficulty,
       announcedAt: nowSeconds(),
       mode,
+      algo: job.algo || 'rx/0',
     });
 
     while (conn.jobs.size > MAX_JOBS) {
@@ -587,7 +601,7 @@ class Downstream {
       jobId: entry.upstreamId,
       nonce,
       result,
-      algo: this.job?.algo,
+      algo: entry.algo,
       height: this.job?.height,
     }).then((outcome) => {
       if (!outcome.ok) this.log('debug', `pool rejected a share from ${conn.remote}: ${outcome.reason}`);
@@ -631,15 +645,65 @@ class Downstream {
       prefixHonoured: this.prefixHonoured,
       prefixIgnored: this.prefixIgnored,
       ...this.stats,
-      connections: rigs.map((c) => ({
-        remote: c.remote,
-        worker: c.worker || null,
-        agent: c.agent || null,
-        prefix: c.prefix,
-        difficulty: Number(c.vardiff.current.toFixed(4)),
-        accepted: c.accepted,
-        rejected: c.rejected,
-      })),
+      estimate: this.network ? this.network.snapshot() : null,
+      ...this.fleetTotals(rigs),
+      connections: rigs.map((c) => {
+        const seconds = Math.max(1, nowSeconds() - (c.connectedAt || this.startedAt));
+        // The difficulty the rig was actually given: a rig on a lowered local
+        // difficulty produces more shares of less value each, and dividing by
+        // that difficulty makes two rigs comparable again.
+        const hashrate = hashrateFromShares({
+          shares: c.accepted,
+          difficulty: c.vardiff.current,
+          seconds,
+        });
+
+        return {
+          remote: c.remote,
+          worker: c.worker || null,
+          agent: c.agent || null,
+          prefix: c.prefix,
+          uptime: Math.round(seconds),
+          difficulty: Number(c.vardiff.current.toFixed(4)),
+          accepted: c.accepted,
+          rejected: c.rejected,
+          hashrate: Number(hashrate.toFixed(1)),
+          sharesPerHour: Number(((c.accepted / seconds) * 3600).toFixed(2)),
+          xmrPerDay: this.priceOf(hashrate),
+        };
+      }),
+    };
+  }
+
+  /** XMR/day for a hashrate, or null when the network figure is unknown. */
+  priceOf(hashrate) {
+    if (!this.network) return null;
+
+    const value = xmrPerDay({
+      hashrate,
+      networkDifficulty: this.network.difficulty,
+      reward: this.network.reward,
+    });
+
+    return value === null ? null : Number(value.toFixed(6));
+  }
+
+  /** Fleet-wide sums, so an operator reads one number instead of adding up
+   *  twenty rigs by hand. */
+  fleetTotals(rigs) {
+    let hashrate = 0;
+    let sharesPerHour = 0;
+
+    for (const c of rigs) {
+      const seconds = Math.max(1, nowSeconds() - (c.connectedAt || this.startedAt));
+      hashrate += hashrateFromShares({ shares: c.accepted, difficulty: c.vardiff.current, seconds });
+      sharesPerHour += (c.accepted / seconds) * 3600;
+    }
+
+    return {
+      hashrate: Number(hashrate.toFixed(1)),
+      sharesPerHour: Number(sharesPerHour.toFixed(2)),
+      xmrPerDay: this.priceOf(hashrate),
     };
   }
 }
