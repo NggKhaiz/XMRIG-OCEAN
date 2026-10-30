@@ -1,3 +1,79 @@
+# zmrig-proxy 1.0.0 — one address for every rig
+
+A new program in `proxy/`, not a fork. The miner binary is unchanged at
+`6.28.0-mo11`; this release is about the farm, not the CPU.
+
+Proxies are where income disappears quietly: rigs connected, shares accepted,
+log clean. So every piece here exists to make one specific silent failure
+impossible, and each has a test that fails if it comes back.
+
+### New
+- **`proxy/install.sh`** — one command to a systemd service (`--dry-run` prints
+  the unit, `--uninstall` removes it). It copies `proxy/` and `pool/src` side by
+  side because the proxy shares the pool's target maths, and a test runs the
+  copied layout so that path cannot rot.
+- **`zmrig-proxy`** (`proxy/`, Node 18+, no dependencies) — the whole farm behind
+  one address and one pool connection.
+  - **Extranonce per rig** (`proxy/src/blob.js`, `proxy/src/extranonce.js`):
+    a little-endian `uint32` at blob offset 39, top byte per rig, 255 rigs. The
+    allocator hands out `1..255` and **never 0**, because a blob whose nonce is 0
+    is the signal that turns extranonce support *off* in the miner
+    (`zmrig/src/job.zig:130`, `detectNicehash`) — prefix 0 silently reintroduces
+    duplicate work. A rig that overwrites its own byte is reported once, with the
+    byte it used instead of a flood of warnings.
+  - **Per-rig difficulty** (`proxy/src/vardiff.js`): local equals upstream by
+    default, so every accepted share is forwarded and the pool's hashrate
+    estimate stays exact; allowed range `[upstream/8, upstream×4]`, 15 % deadband,
+    `forwardRatio` and `absorbed` published on `/status`.
+  - **Failover and survival** (`proxy/src/upstream.js`): one upstream connection,
+    exponential backoff (5 s → 60 s) on a drop, **immediate rotation** when a pool
+    refuses the login, rigs never dropped, last job replayed during an outage.
+  - **Four transports, one protocol**: `stratum+tcp`, `stratum+ssl`, `ws`, `wss`
+    (`proxy/src/conn.js` adapts them; `pool/src/ws.js` does the RFC 6455 work).
+  - **One flag for the public path**: `--tunnel=wireguard|tailscale|cf|cf-quick`.
+    `wireguard` generates a server config plus one peer file per rig
+    (`10.66.66.2 …`), one UDP port, no third party. `tailscale` logs in with
+    `--tunnel-token` and uses Funnel only for the WebSocket listener. `cf-quick`
+    **refuses to start without `--ws`** and prints why it is a demo: random
+    hostname per restart, 200 concurrent requests, no authentication, no SLA.
+  - **Default-safe**: binds `127.0.0.1`, refuses `--bind=0.0.0.0` without
+    `--token` or `--allow=<cidr>`, rate-limits 60 connections/minute per IP,
+    status endpoint on loopback behind a bearer token.
+  - **`doctor`** tests the pool, the wallet and the network before a rig is
+    pointed anywhere, including the arithmetic an operator usually gets wrong:
+    shares/hour = `hashrate × 3600 / difficulty`.
+
+### Fixed (pool)
+- **`nextDifficulty()` had the vardiff ratio inverted**
+  (`pool/src/target.js`). It computed `observed/desired` instead of
+  `desired/observed`, which is the one direction error that is invisible: a slow
+  rig was given harder and harder targets until it submitted nothing at all while
+  still drawing full power, and a fast rig drifted to the floor. Measured, same
+  inputs: `nextDifficulty(1000, 60 s, 15 s)` returned **2000** (harder); it now
+  returns **500**. `nextDifficulty(1000, 1 s, 15 s)` returned **500**; it now
+  returns **2000**. The two columns were exactly swapped. The unit test now pins
+  the direction (`slow < 1000`, `fast > 1000`) instead of only asserting that a
+  number came back.
+- **`difficultyFromTarget()` read the wire target as big-endian**
+  (`pool/src/target.js`). `targetHex()` writes a little-endian `uint64` — which is
+  what a miner reads — and the inverse parsed the hex as big-endian, so
+  `difficultyFromTarget('efa7c64b37894100')` returned **1.0682** instead of
+  **1000**. Nothing in the pool called it, which is why the old round-trip test
+  (bigint in, bigint out) passed; the proxy is the first caller, and a proxy that
+  believes the pool's difficulty is 1/937th of the truth forwards shares that have
+  not cleared the pool target. Both the wire form and a 32-byte target (low 64
+  bits) are now handled, and tested.
+
+### Tests
+- `proxy/`: **43 passing** (`14` blob/extranonce/vardiff, `8` data plane over real
+  sockets — two rigs on one upstream connection, correct pool job id on forward,
+  absorbed shares counted, pool death survived, login-refusal failover, `14` flags
+  and access control (IPv4 and IPv6 CIDR), `4` the real binary over TCP and WebSocket including the
+  token gate, `/status`, `doctor` and a clean SIGTERM).
+- `pool/`: **29 tests, 26 pass**, 3 skipped by design (was 28/25).
+- Docs in the same change: `doc/PROXY.md`, `README.md`, and
+  `web/content/vi/proxy.md` linked from the site's navigation.
+
 # v6.28.0-mo11 — the miner that knows when it stopped earning
 
 Two changes, both about income that is lost silently.
