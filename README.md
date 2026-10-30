@@ -127,7 +127,7 @@ at release time; `ALPHA` carries work that is not released yet. See
 ## Everyday commands
 
 ```bash
-sudo ./oneclick.sh status           # service, hashrate, accepted shares
+sudo ./oneclick.sh status           # service, hashrate, shares, health
 sudo ./oneclick.sh bench            # 180 s RandomX measurement
 sudo ./oneclick.sh report --power 95 # ZMRIG1. code for the site calculator
 sudo ./oneclick.sh verify           # prove the 0 % fee
@@ -167,6 +167,43 @@ zmrig -o pool:3333 -u 4YourAddress.rig1 -t 4
 `oneclick.sh report` refuses to run when the machine cannot hold the dataset,
 instead of being killed by the OOM killer mid-measurement.
 
+## Is it still earning?
+
+That question is not the same as "is the process running", and the difference is
+where money disappears quietly. A miner whose pool rejects every share looks
+perfect from the outside: alive, connected, hashing, and earning nothing.
+
+`zmrig` now judges its own numbers once a second and reports one of five states:
+
+| State | Meaning | What happens |
+| --- | --- | --- |
+| `warming` | dataset is building, or the user paused it | nothing (a pause is a feature, not a fault) |
+| `ok` | hashrate near this session's best, shares accepted | nothing |
+| `degraded` | below 80 % of the session peak for ten minutes (throttle, noisy neighbour) | logged as a warning |
+| `stalled` | no hashes at all while the process lives | logged as an error |
+| `rejected` | shares are being sent, the pool accepts none | logged as an error |
+
+```bash
+sudo ./oneclick.sh status
+#   hashrate: 1042.6 H/s (10s/60s/15m)
+#   shares:   184/0/0 accepted
+#   health:   ok
+```
+
+`stalled` or `rejected` for **15 minutes** and the process exits with code 3,
+which `Restart=always` turns into a clean start — that is the only thing that
+actually fixes a stuck engine or a pool that has decided against you. The trade is
+explicit: 16–30 s of lost hashrate instead of hours of zero.
+
+```bash
+zmrig ... --no-health-restart        # never exit on its own
+zmrig ... --health-restart=1800      # be slower to give up (seconds)
+zmrig ... --health-warmup=300        # judge nothing for the first 5 minutes
+```
+
+The state also travels in the `ZMRIG1.` code (`"health":"ok"`), so a fleet
+dashboard can sort by machines that are running but earning nothing.
+
 ## Tuning the miner
 
 Every knob below was measured with `zmrig/tests/ab.sh` (same binary, same
@@ -178,6 +215,7 @@ Xeon at 2.6 GHz with 3.9 GiB of RAM, `--mode fast`, 4000 hashes per run.
 | `--huge-pages` / `--no-huge-pages` | on, and **reserved automatically** | **+25.0 %** measured end-to-end: 855.8 H/s with nothing reserved (what a fresh VPS does) → 1070.0 H/s once the miner reserves 1208 × 2 MiB pages itself at startup. `--no-auto-hugepages` keeps `/proc` untouched; `--check` reports the state and never writes. |
 | `-t/--threads` | one per hardware thread | **−48 %** with one thread on a 2 vCPU box (553.4 vs 1070.0 H/s); 4 threads on 2 vCPU adds nothing (1070.0). `--check` prints both numbers. |
 | `--msr` | off (on for `oneclick.sh` installs) | Prefetchers off through MSR. Needs root and bare metal; the read is refused inside a VM without MSR passthrough, and the miner says so instead of pretending. The installer writes `wrmsr`/`rdmsr` as XMRig does, so a root service gets it and restores the old values on exit; `--no-msr` turns it off for containers. |
+| thread pinning | one thread per physical core first, sockets interleaved | Not a flag: the order comes from sysfs, because "thread *i* on cpu *i*" is wrong on AMD, where SMT siblings are adjacent (cpu0/cpu1 are one core). `--check` prints the mapping. On a single-socket Intel box the two orders are identical, which is why this went unnoticed for so long; the cost of getting it wrong is 4 threads on 2 cores, i.e. about half the machine. |
 | `--cpu-affinity=0x3` | all cores | XMRig-style bitmask. Pinning both threads to one core in the test box halves the rate (832 → 405 H/s), which is the expected, verifiable behaviour of a real pin. |
 | `--no-affinity` | pin | Lets the scheduler move threads; measured equal to pinning on an idle box, kept for hosts with noisy neighbours. |
 | `--priority=N` / `--cpu-priority=N` | off | 1..5 (XMRig scale) or a raw nice value; the worker sets it per thread. |
@@ -187,7 +225,7 @@ Xeon at 2.6 GHz with 3.9 GiB of RAM, `--mode fast`, 4000 hashes per run.
 | `--scratchpad-prefetch=0..3` | 1 | Prefetch hint baked into the JIT. All four modes landed in 795–832 H/s on this box: no measurable difference, so the documented default stays. |
 | `--no-jit` | off | Interpreter only, ~6x slower. Kept for CPUs without x86-64/ARM64, never for mining. |
 | `--nicehash` | auto | Masks the nonce to the 24 bits a NiceHash/rental pool owns, so the top extranonce byte survives. Off unless the pool's job carries a non-zero nonce. |
-| `--user-agent=UA` | `zmrig/6.27.0-mo10` | Sent in the WebSocket upgrade; some relays and Cloudflare routes only accept known miner strings. |
+| `--user-agent=UA` | `zmrig/6.28.0-mo11` | Sent in the WebSocket upgrade; some relays and Cloudflare routes only accept known miner strings. |
 | `--donate-level=N` | — | Accepted so XMRig scripts keep working, then ignored with a log line: the developer fee is 0 %, never 1 %. |
 | *nothing below this line* | — | Prefetch mode, `--no-huge-pages-jit`, `--no-affinity`, `--randomx-init`, `--no-optimized-init` and `--priority` all measured inside ±3 % noise on the same box. They exist for hosts where they matter; do not expect a number. VAES-512 was tried and is **3.5 % slower** here — see [`doc/PERFORMANCE.md`](doc/PERFORMANCE.md). |
 
@@ -329,6 +367,7 @@ node run_tests.js --safe --build-dir build
 ./tests/oneclick/config.sh           # what the zero-flag path writes into config.json
 ./tests/oneclick/governor.sh         # free pins the CPU, watt does not
 ./tests/oneclick/purge.sh            # purge removes exactly its own paths, and nothing else
+./zmrig/tests/health.sh              # the watchdog: honest pool vs a pool that rejects everything
 npm run test:web                     # site builder, docs renderer, address + branch guards
 npm run test:pool                    # pool unit + protocol + end-to-end (28 tests)
 ```

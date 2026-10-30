@@ -162,5 +162,34 @@ else
     record FAIL "--profile and --autotune are documented" "not in --help"
 fi
 
+# --- health ------------------------------------------------------------
+# The watchdog restarts the process by default, so the escape hatch has to be
+# in --help: a user whose machine must stay up needs to find it.
+if "$BIN" --help | grep -qF -- "--no-health-restart"; then
+    record PASS "--no-health-restart is documented" ""
+else
+    record FAIL "--no-health-restart is documented" "not in --help"
+fi
+
+expect_exit 0 "--health-restart accepts a value" -- \
+    "$BIN" -o pool.example.com:3333 -u "$WALLET" --health-restart=60 --check
+expect_exit 1 "--health-restart rejects junk" -- \
+    "$BIN" -o pool.example.com:3333 -u "$WALLET" --health-restart=soon --check
+
+if "$BIN" -o pool.example.com:3333 -u "$WALLET" --no-health-restart --check >/dev/null 2>&1; then
+    record PASS "--no-health-restart is accepted" ""
+else
+    record FAIL "--no-health-restart is accepted" "exited $?"
+fi
+
+# The CPUs a run will use must be listed: that line is what makes a wrong
+# pinning (two threads on one physical core) visible instead of silent.
+cpus_line=$("$BIN" -o pool.example.com:3333 -u "$WALLET" --check 2>/dev/null | sed -n 's/^ *cpus *//p' | head -1)
+if [ -n "$cpus_line" ]; then
+    record PASS "--check lists the CPUs each thread uses" "$cpus_line"
+else
+    record FAIL "--check lists the CPUs each thread uses" "no cpus line"
+fi
+
 printf '\n    %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

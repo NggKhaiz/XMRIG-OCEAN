@@ -116,6 +116,11 @@ PURGE_DRY_RUN=0
 AUTOTUNE="${MINER_AUTOTUNE:-auto}"
 AUTOTUNE_SECONDS="${MINER_AUTOTUNE_SECONDS:-8}"
 AUTOTUNE_THREADS="${MINER_AUTOTUNE_THREADS:-}"
+# Let the miner exit for a restart after 15 minutes of "stalled" or "every
+# share rejected": under systemd that is the only real recovery, and it costs
+# 16-30 s against hours of zero. --no-health-restart on a machine that must
+# stay up regardless.
+HEALTH_RESTART="${MINER_HEALTH_RESTART:-1}"
 
 # ---------------------------------------------------------------------------
 # output helpers
@@ -160,6 +165,8 @@ Options
   --autotune[=SEC]       search for the best thread count after install
                          (default: on for zmrig, 8 s per candidate)
   --no-autotune          keep the built-in thread heuristic
+  --no-health-restart    never exit to recover from a stalled miner
+                         (default: exit after 15 min so systemd restarts it)
   --algo NAME            force one algorithm instead of pool auto-selection
   --engine NAME          auto (default) | xmrig (all algorithms) | zmrig (Zig, rx/*).
                          auto reads the pool: switching pools need every algorithm,
@@ -227,6 +234,7 @@ while [ $# -gt 0 ]; do
         --algo)          ALGO="${2:?}"; shift ;;
         --algo=*)        ALGO="${1#*=}" ;;
         --dry-run)       PURGE_DRY_RUN=1 ;;
+        --no-health-restart) HEALTH_RESTART=0 ;;
         --autotune)      AUTOTUNE=1 ;;
         --autotune=*)    AUTOTUNE="${1#*=}" ;;
         --no-autotune)   AUTOTUNE=0 ;;
@@ -905,10 +913,19 @@ write_config() {
     # script generated, never user text.
     local profile_json=""
     local cpu_threads_json=""
+    local health_json=""
     if [ "${ENGINE:-xmrig}" = "zmrig" ]; then
         resolve_profile_effective
         profile_json="
     \"profile\": \"${PROFILE_EFFECTIVE}\","
+        if [ "$HEALTH_RESTART" != 1 ]; then
+            # profile_json already ends with a comma, so this block only has
+            # to supply its own trailing one.
+            health_json="
+    \"health\": {
+        \"restart\": false
+    },"
+        fi
         case "${AUTOTUNE_THREADS:-}" in
             ''|*[!0-9]*) ;;
             *) cpu_threads_json="        \"threads\": ${AUTOTUNE_THREADS}," ;;
@@ -930,7 +947,7 @@ write_config() {
         "access-token": ${http_token},
         "restricted": true
     },
-    "autosave": true,${profile_json}
+    "autosave": true,${profile_json}${health_json}
     "background": false,
     "colors": false,
     "title": true,
@@ -1137,6 +1154,10 @@ StartLimitIntervalSec=0
 Type=simple
 ExecStart=${BINARY} -c ${CONFIG_FILE} --no-color
 WorkingDirectory=${STATE_DIR}
+# Restart=always is what makes the miner's own watchdog work: it exits with
+# code 3 after 15 minutes of "stalled" or "every share rejected", which is the
+# only way to recover from a stuck engine or a pool that has blacklisted us.
+# Mine on a machine that should stay up regardless: --no-health-restart.
 Restart=always
 RestartSec=5
 Nice=-10
@@ -1237,6 +1258,17 @@ bg_ctl() {
 }
 
 # Current hashrate from the local HTTP API, falling back to the log tail.
+# The miner logs one "health: <state> ..." line per interval. Reading it back
+# is what turns `status` from "the process is up" into "the process is earning".
+current_health() {
+    local raw
+    raw=$(log_tail 400 | sed 's/\x1b\[[0-9;]*m//g' | grep -E 'health: ' | tail -1) || true
+    [ -n "$raw" ] || return 1
+
+    # "health: ok rate 60s ..." -> "ok"
+    printf '%s' "${raw#*health: }" | awk '{ print $1 }'
+}
+
 current_hashrate() {
     local api
     if api=$(summary_hashrate 2>/dev/null) && [ -n "${api// /}" ]; then
@@ -1843,6 +1875,11 @@ autotune_plan() {
 # an install that cannot measure still has to install.
 maybe_autotune() {
     AUTOTUNE_THREADS="${MINER_AUTOTUNE_THREADS:-}"
+# Let the miner exit for a restart after 15 minutes of "stalled" or "every
+# share rejected": under systemd that is the only real recovery, and it costs
+# 16-30 s against hours of zero. --no-health-restart on a machine that must
+# stay up regardless.
+HEALTH_RESTART="${MINER_HEALTH_RESTART:-1}"
     autotune_wanted || return 0
 
     local bin
@@ -1864,7 +1901,12 @@ maybe_autotune() {
     AUTOTUNE_THREADS=$(printf '%s\n' "$out" | sed -n 's/^autotune-best-threads=//p' | head -1)
 
     case "$AUTOTUNE_THREADS" in
-        ''|*[!0-9]*) warn "the search printed no winner, keeping the heuristic"; AUTOTUNE_THREADS="${MINER_AUTOTUNE_THREADS:-}" ; return 0 ;;
+        ''|*[!0-9]*) warn "the search printed no winner, keeping the heuristic"; AUTOTUNE_THREADS="${MINER_AUTOTUNE_THREADS:-}"
+# Let the miner exit for a restart after 15 minutes of "stalled" or "every
+# share rejected": under systemd that is the only real recovery, and it costs
+# 16-30 s against hours of zero. --no-health-restart on a machine that must
+# stay up regardless.
+HEALTH_RESTART="${MINER_HEALTH_RESTART:-1}" ; return 0 ;;
     esac
 
     ok "best thread count on this machine: ${AUTOTUNE_THREADS} (written to the config)"
@@ -1974,6 +2016,13 @@ case "$COMMAND" in
         info "huge pages: $(awk '$1 == "HugePages_Total:" { print $2 }' /proc/meminfo 2>/dev/null || echo '?') x 2 MiB"
         shares=$(summary_shares 2>/dev/null || true)
         [ -n "$shares" ] && info "shares:   ${shares} accepted"
+        health=$(current_health 2>/dev/null || true)
+        if [ -n "$health" ]; then
+            case "$health" in
+                ok|warming|degraded) info "health:   ${health}" ;;
+                *)                   warn "health:   ${health} (check 'logs'; the miner restarts itself after 15 min of this)" ;;
+            esac
+        fi
         show_logs 6
         ;;
     logs)      resolve_engine; show_logs "${1:-40}" ;;
