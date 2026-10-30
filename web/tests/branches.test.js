@@ -23,6 +23,7 @@ const CARRIERS = [
   'doc/INSTALL.md',
   'doc/SETUP.md',
   'web/index.html',
+  'web/assets/command.js',
   'web/assets/builder.js',
   'web/content/vi/gioi-thieu.md',
 ];
@@ -67,8 +68,10 @@ test('the published one-liner installs from BETA', () => {
     read('README.md').includes(expected),
     'README one-liner uses the stable branch',
   );
+  // The URL lives in command.js now, because the wizard and the quick builder
+  // both build their commands there. One file, one URL.
   assert.ok(
-    read('web/assets/builder.js').includes(expected),
+    read('web/assets/command.js').includes(expected),
     'the site builder uses the same URL as the README',
   );
 });

@@ -1,22 +1,11 @@
-// Command builder.
+// The quick builder on the home page.
 //
-// Assembles the exact install command for the options on the page, so nobody
-// has to remember the flags. Everything is computed here: no network requests,
-// the wallet never leaves the browser.
-//
-// The flags mirror oneclick.sh. If a flag is added there, add it here too.
+// All of the rules live in command.js; this file only reads the form, calls
+// `zmrigCommand.build()`, and paints the result. Keeping it that way is what
+// lets the wizard and this page produce byte-identical commands.
 
 (function () {
   "use strict";
-
-  var RAW_URL = "https://raw.githubusercontent.com/NggKhaiz/ZMRIG/BETA/oneclick.sh";
-
-  var POOLS = {
-    moneroocean: { pool: "gulf.moneroocean.stream:10001", wsPath: null },
-    supportxmr: { pool: "pool.supportxmr.com:3333", wsPath: null },
-    ocean: { pool: "", wsPath: "/stratum" },
-    custom: { pool: "", wsPath: "/stratum" }
-  };
 
   var el = function (id) { return document.getElementById(id); };
 
@@ -26,12 +15,21 @@
     rig: el("b-rig"),
     engine: el("b-engine"),
     pool: el("b-pool"),
+    failover: el("b-failover"),
+    poolInfo: el("b-pool-info"),
+    poolTag: el("b-pool-tag"),
+    summary: el("b-summary"),
     profile: el("b-profile"),
     host: el("b-host"),
+    hostHint: el("b-host-hint"),
     hostField: el("b-host-field"),
     wsPath: el("b-wspath"),
     wsPathField: el("b-wspath-field"),
+    tls: el("b-tls"),
+    tlsHint: el("b-tls-hint"),
     cpu: el("b-cpu"),
+    noautotune: el("b-noautotune"),
+    nohealth: el("b-nohealth"),
     cloudflare: el("b-cloudflare"),
     proxy: el("b-proxy"),
     msr: el("b-msr"),
@@ -43,156 +41,178 @@
     output: el("b-output"),
     status: el("b-status"),
     note: el("b-note"),
+    warn: el("b-warn"),
     copy: el("b-copy"),
-    reset: el("b-reset")
+    copyPlan: el("b-copy-plan"),
+    reset: el("b-reset"),
   };
 
-  if (!nodes.output) return;
+  if (!nodes.output || !nodes.pool) return;
 
-  function shellQuote(value) {
-    if (value === "") return "''";
-    if (/^[A-Za-z0-9._:\/@%+=,-]+$/.test(value)) return value;
+  var table = window.zmrigPools;
+  var last = { args: [], wallet: { ok: false } };
 
-    return "'" + value.replace(/'/g, "'\\''") + "'";
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
   }
 
-  // Monero addresses: 95 characters (4… primary, 8… subaddress) or 106 for an
-  // integrated address. Base58 excludes 0, O, I and l.
-  function walletState(value) {
-    if (!value) return { ok: false, empty: true, message: "Ví chính bắt đầu bằng 4, subaddress bằng 8. Không nhập seed hay private key." };
+  // --- populate the pool controls from the one pool table ------------------
+  function fillPools() {
+    nodes.pool.innerHTML = table.list
+      .map(function (pool) {
+        var fee = table.feeLabel(pool);
+        return (
+          '<option value="' + pool.id + '">' + escapeHtml(pool.name) +
+          " — " + escapeHtml(pool.host) + " · " + escapeHtml(fee) + "</option>"
+        );
+      })
+      .join("") + '<option value="custom">Khác — tôi tự nhập host</option>';
 
-    if (!/^[48][1-9A-HJ-NP-Za-km-z]+$/.test(value)) {
-      return { ok: false, empty: false, message: "Ký tự không hợp lệ — địa chỉ Monero dùng base58 (không có 0, O, I, l)." };
+    if (nodes.failover) {
+      nodes.failover.innerHTML = table.list
+        .map(function (pool) {
+          return (
+            '<label class="pill"><input type="checkbox" data-failover="' + pool.id + '"> ' +
+            "<span>" + escapeHtml(pool.short) + "</span></label>"
+          );
+        })
+        .join("");
+    }
+  }
+
+  function failoverChoice() {
+    if (!nodes.failover) return [];
+    return Array.prototype.slice
+      .call(nodes.failover.querySelectorAll("input[data-failover]"))
+      .filter(function (box) { return box.checked; })
+      .map(function (box) { return box.getAttribute("data-failover"); });
+  }
+
+  function state() {
+    return {
+      wallet: nodes.wallet.value,
+      rig: nodes.rig.value,
+      engine: nodes.engine.value,
+      profile: nodes.profile ? nodes.profile.value : "auto",
+      pool: nodes.pool.value,
+      host: nodes.host.value,
+      failover: failoverChoice(),
+      tls: nodes.tls ? nodes.tls.checked : false,
+      cloudflare: nodes.cloudflare.checked,
+      wsPath: nodes.wsPath.value,
+      proxy: nodes.proxy.checked,
+      proxyUrl: nodes.proxyUrl ? nodes.proxyUrl.value : "",
+      msr: nodes.msr && nodes.msr.checked,
+      nicehash: nodes.nicehash && nodes.nicehash.checked,
+      notune: nodes.notune.checked,
+      autotuneOff: nodes.noautotune && nodes.noautotune.checked,
+      noHealthRestart: nodes.nohealth && nodes.nohealth.checked,
+      force: nodes.force.checked,
+      clone: nodes.clone.checked,
+      cpu: Number(nodes.cpu.value),
+    };
+  }
+
+  function poolInfoHtml() {
+    var pool = table.find(nodes.pool.value);
+
+    if (!pool) {
+      return (
+        '<p class="small"><strong>Pool tự nhập.</strong> Kiểm tra phí và minimum trên trang của họ: ' +
+        "hai thứ đó quyết định thu nhập nhiều hơn hashrate. Nếu bạn tự dựng pool trong repo này " +
+        '(<code>pool/</code>), hãy bật WebSocket + TLS.</p>'
+      );
     }
 
-    if (value.length === 95) return { ok: true, message: "Địa chỉ hợp lệ (95 ký tự)." };
-    if (value.length === 106 && value[0] === "4") return { ok: true, message: "Địa chỉ tích hợp (106 ký tự)." };
-
-    return { ok: false, empty: false, message: "Độ dài " + value.length + " — địa chỉ thường dài 95 ký tự." };
-  }
-
-  function currentPool() {
-    var choice = nodes.pool.value;
-    var preset = POOLS[choice] || POOLS.custom;
-    var host = nodes.host.value.trim();
-
-    var value = host || preset.pool;
-
-    if (!value && choice === "ocean") value = "";
-    if (!value && choice === "custom") value = "";
-
-    return { choice: choice, value: value, wsPath: preset.wsPath };
-  }
-
-  function build() {
-    var wallet = nodes.wallet.value.trim();
-    var rig = nodes.rig.value.trim();
-    var cloudflare = nodes.cloudflare.checked;
-    var proxy = nodes.proxy.checked ? nodes.proxyUrl.value.trim() : "";
-    var cpu = Number(nodes.cpu.value);
-    var pool = currentPool();
-
-    // The C++ frontend has no WebSocket client and no proxy support; the
-    // installer refuses those combinations, so do not offer them.
-    if (cloudflare || proxy) nodes.engine.value = "zmrig";
-    var engine = nodes.engine.value;
-
-    var args = ["install"];
-    args.push("--wallet", wallet || "YOUR_WALLET");
-    if (rig) args.push("--rig-id", rig);
-    // "auto" means "let the installer decide", and the installer can only
-    // decide if the flag is absent. Saying --engine auto would also work, but
-    // the shortest correct command is the point of the builder.
-    if (engine !== "auto") args.push("--engine", engine);
-    // Without a host, say so in the command instead of silently falling back to
-    // the installer default pool.
-    args.push("--pool", pool.value || "YOUR_POOL_HOST");
-
-    if (cloudflare) {
-      args.push("--cloudflare");
-      var wsPath = (nodes.wsPath.value.trim() || "/stratum");
-      if (wsPath[0] !== "/") wsPath = "/" + wsPath;
-      args.push("--ws-path", wsPath);
-    }
-
-    // Same rule for the profile: absent means "detect it".
-    var profile = nodes.profile ? nodes.profile.value : "auto";
-    if (profile !== "auto") args.push("--profile", profile);
-
-    if (proxy) args.push("--proxy", proxy);
-    // MSR is on by default for a root install; this switch exists for hosts
-    // that refuse the write (most VMs and containers).
-    if (nodes.msr && nodes.msr.checked) args.push("--no-msr");
-    if (nodes.nicehash && nodes.nicehash.checked) args.push("--nicehash");
-    if (Number.isFinite(cpu) && cpu > 0 && cpu < 100) args.push("--cpu-hint", String(Math.round(cpu)));
-    if (nodes.notune.checked) args.push("--no-tune");
-    if (nodes.force.checked) args.push("--force");
-    args.push("--yes");
-
-    var quoted = args.map(function (arg) {
-      return /^--/.test(arg) ? arg : shellQuote(arg);
-    }).join(" ");
-
-    var install = nodes.clone.checked
-      ? "sudo ./oneclick.sh " + quoted
-      : "curl -fsSL " + RAW_URL + " \\\n  | sudo bash -s -- " + quoted;
-
-    var lines = [
-      "# 1. cài đặt, build, tune, tạo service (một lệnh)",
-      install,
-      "",
-      "# 2. xem dịch vụ và log — cần cho mọi lần gỡ lỗi",
-      "sudo systemctl status xmrig-ocean --no-pager -l",
-      "sudo journalctl -u xmrig-ocean -n 40 --no-pager"
+    var rows = [
+      "<span><b>Phí</b> " + escapeHtml(table.feeLabel(pool)) + "</span>",
+      "<span><b>Minimum</b> " + escapeHtml(table.minLabel(pool)) + "</span>",
+      "<span><b>Trả</b> " + escapeHtml(pool.cadence) + "</span>",
+      "<span><b>Endpoint</b> <code>" + escapeHtml(pool.host) + "</code></span>",
     ];
 
-    return { text: lines.join("\n"), args: args, wallet: wallet, pool: pool, cloudflare: cloudflare, engine: engine, profile: profile };
+    return (
+      '<p class="small" style="margin:0 0 6px">' + escapeHtml(pool.why) + "</p>" +
+      '<div class="pool-facts">' + rows.join("") + "</div>"
+    );
   }
 
-  function updateValidation() {
-    var state = walletState(nodes.wallet.value.trim());
+  function summaryHtml(result) {
+    var rows = [];
 
-    nodes.walletHint.textContent = state.message;
-    nodes.walletHint.className = "hint" + (state.empty ? "" : (state.ok ? " good" : " bad"));
-    nodes.wallet.setAttribute("aria-invalid", state.ok || state.empty ? "false" : "true");
+    rows.push(["Pool", escapeHtml(result.pool.name)]);
+    if (result.pool.fee !== null && result.pool.fee !== undefined) {
+      rows.push(["Phí pool", escapeHtml(table.feeLabel({ fee: result.pool.fee }))]);
+    }
+    rows.push(["Endpoint", "<code>" + escapeHtml(result.pool.endpoint || "—") + "</code>"]);
+    if (result.failover.length) {
+      rows.push(["Dự phòng", result.failover.map(function (f) { return "<code>" + escapeHtml(f) + "</code>"; }).join("<br>")]);
+    }
+    rows.push(["Engine", escapeHtml(result.engine === "auto" ? "tự nhận diện" : result.engine)]);
+    rows.push(["Chế độ", escapeHtml(result.profile === "auto" ? "tự nhận diện" : result.profile)]);
 
-    return state;
+    return rows
+      .map(function (row) {
+        return "<li><span>" + row[0] + "</span><span>" + row[1] + "</span></li>";
+      })
+      .join("");
+  }
+
+  function updateValidation(result) {
+    var state_ = result.wallet;
+    nodes.walletHint.textContent = state_.message;
+    nodes.walletHint.className = "hint" + (state_.empty ? "" : state_.ok ? " good" : " bad");
+    nodes.wallet.setAttribute("aria-invalid", state_.ok || state_.empty ? "false" : "true");
+
+    if (nodes.hostHint) {
+      var host = window.zmrigCommand.hostState(result.pool.endpoint);
+      nodes.hostHint.textContent = host.message;
+      nodes.hostHint.className = "hint" + (host.empty ? "" : host.ok ? " good" : " bad");
+    }
   }
 
   function update() {
     var choice = nodes.pool.value;
-    var needsHost = choice === "custom" || (choice === "ocean" && !POOLS.ocean.pool);
+    var isCustom = !table.find(choice);
 
-    // The host is only needed when the preset does not name one, or when the
-    // WebSocket path has to be dialled by hostname.
-    nodes.hostField.hidden = !(needsHost || (nodes.cloudflare.checked && choice === "custom"));
-
-    if (nodes.hostField.hidden === false) {
-      nodes.host.placeholder = choice === "ocean" ? "pool.example.com" : "pool.example.com:3333";
+    nodes.hostField.hidden = !isCustom;
+    if (!isCustom) nodes.host.value = "";
+    if (isCustom) {
+      nodes.host.placeholder = "pool.example.com:3333";
     }
 
     nodes.wsPathField.hidden = !nodes.cloudflare.checked;
     nodes.proxyUrl.hidden = !nodes.proxy.checked;
 
-    // Index by value, not by position: the option order on the page is a
-    // presentation detail and has already changed once.
+    // Index by value, not by position: the option order is a presentation
+    // detail and has already changed once.
     var xmrigOption = nodes.engine.querySelector('option[value="xmrig"]');
     if (xmrigOption) xmrigOption.disabled = nodes.cloudflare.checked || nodes.proxy.checked;
-
     if (nodes.cloudflare.checked || nodes.proxy.checked) nodes.engine.value = "zmrig";
 
-    var state = updateValidation();
-    var result = build();
+    var result = window.zmrigCommand.build(state());
+    last = result;
 
-    nodes.output.textContent = result.text;
+    nodes.poolInfo.innerHTML = poolInfoHtml();
+    nodes.summary.innerHTML = summaryHtml(result);
+    nodes.output.textContent = result.install;
 
-    var blocked = !state.ok || (result.cloudflare && !result.pool.value);
+    var pool = table.find(choice);
+    nodes.poolTag.textContent = pool ? pool.name + " · " + table.feeLabel(pool) : "tự nhập";
 
-    if (!state.ok) {
-      nodes.status.textContent = state.empty ? "Nhập địa chỉ ví để có lệnh chạy được." : "Địa chỉ ví chưa đúng — kiểm tra lại.";
-      nodes.status.className = "status bad";
-    } else if (result.cloudflare && !result.pool.value) {
-      nodes.status.textContent = "Cần host của pool để dùng WebSocket.";
+    updateValidation(result);
+
+    var messages = {
+      "empty-wallet": "Nhập địa chỉ ví để có lệnh chạy được.",
+      "bad-wallet": "Địa chỉ ví chưa đúng — kiểm tra lại.",
+      "bad-host": "Cần host:port của pool để cài được.",
+      "no-proxy": "Đã chọn proxy nhưng chưa nhập địa chỉ proxy.",
+    };
+
+    if (result.blocked) {
+      nodes.status.textContent = messages[result.blocked] || "Còn thiếu thông tin.";
       nodes.status.className = "status bad";
     } else {
       nodes.status.textContent = "";
@@ -201,25 +221,30 @@
 
     // Copying a command that cannot work is worse than no button at all: the
     // wallet would be planted in a systemd unit as-is.
-    if (nodes.copy) nodes.copy.disabled = blocked;
+    if (nodes.copy) nodes.copy.disabled = Boolean(result.blocked);
+    if (nodes.copyPlan) nodes.copyPlan.disabled = result.wallet.empty;
 
-    var notes = [];
-    if (result.cloudflare) notes.push("WebSocket trên 443: cần engine zmrig (C++ không có client WS).");
-    if (nodes.notune.checked) notes.push("Không tune hệ thống: mất khoảng 20–30% hashrate do huge pages.");
-    if (result.engine === "auto") notes.push("Engine để auto: cài đặt tự chọn theo pool và CPU.");
-    if (result.engine === "xmrig") notes.push("Engine C++: dùng được mọi thuật toán, không hỗ trợ --cloudflare/--proxy.");
-    if (result.profile === "watt") notes.push("Chế độ watt: giữ governor tiết kiệm điện và bớt thread SMT, hashrate thấp hơn vài % nhưng H/W cao hơn.");
-    if (result.profile === "free") notes.push("Chế độ free: dùng hết CPU, chỉ hợp với máy dùng điện free.");
-    nodes.note.textContent = notes.length ? notes.join(" ") : "Địa chỉ ví chỉ nằm trong lệnh và file cấu hình trên máy bạn.";
+    nodes.note.textContent = result.notes.length
+      ? result.notes.join(" ")
+      : "Địa chỉ ví chỉ nằm trong lệnh và file cấu hình trên máy bạn.";
+    nodes.warn.textContent = result.warnings.join(" ");
+    nodes.warn.className = result.warnings.length ? "hint warnate" : "hint";
+    nodes.warn.hidden = result.warnings.length === 0;
+
+    if (nodes.tlsHint) {
+      nodes.tlsHint.textContent = pool && pool.tlsPort
+        ? "Cổng TLS của " + pool.name + ": " + pool.tlsPort + "."
+        : isCustom
+          ? "Chỉ bật nếu pool của bạn có TLS trên cổng này, nếu không sẽ bị từ chối ngay khi login."
+          : "Pool này không công bố cổng TLS riêng.";
+    }
 
     return result;
   }
 
-  function copyOutput() {
-    var text = nodes.output.textContent;
-
+  function copy(text, okMessage) {
     var done = function (ok) {
-      nodes.status.textContent = ok ? "Đã copy lệnh." : "Không copy được — bôi đen khung lệnh và Ctrl+C.";
+      nodes.status.textContent = ok ? okMessage : "Không copy được — bôi đen khung lệnh và Ctrl+C.";
       nodes.status.className = "status " + (ok ? "ok" : "bad");
       setTimeout(function () { update(); }, 1800);
     };
@@ -251,15 +276,50 @@
     nodes.host.value = "";
     nodes.wsPath.value = "/stratum";
     nodes.cpu.value = "100";
+    if (nodes.tls) nodes.tls.checked = false;
+    if (nodes.noautotune) nodes.noautotune.checked = false;
+    if (nodes.nohealth) nodes.nohealth.checked = false;
     nodes.cloudflare.checked = false;
     nodes.proxy.checked = false;
     nodes.proxyUrl.value = "";
     nodes.notune.checked = false;
     nodes.force.checked = false;
     nodes.clone.checked = false;
+    if (nodes.failover) {
+      nodes.failover.querySelectorAll("input").forEach(function (box) { box.checked = false; });
+    }
     update();
     nodes.wallet.focus();
   }
+
+  // The comparison table under the builder. It reads the same table the
+  // controls do, so a fee can only be changed in one file.
+  function fillPoolTable() {
+    var body = el("pool-table");
+    if (!body) return;
+
+    body.innerHTML = table.list
+      .map(function (pool) {
+        var tag = pool.tag === "best" ? ' <span class="tag ok">nhiều nhất</span>'
+          : pool.tag === "steady" ? ' <span class="tag">ổn định</span>'
+            : pool.tag === "p2p" ? ' <span class="tag">phi tập trung</span>' : "";
+
+        return (
+          "<tr>" +
+          '<td><a href="wizard.html?pool=' + pool.id + '">' + escapeHtml(pool.name) + "</a>" + tag + "</td>" +
+          '<td class="num">' + escapeHtml(table.feeLabel(pool)) + "</td>" +
+          '<td class="num">' + escapeHtml(table.minLabel(pool)) + "</td>" +
+          "<td>" + escapeHtml(pool.cadence) + "</td>" +
+          "<td><code>" + escapeHtml(pool.host) + "</code></td>" +
+          '<td>' + (pool.switching ? "chuyển thuật toán" : "") + "</td>" +
+          "</tr>"
+        );
+      })
+      .join("");
+  }
+
+  fillPools();
+  fillPoolTable();
 
   ["input", "change"].forEach(function (event) {
     document.querySelectorAll("#builder input, #builder select").forEach(function (node) {
@@ -267,12 +327,15 @@
     });
   });
 
-  nodes.copy.addEventListener("click", copyOutput);
-
+  nodes.copy.addEventListener("click", function () { copy(last.install, "Đã copy lệnh cài."); });
+  if (nodes.copyPlan) nodes.copyPlan.addEventListener("click", function () { copy(last.plan, "Đã copy lệnh xem trước."); });
   if (nodes.reset) nodes.reset.addEventListener("click", reset);
 
-  // Deep link: index.html#builder pre-fills nothing, but scrolling there with
-  // the wallet field focused saves a click on phones.
+  // A link from the pool table or the wizard can preselect a pool:
+  // index.html?pool=c3pool#builder
+  var wanted = new URLSearchParams(window.location.search).get("pool");
+  if (wanted && table.find(wanted)) nodes.pool.value = wanted;
+
   if (window.location.hash === "#builder") {
     setTimeout(function () { nodes.wallet.focus(); }, 250);
   }
