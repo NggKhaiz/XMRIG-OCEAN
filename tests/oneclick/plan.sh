@@ -145,6 +145,40 @@ else
     fail "--no-autotune was ignored"
 fi
 
+# --- pool names and failover -------------------------------------------
+# A pool is hostname + port + whether it wants TLS. Nobody should have to
+# memorise three facts to start mining, and a rig that cannot resolve the
+# default hostname (DNS filters block gulf.moneroocean.stream and
+# pool.supportxmr.com in some networks) needs another endpoint ready.
+out=$(plan --pool=moneroocean)
+if printf '%s' "$out" | grep -q "pool *gulf.moneroocean.stream:10001"; then
+    pass "a pool name resolves to its endpoint"
+else
+    fail "--pool=moneroocean did not resolve: $(printf '%s' "$out" | grep 'pool ' | head -1)"
+fi
+
+out=$(plan --pool=supportxmr)
+if printf '%s' "$out" | grep -q "pool *pool.supportxmr.com:3333"; then
+    pass "a second pool name resolves"
+else
+    fail "--pool=supportxmr did not resolve"
+fi
+
+out=$(plan --pool=supportxmr --failover=moneroocean,c3pool)
+if printf '%s' "$out" | grep -q "failover *gulf.moneroocean.stream:10001,c3pool.com:3333"; then
+    pass "backup pools are planned and shown"
+else
+    fail "failover missing: $(printf '%s' "$out" | grep failover | head -1)"
+fi
+
+# A host:port is never rewritten: someone who typed an endpoint meant it.
+out=$(plan --pool=127.0.0.1:3333)
+if printf '%s' "$out" | grep -q "pool *127.0.0.1:3333"; then
+    pass "an explicit host:port passes through"
+else
+    fail "an explicit host:port was rewritten"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
     echo "plan: all checks passed"

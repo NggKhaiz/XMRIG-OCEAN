@@ -70,7 +70,8 @@ sudo ./oneclick.sh purge      # remove everything, config included (asks first)
 | Option | Meaning |
 |---|---|
 | `--wallet ADDR` | Monero address (95 chars) or pool login. Asked interactively when omitted. |
-| `--pool HOST:PORT` | pool endpoint, default `gulf.moneroocean.stream:10001` |
+| `--pool HOST:PORT` | pool endpoint, default `gulf.moneroocean.stream:10001`. A short name also works: `moneroocean`, `supportxmr`, `c3pool`, `xmrpool`, `herominers`, `p2pool`, `p2pool-nano`. |
+| `--failover LIST` | comma-separated backup pools, written into `config.json` and used only when the first is unreachable or refuses this IP. See [POOLS.md](POOLS.md). |
 | `--pass VALUE` | pool password, default `x` |
 | `--rig-id NAME` | name shown on the pool dashboard |
 | `--algo NAME` | pin one algorithm (`rx/0`, `cn/r`, …). Also **skips the 2-minute calibration**, see below. |

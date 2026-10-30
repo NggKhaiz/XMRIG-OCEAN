@@ -506,6 +506,61 @@ if selected seed; then
     fi
 fi
 
+# --- anti-ban behaviour -----------------------------------------------------
+# Pools ban IPs for two things: repeating a login they already refused, and
+# submitting invalid shares. Both are silent in a hashrate reading, so they are
+# tested here. See zmrig/src/stratum.zig (classify) and miner.zig (quarantine).
+
+if selected badlogin; then
+    port_bl=$((port++))
+    python3 "$NET/pool.py" --port "$port_bl" --mode basic --diff 50 \
+        --reject-login "invalid address" --lifetime 60 >"${LOGDIR}/poolbadlogin.log" 2>&1 &
+    PIDS+=($!)
+    wait_port "$port_bl" 10
+    log="${LOGDIR}/badlogin.log"
+    run_miner badlogin 8 "$log" -o "127.0.0.1:${port_bl}" -t 1 --mode light --retry-pause 1
+    connects=$(grep -c 'connecting to' "$log")
+    if grep -q 'does not accept this wallet' "$log" && [ "${connects:-0}" -le 2 ]; then
+        record PASS "bad wallet is not retried" "connects=$connects, error explained"
+    else
+        record FAIL "bad wallet is not retried" "connects=${connects:-0} (see $log)"
+    fi
+fi
+
+if selected banned; then
+    port_ban=$((port++))
+    python3 "$NET/pool.py" --port "$port_ban" --mode basic --diff 50 \
+        --reject-login "your IP is banned" --lifetime 60 >"${LOGDIR}/poolban.log" 2>&1 &
+    PIDS+=($!)
+    wait_port "$port_ban" 10
+    log="${LOGDIR}/banned.log"
+    # A 60 s cooldown and 8 s of running: exactly one attempt is allowed.
+    run_miner banned 8 "$log" -o "127.0.0.1:${port_ban}" -t 1 --mode light \
+        --retry-pause 1 --ban-cooldown 60
+    connects=$(grep -c 'connecting to' "$log")
+    if grep -q 'banned this IP' "$log" && [ "${connects:-0}" -le 1 ]; then
+        record PASS "a ban is not retried" "connects=$connects"
+    else
+        record FAIL "a ban is not retried" "connects=${connects:-0} (see $log)"
+    fi
+fi
+
+if selected invalid; then
+    port_inv=$((port++))
+    python3 "$NET/pool.py" --port "$port_inv" --mode reject --diff 1 --lifetime 90 \
+        >"${LOGDIR}/poolinvalid.log" 2>&1 &
+    PIDS+=($!)
+    wait_port "$port_inv" 10
+    log="${LOGDIR}/invalid.log"
+    run_miner invalid 14 "$log" -o "127.0.0.1:${port_inv}" -t 1 --mode light
+    rejects=$(grep -c 'share rejected' "$log")
+    if grep -q 'pausing submissions' "$log" && [ "${rejects:-0}" -lt 12 ]; then
+        record PASS "invalid shares stop the stream" "rejects=$rejects, then paused"
+    else
+        record FAIL "invalid shares stop the stream" "rejects=${rejects:-0} (see $log)"
+    fi
+fi
+
 if [ "$SOAK" -eq 1 ]; then
     port_so=$((port++))
     python3 "$NET/pool.py" --port "$port_so" --mode soak --diff 300 --lifetime 400 \

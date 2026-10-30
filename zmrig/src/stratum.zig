@@ -12,11 +12,86 @@ const options = @import("options.zig");
 const transport = @import("transport.zig");
 const util = @import("util.zig");
 
-pub const agent = "zmrig/6.29.0-mo12";
+pub const agent = "zmrig/6.30.0-mo13";
 
 /// `--user-agent`: some pools and relays only accept a known miner string, and
 /// Cloudflare Workers can route on it. Null keeps the default.
 pub var user_agent: ?[]const u8 = null;
+
+/// Why a pool said no. The difference is money: a wrong wallet retried every
+/// few seconds is how an IP ends up banned on several pools at once, while
+/// "low difficulty share" is the pool telling us the hardware is producing
+/// garbage -- repeating it is what turns a 10-minute ban into an hour.
+pub const Refusal = enum {
+    none,
+    banned,
+    credentials,
+    invalid_share,
+    throttled,
+    full,
+
+    pub fn label(self: Refusal) []const u8 {
+        return switch (self) {
+            .none => "none",
+            .banned => "banned",
+            .credentials => "credentials",
+            .invalid_share => "invalid share",
+            .throttled => "throttled",
+            .full => "pool full",
+        };
+    }
+};
+
+/// Substring match that ignores case: pools write "your IP is banned",
+/// "BANNED", "Invalid address" and everything in between.
+fn contains(haystack: []const u8, needle: []const u8) bool {
+    if (needle.len == 0 or haystack.len < needle.len) return false;
+
+    var i: usize = 0;
+    while (i + needle.len <= haystack.len) : (i += 1) {
+        if (std.ascii.eqlIgnoreCase(haystack[i .. i + needle.len], needle)) return true;
+    }
+
+    return false;
+}
+
+/// Turns a pool's error text into a decision. Order matters: "invalid share"
+/// also contains "invalid", so it is matched before the credential phrases.
+pub fn classify(text: []const u8) Refusal {
+    if (text.len == 0) return .none;
+
+    const ban_phrases = [_][]const u8{ "ban", "blocked", "blacklist", "not allowed", "denied" };
+    for (ban_phrases) |phrase| {
+        if (contains(text, phrase)) return .banned;
+    }
+
+    const share_phrases = [_][]const u8{
+        "invalid share", "low difficulty", "bad share", "invalid result", "invalid nonce", "invalid hash",
+    };
+    for (share_phrases) |phrase| {
+        if (contains(text, phrase)) return .invalid_share;
+    }
+
+    const throttle_phrases = [_][]const u8{ "too many", "rate limit", "ratelimit", "slow down", "throttl", "retry later" };
+    for (throttle_phrases) |phrase| {
+        if (contains(text, phrase)) return .throttled;
+    }
+
+    const full_phrases = [_][]const u8{ "full", "no slots", "busy" };
+    for (full_phrases) |phrase| {
+        if (contains(text, phrase)) return .full;
+    }
+
+    const credential_phrases = [_][]const u8{
+        "invalid login", "invalid address", "invalid user", "invalid wallet", "unauthenticated",
+        "unauthorized", "unauthorised", "wrong password", "bad login",
+    };
+    for (credential_phrases) |phrase| {
+        if (contains(text, phrase)) return .credentials;
+    }
+
+    return .none;
+}
 
 pub const ConnectError = error{
     ConnectFailed,
@@ -211,6 +286,9 @@ pub const Session = struct {
     next_id: u64 = 1,
     logger: *log.Logger,
     supports_algo_extension: bool = false,
+    /// Why the last login attempt was refused, so the connect loop can stop
+    /// retrying a bad wallet and can cool down a pool that banned us.
+    last_failure: Refusal = .none,
 
     /// Timestamp of the last "unsupported algorithm" warning, so a pool that
     /// keeps offering a coin we do not mine cannot flood the log.
@@ -280,7 +358,9 @@ pub const Session = struct {
             switch (message) {
                 .reply => |reply| {
                     if (!reply.ok) {
-                        self.logger.err("login rejected: {s}", .{reply.message orelse "unknown error"});
+                        const reason = reply.message orelse "unknown error";
+                        self.last_failure = classify(reason);
+                        self.logger.err("login rejected: {s} ({s})", .{ reason, self.last_failure.label() });
                         return error.LoginRejected;
                     }
                     if (reply.job) |pool_job| {
@@ -709,4 +789,32 @@ test "the unsupported algorithm name is read with or without spaces" {
     try testing.expectEqualStrings("cn/1", unsupportedAlgoName("{\"algo\":\"cn/1\"}"));
     try testing.expectEqualStrings("cn/1", unsupportedAlgoName("{\"height\": 1, \"algo\": \"cn/1\", \"job_id\": \"j\"}"));
     try testing.expectEqualStrings("that algorithm", unsupportedAlgoName("{\"job_id\":\"j\"}"));
+}
+
+test "a pool's refusal is classified, because retrying a ban is how it grows" {
+    const testing = std.testing;
+
+    // Bans come in many spellings; every one of them must stop the retry loop.
+    try testing.expectEqual(Refusal.banned, classify("your IP is banned"));
+    try testing.expectEqual(Refusal.banned, classify("BANNED: too many bad shares"));
+    try testing.expectEqual(Refusal.banned, classify("IP blocked"));
+    try testing.expectEqual(Refusal.banned, classify("access denied"));
+
+    // Invalid shares are the pool warning about the hardware.
+    try testing.expectEqual(Refusal.invalid_share, classify("Low difficulty share"));
+    try testing.expectEqual(Refusal.invalid_share, classify("invalid share"));
+    try testing.expectEqual(Refusal.invalid_share, classify("Invalid result"));
+
+    // "invalid" alone is not a credential problem: the order matters.
+    try testing.expectEqual(Refusal.credentials, classify("invalid address"));
+    try testing.expectEqual(Refusal.credentials, classify("Unauthenticated"));
+    try testing.expectEqual(Refusal.credentials, classify("wrong password"));
+
+    try testing.expectEqual(Refusal.throttled, classify("too many connections"));
+    try testing.expectEqual(Refusal.throttled, classify("rate limited"));
+    try testing.expectEqual(Refusal.full, classify("pool is full"));
+
+    // Anything unrecognised keeps the old exponential-backoff behaviour.
+    try testing.expectEqual(Refusal.none, classify("unknown error"));
+    try testing.expectEqual(Refusal.none, classify(""));
 }

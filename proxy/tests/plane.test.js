@@ -359,6 +359,46 @@ test('vardiff hands a fast rig a harder target and a slow rig an easier one', as
 
 });
 
+test('a pool that bans the IP is left alone, not retried', async (t) => {
+  const banning = await withPool(t, { difficulty: 1000, rejectLogin: 'your IP is banned' });
+  const good = await withPool(t, { difficulty: 1000 });
+
+  const proxy = await withProxy(t, {
+    pools: [`127.0.0.1:${banning.port}`, `127.0.0.1:${good.port}`],
+    upstreamOptions: { retryPauseMs: 40, maxRetryPauseMs: 80 },
+  });
+
+  const rig = await new Rig(proxy.port).connect();
+  const login = await rig.login(`${WALLET}.rigA`);
+  assert.strictEqual(login.result.status, 'OK');
+
+  const banningLogins = () => banning.logins.filter((m) => m.method === 'login').length;
+
+  assert.strictEqual(banningLogins(), 1, 'the banning pool is contacted once');
+  assert.strictEqual(proxy.upstream.stats.lastRefusal, 'banned');
+
+  // Let the reconnect loop run for a while: it must stay away from the pool
+  // that banned us instead of knocking every 40 ms.
+  await sleep(400);
+  assert.strictEqual(banningLogins(), 1, `the banning pool was retried ${banningLogins()} times`);
+  assert.ok(proxy.upstream.connected, 'and the farm stays on the working pool');
+});
+
+test('a wrong wallet in a single-pool setup does not become a login storm', async (t) => {
+  const pool = await withPool(t, { difficulty: 1000, rejectLogin: 'invalid address' });
+
+  const proxy = await withProxy(t, {
+    pools: [`127.0.0.1:${pool.port}`],
+    upstreamOptions: { retryPauseMs: 20, maxRetryPauseMs: 40 },
+  });
+
+  await sleep(500);
+  const logins = pool.logins.filter((m) => m.method === 'login').length;
+
+  assert.strictEqual(logins, 1, `expected one attempt, saw ${logins}`);
+  assert.strictEqual(proxy.upstream.stats.lastRefusal, 'credentials');
+});
+
 test('the proxy tells the pool which coins the farm can mine', async (t) => {
   const pool = await withPool(t, { difficulty: 1000 });
   const proxy = await withProxy(t, {

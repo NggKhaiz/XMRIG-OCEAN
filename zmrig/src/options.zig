@@ -125,6 +125,7 @@ pub const Seen = struct {
     print_time: bool = false,
     retries: bool = false,
     retry_pause: bool = false,
+    ban_cooldown: bool = false,
     idle_timeout: bool = false,
     keepalive_interval: bool = false,
     scratchpad_prefetch: bool = false,
@@ -191,6 +192,9 @@ pub const Options = struct {
     print_time: u32 = 60,
     retries: u32 = 5,
     retry_pause: u32 = 5,
+    /// Minutes a pool is left alone after it banned this IP, refused the
+    /// wallet, or said it is full. Retrying a ban is how it becomes a longer ban.
+    ban_cooldown: u32 = 900,
     /// Seconds of total pool silence before the connection is dropped.
     /// 0 disables the watchdog.
     idle_timeout: u32 = 300,
@@ -354,6 +358,8 @@ pub const usage =
     \\      --connect-to=HOST[:P] dial this address instead of the pool host
     \\      --proxy=URL          http://user:pass@host:port or socks5://host:port
     \\      --retries=N          reconnect attempts per pool before failover (default: 5)
+    \\      --ban-cooldown=N     seconds a pool is left alone after it bans this IP,
+    \\                           refuses the wallet, or reports itself full (default: 900)
     \\      --retry-pause=N      seconds between reconnects (default: 5)
     \\      --idle-timeout=N     drop a pool that says nothing for N seconds (0 = never, default 300)
     \\      --scratchpad-prefetch=N  0=nop 1=prefetcht0 (default) 2=prefetchnta 3=load
@@ -752,6 +758,9 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8) ParseEr
         } else if (std.mem.eql(u8, name, "--retries")) {
             opts.retries = try parseNumber(u32, try needValue(args, &i, inline_value));
             opts.seen.retries = true;
+        } else if (std.mem.eql(u8, name, "--ban-cooldown")) {
+            opts.ban_cooldown = try parseNumber(u32, try needValue(args, &i, inline_value));
+            opts.seen.ban_cooldown = true;
         } else if (std.mem.eql(u8, name, "--scratchpad-prefetch")) {
             opts.scratchpad_prefetch = try parseNumber(i32, try needValue(args, &i, inline_value));
             opts.seen.scratchpad_prefetch = true;
@@ -1096,6 +1105,7 @@ pub fn parseConfigFile(allocator: std.mem.Allocator, opts: *Options, path: []con
     }
     if (jsonInt(u32, root, "print-time")) |v| opts.print_time = v;
     if (jsonInt(u32, root, "retries")) |v| opts.retries = v;
+    if (jsonInt(u32, root, "ban-cooldown")) |v| opts.ban_cooldown = v;
     if (jsonInt(u32, root, "retry-pause")) |v| opts.retry_pause = v;
     if (jsonInt(u32, root, "idle-timeout")) |v| opts.idle_timeout = v;
     if (jsonInt(u32, root, "keepalive-interval")) |v| opts.keepalive_interval = v;

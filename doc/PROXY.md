@@ -472,13 +472,13 @@ Measured, in this repository, with `node --test proxy/tests/`:
 
 | Suite | Tests | What it proves |
 |---|---|---|
-| `core.test.js` | 15 | blob nonce byte order, per-algorithm nonce offset, extranonce allocation, vardiff bounds, target parity with the pool |
-| `plane.test.js` | 12 | two rigs on one upstream connection, share forwarded with the *pool's* job id, absorbed shares counted, pool death survived, failover, extranonce misuse reported once |
+| `core.test.js` | 16 | blob nonce byte order, per-algorithm nonce offset, extranonce allocation, vardiff bounds, target parity with the pool |
+| `plane.test.js` | 14 | two rigs on one upstream connection, share forwarded with the *pool's* job id, absorbed shares counted, pool death survived, failover, extranonce misuse reported once, a banned pool left alone, a wrong wallet not retried |
 | `config.test.js` | 16 | flag parsing and aliases, refused dangerous combinations, CIDR matching, rate limiting, WireGuard config generation, the money flags |
 | `network.test.js` | 7 | difficulty shapes from public APIs, H/s from shares, XMR/day maths, a failed fetch keeping the last value, "unknown" staying `null` |
 | `e2e.test.js` | 4 | the real binary: TCP rig, WebSocket rig, token gate, status endpoint, `doctor`, SIGTERM leaves no listener behind |
 | `layout.test.js` | 3 | every relative `require` resolves, and the *copied* install layout (`/opt/zmrig-proxy/{proxy,pool}`) still runs |
-| **total** | **57 passing** | |
+| **total** | **60 passing** | |
 
 Timings from the end-to-end run on a 2 vCPU VM: full start → TCP rig job →
 WebSocket rig job → authenticated status read = **213 ms** wall; `doctor`

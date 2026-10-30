@@ -107,7 +107,8 @@ sudo ./oneclick.sh update
 | Cờ | Ý nghĩa |
 |---|---|
 | `--wallet ADDR` | địa chỉ ví hoặc login pool |
-| `--pool HOST:PORT` | endpoint pool, mặc định `gulf.moneroocean.stream:10001` |
+| `--pool HOST:PORT` | endpoint pool, mặc định `gulf.moneroocean.stream:10001`. Tên ngắn cũng được: `moneroocean`, `supportxmr`, `c3pool`, `xmrpool`, `herominers`, `p2pool`, `p2pool-nano`. |
+| `--failover DANH_SÁCH` | pool dự phòng, cách nhau bằng dấu phẩy; ghi vào `config.json`, chỉ dùng khi pool đầu không tới được hoặc từ chối IP này. Xem [Chọn pool](chon-pool.html). |
 | `--pass VALUE` | password pool (mặc định `x`) |
 | `--rig-id NAME` | tên máy hiện trên dashboard pool và trong mã báo cáo |
 | `--algo NAME` | ghim một thuật toán; `--algo=auto` khai cả họ RandomX để pool chuyển sang coin đắt nhất (mặc định: pool tự chọn) |

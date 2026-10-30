@@ -89,7 +89,7 @@ measurement + one 250 ms power sample.
 
 ```
 ./zmrig/tests/net.sh --soak
-26 passed, 0 failed, 0 skipped
+29 passed, 0 failed, 0 skipped
 ```
 
 Logs: `/tmp/zmrig-net.XXXXXX/`. The suite runs in `--mode light` (50–70 H/s) so
