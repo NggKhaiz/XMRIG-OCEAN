@@ -8,6 +8,7 @@ scripts/deps
 .vscode
 /.qtcreator
 /zmrig/out
+/.zig-cache
 
 # pool: runtime state and audit log (money data, never in git)
 /pool/data

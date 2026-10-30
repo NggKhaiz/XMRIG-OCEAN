@@ -14,6 +14,8 @@ const { targetHex } = require('../../pool/src/target');
 const WALLET = '46SQLW7DXaq6GJaQbHUFMAhd1VYpfQFJQ2gfZo9TCB8bf9vnf1MUwAD2Fwj6KMsY4RU3oKA3x6hByg8BKg7FfMWn6ysb5tJ';
 // 76 bytes: 3 version + 36 (timestamp + prev hash) + 4 nonce at offset 39 + 33
 const BLOB = '0c0c0c' + 'ab'.repeat(36) + '00000000' + 'cd'.repeat(33);
+// Scala/Panthera: the nonce lives at offset 147, not 39.
+const BLOB_PANTHERA = 'ab'.repeat(39) + '00000000' + 'ab'.repeat(104) + '00000000' + 'cd'.repeat(20);
 const ZERO_HASH = '00'.repeat(32);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -21,12 +23,12 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function jobFor(state) {
   return {
     job_id: state.jobId,
-    blob: BLOB,
+    blob: state.blob || BLOB,
     target: targetHex(state.difficulty),
     height: state.height,
     seed_hash: 'aa'.repeat(32),
     next_seed_hash: 'bb'.repeat(32),
-    algo: 'rx/0',
+    algo: state.algo || 'rx/0',
   };
 }
 
@@ -37,6 +39,8 @@ function fakePool(options = {}) {
     submits: [],
     sockets: new Set(),
     difficulty: options.difficulty || 1000,
+    algo: options.algo || 'rx/0',
+    blob: options.blob || BLOB,
     height: options.height || 3_500_000,
     jobId: 'job-1',
   };
@@ -260,4 +264,4 @@ class WsRig {
   }
 }
 
-module.exports = { BLOB, Rig, WALLET, WsRig, ZERO_HASH, fakePool, jobFor, sleep };
+module.exports = { BLOB, BLOB_PANTHERA, Rig, WALLET, WsRig, ZERO_HASH, fakePool, jobFor, sleep };

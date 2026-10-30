@@ -191,5 +191,40 @@ else
     record FAIL "--check lists the CPUs each thread uses" "no cpus line"
 fi
 
+# --algo=auto is the one flag that changes what the pool may pay: it decides
+# whether a rig can be moved to another coin. It must be accepted, documented,
+# and visible in --check.
+expect_exit 0 "--algo=auto is accepted" -- \
+    "$BIN" -o pool.example.com:3333 -u "$WALLET" --algo=auto --check
+expect_exit 1 "--algo rejects an unknown name" -- \
+    "$BIN" -o pool.example.com:3333 -u "$WALLET" -a rx/typo --check
+
+if "$BIN" --help | grep -qF -- "'auto' advertises all RandomX variants"; then
+    record PASS "--algo=auto is documented" ""
+else
+    record FAIL "--algo=auto is documented" "not in --help"
+fi
+
+algo_line=$("$BIN" -o pool.example.com:3333 -u "$WALLET" --algo=auto --check 2>/dev/null | sed -n 's/^ *pool .*algo=//p' | head -1)
+if [ "$algo_line" = "auto (all RandomX variants)" ]; then
+    record PASS "--check shows what will be advertised" "$algo_line"
+else
+    record FAIL "--check shows what will be advertised" "got: ${algo_line:-nothing}"
+fi
+
+# The installer writes "algo":"auto" inside the pool object (not only as a
+# flag), so a config file must produce the same advertisement.
+auto_cfg=$(mktemp)
+cat >"$auto_cfg" <<JSON
+{"pools":[{"url":"pool.example.com:3333","user":"$WALLET","algo":"auto"}]}
+JSON
+auto_line=$("$BIN" -c "$auto_cfg" --check 2>/dev/null | sed -n 's/^ *pool .*algo=//p' | head -1)
+if [ "$auto_line" = "auto (all RandomX variants)" ]; then
+    record PASS "pool-level algo=auto is honoured" "$auto_line"
+else
+    record FAIL "pool-level algo=auto is honoured" "got: ${auto_line:-nothing}"
+fi
+rm -f "$auto_cfg"
+
 printf '\n    %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

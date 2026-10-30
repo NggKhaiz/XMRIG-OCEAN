@@ -110,7 +110,47 @@ Mỗi tính năng là một cờ. Bảng đầy đủ ở `doc/PROXY.md`; nhữn
 | `--allow=<cidr,...>` | loopback + RFC1918 | ai được kết nối |
 | `--token=<secret>` | không | mật khẩu stratum mọi rig phải gửi |
 | `--target-share=<giây>` | 15 | nhịp share của mỗi rig |
+| `--algo=auto\|none\|<tên>` | `auto` | pool được phép chuyển farm sang coin nào |
+| `--network-difficulty=<n>` | không | độ khó mạng của coin, bật cột **XMR/ngày** |
+| `--network-url=<url>` | không | hoặc tự đọc độ khó đó mỗi `--network-interval` |
 | `--tunnel=<...>` | `none` | đường ra công khai |
+
+## Pool được phép chuyển farm sang coin nào
+
+Pool trả theo coin đang đắt nhất (MoneroOcean và bản sao) chỉ làm được việc đó khi miner khai báo nó băm được gì. Người giữ kết nối tới pool là **proxy**, nên proxy mới là chỗ phải khai — rig đứng sau một proxy im lặng thì không bao giờ được chuyển, dù bản thân rig hỗ trợ.
+
+Mặc định `--algo=auto`: bảy biến thể RandomX mà engine có cấu hình riêng (`src/crypto/rx/RxAlgo.cpp`) — `rx/0`, `rx/wow`, `rx/arq`, `rx/graft`, `rx/sfx`, `rx/yada`, `panthera`. `--algo=none` để pool tự quyết, `--algo=rx/0` ghim Monero, `--algo=rx/0,rx/wow` chọn tay.
+
+Hai chi tiết không phải chuyện hình thức: **vị trí nonce đổi theo thuật toán** (panthera là byte 147 chứ không phải 39 — `zmrig/src/job.zig:88`; ghi sai chỗ thì mọi share bị từ chối mà log vẫn sạch), và **share chuyển tiếp mang đúng algo của job**.
+
+`rx/2` không được khai: tham số của nó khác nhau tuỳ fork của pool, đoán sai là mất trắng một đêm share. Miner cũng có cờ này: `zmrig -a auto`.
+
+## Mỗi rig kiếm được bao nhiêu
+
+`/status` trả lời câu hỏi kế tiếp của người vận hành: rig này đang băm bao nhiêu, và số đó đáng bao nhiêu tiền. Rig không khai báo hashrate qua stratum, nên proxy **đo** chứ không đoán: mỗi share được nhận ở đúng độ khó proxy đã phát ra là bằng chứng của `độ khó × 2³²` hash, do đó
+
+```
+H/s ≈ số share nhận × độ khó × 2³² / số giây
+```
+
+Vì chia cho **độ khó cục bộ** của chính rig đó, một rig chạy `--local-difficulty` thấp (nhiều share, mỗi share giá trị nhỏ hơn) vẫn ra cùng một H/s như rig giống hệt chạy độ khó của pool — nhờ vậy cột này so sánh được giữa các máy trong farm.
+
+Tiền thì cần hai số proxy không tự biết: độ khó mạng và phần thưởng mỗi block. Cả hai là **đầu vào**, không phải phỏng đoán:
+
+```bash
+# chính xác: tự cấp độ khó mạng
+zmrig-proxy start --user=<ví> --pool=supportxmr.com:3333 --network-difficulty=3.01e11
+
+# tự động: đọc lại mỗi 10 phút từ một endpoint JSON có trường đó
+zmrig-proxy start --user=<ví> --pool=supportxmr.com:3333 \
+    --network-url=https://xmrchain.net/api/networkinfo
+```
+
+```
+XMR/ngày = (H/s / độ khó mạng) × (86400 / 120) × phần thưởng block
+```
+
+Không đặt cờ nào thì `/status` vẫn trả `hashrate` và `sharesPerHour` cho từng rig và cho cả farm, còn `xmrPerDay` là `null` — một số `null` tin được thì hơn một con số không kiểm chứng. Trường `estimate` cho biết con số đến từ đâu (`flag`, `url`, hay không có). Lần đọc lỗi thì giữ nguyên giá trị cũ và ghi đúng một dòng log: độ khó mạng đổi vài phần nghìn mỗi giờ, còn tính năng giám sát thì không bao giờ được phép làm rớt kết nối tới pool (`proxy/src/network.js`, 7 test).
 
 ## Bảo mật
 
@@ -148,7 +188,7 @@ node proxy/src/main.js start --user=ĐỊA_CHỈ_VÍ \
 
 ## Đã đo, và chưa đo
 
-`node --test proxy/tests/` — **43 test, pass 43**: 14 test cho nonce/extranonce/vardiff, 8 test dựng socket thật (hai rig một kết nối pool, share chuyển tiếp đúng job id của pool, pool chết giữa phiên, failover), 14 test cho cờ, danh sách IP và CIDR IPv6, 3 test cho layout cài đặt, 4 test chạy đúng binary (TCP, WebSocket, token, `/status`, `doctor`, SIGTERM không để lại listener). Trên VM 2 vCPU: khởi động → rig TCP có job → rig WebSocket có job → đọc status = **213 ms**; `doctor` tới pool nội bộ = **83 ms**.
+`node --test proxy/tests/` — **57 test, pass 57**: 15 test cho nonce/extranonce/vardiff, 7 test cho phần quy đổi H/s → XMR/ngày, 12 test dựng socket thật (hai rig một kết nối pool, share chuyển tiếp đúng job id của pool, pool chết giữa phiên, failover), 16 test cho cờ (kể cả cờ tiền tệ), danh sách IP và CIDR IPv6, 3 test cho layout cài đặt, 4 test chạy đúng binary (TCP, WebSocket, token, `/status`, `doctor`, SIGTERM không để lại listener). Trên VM 2 vCPU: khởi động → rig TCP có job → rig WebSocket có job → đọc status = **213 ms**; `doctor` tới pool nội bộ = **83 ms**.
 
 **Chưa đo**: thông lượng 10.000 share/giây. Mỗi share là một phép so sánh BigInt và một lần ghi chuỗi, round-trip tới pool lớn hơn hai bậc, nhưng chưa load-test. Một tiến trình phục vụ 255 rig (255 prefix dùng được); hơn nữa thì chạy thêm một tiến trình, đó là câu trả lời tốt hơn một bảng cấp phát dài hơn.
 

@@ -26,7 +26,7 @@ Không cần cờ nào khác. Mọi quyết định còn lại được đọc t
 
 | Quyết định | Cách script tự chọn |
 | --- | --- |
-| Engine | Theo pool. Pool đổi thuật toán theo lợi nhuận (MoneroOcean…) → engine C++ (34 thuật toán); pool chỉ đào Monero → `zmrig` (nhanh hơn, 0% phí). |
+| Engine | `zmrig` (0% phí), và nó tự thương lượng: pool đổi coin theo lợi nhuận (MoneroOcean…) nhận được login khai đủ họ RandomX nên vẫn chuyển rig sang coin đắt nhất được. `--algo` phi RandomX (cn/2…) hoặc `--engine=xmrig` mới dùng engine C++ (34 thuật toán). |
 | Chế độ | `free` (hashrate tối đa) cho mọi máy, trừ laptop đang dùng pin → `watt` (tối đa H/W). |
 | Số thread | Đo thật sau khi build: mỗi ứng viên chạy 8 s trên dataset thật, kết quả tốt nhất ghi vào `config.json`. |
 | Huge pages | Tự đặt theo kích thước dataset; nếu kernel không cấp đủ thì lùi về THP và nói rõ. |
@@ -110,7 +110,7 @@ sudo ./oneclick.sh update
 | `--pool HOST:PORT` | endpoint pool, mặc định `gulf.moneroocean.stream:10001` |
 | `--pass VALUE` | password pool (mặc định `x`) |
 | `--rig-id NAME` | tên máy hiện trên dashboard pool và trong mã báo cáo |
-| `--algo NAME` | ép một thuật toán (mặc định pool tự chọn) |
+| `--algo NAME` | ghim một thuật toán; `--algo=auto` khai cả họ RandomX để pool chuyển sang coin đắt nhất (mặc định: pool tự chọn) |
 | `--engine xmrig\|zmrig` | engine C++ hay engine Zig |
 | `--tls` | dùng TLS cho kết nối pool |
 | `--cloudflare[=HOST[:PORT]]` | pool qua `wss://` trên 443, tự chuyển sang engine `zmrig` |

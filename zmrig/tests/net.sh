@@ -204,6 +204,30 @@ if selected tcp; then
     check_case "tcp" "$log" 1
 fi
 
+# `--algo=auto` has to reach the pool as a list, over a real socket. A unit test
+# can only prove the JSON is built; only this proves it is sent.
+if selected algo; then
+    log="${LOGDIR}/algo-auto.log"
+    run_miner algo-auto 6 "$log" -o "127.0.0.1:${POOL_PORT}" -t 1 --mode light --algo=auto
+    if grep -q 'LOGIN login .*algo=rx/0,rx/wow,rx/arq,rx/graft,rx/sfx,rx/yada,panthera' "$POOL_LOG"; then
+        record PASS "algo auto" "pool received the full RandomX family"
+    else
+        record FAIL "algo auto" "pool did not receive the list (see ${POOL_LOG})"
+    fi
+    check_case "algo auto mining" "$log" 1
+fi
+
+if selected pinned; then
+    log="${LOGDIR}/algo-pinned.log"
+    run_miner algo-pinned 6 "$log" -o "127.0.0.1:${POOL_PORT}" -t 1 --mode light -a rx/wow
+    if grep -q 'LOGIN login .*algo=rx/wow$' "$POOL_LOG"; then
+        record PASS "algo pinned" "one algorithm, no list"
+    else
+        record FAIL "algo pinned" "the pin did not reach the pool"
+    fi
+    check_case "algo pinned mining" "$log" 1
+fi
+
 if selected tls; then
     shim_start tls tls; p=$SHIM_PORT
     wait_port "$p" 10

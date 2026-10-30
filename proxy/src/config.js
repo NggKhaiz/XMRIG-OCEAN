@@ -41,9 +41,21 @@ const DEFAULTS = {
   user: '',
   password: 'x',
   agent: `zmrig-proxy/${VERSION}`,
+  // Algorithms the proxy tells the pool it can serve. `auto` is the RandomX
+  // family, which every miner behind this proxy implements; a pin (`--algo=rx/0`)
+  // is for a farm that must stay on one coin.
+  algo: 'auto',
+  algos: [],
   verify: false,
   rigs: 1,          // `tunnel wireguard --rigs=<n>`
   dir: '',         // where tunnel files are written
+  // Network figures used for the `XMR/day` column in /status. Both are
+  // optional: without them the proxy still reports hashrate and shares/hour,
+  // and says "unknown" instead of inventing a number.
+  networkDifficulty: 0,
+  networkUrl: '',
+  networkIntervalMs: 600_000,
+  blockReward: 0.6,   // Monero tail emission, XMR per block
 };
 
 const TUNNELS = ['none', 'wireguard', 'tailscale', 'cf', 'cf-quick'];
@@ -72,6 +84,10 @@ const ALIASES = {
   'tls-cert': 'tlsCert',
   'tls-key': 'tlsKey',
   'tunnel-dir': 'dir',
+  'network-difficulty': 'networkDifficulty',
+  'network-url': 'networkUrl',
+  'network-interval': 'networkIntervalMs',
+  'block-reward': 'blockReward',
 };
 
 const BOOLEAN_FLAGS = new Set([
@@ -134,6 +150,7 @@ function build(argv = [], env = process.env) {
   if (flags.verbose) config.logLevel = 'debug';
   if (flags['no-workers']) config.forwardWorkers = false;
   if (flags.verify) config.verify = true;
+  if (value('algo')) config.algo = String(value('algo')).trim();
   config.rigs = number(value('rigs'), 'rigs', config.rigs, 1, 250);
   if (value('dir')) config.dir = String(value('dir'));
   if (value('tunnel-dir')) config.dir = String(value('tunnel-dir'));
@@ -146,6 +163,13 @@ function build(argv = [], env = process.env) {
   config.maxRigs = number(value('max-rigs'), 'max-rigs', config.maxRigs, 1, 255);
   config.keepAliveMs = number(value('keepalive'), 'keepalive', config.keepAliveMs, 10_000, 600_000);
   config.retryPauseMs = number(value('retry-pause'), 'retry-pause', config.retryPauseMs, 100, 60_000);
+  config.networkDifficulty = number(value('network-difficulty'), 'network-difficulty', config.networkDifficulty, 1, 1e16);
+  config.networkUrl = String(value('network-url') || env.OCEAN_PROXY_NETWORK_URL || '').trim();
+  // Seconds on the command line (`--network-interval=600`), milliseconds in
+  // the object: nobody types 600000 by hand, and a 10 ms poll would hammer a
+  // public API.
+  config.networkIntervalMs = number(value('network-interval'), 'network-interval', config.networkIntervalMs / 1000, 60, 6 * 3600) * 1000;
+  config.blockReward = number(value('block-reward'), 'block-reward', config.blockReward, 0.0001, 100);
 
   if (value('pool')) {
     config.pool = String(value('pool')).split(',').map((s) => s.trim()).filter(Boolean);
@@ -178,6 +202,10 @@ function build(argv = [], env = process.env) {
   if (value('tunnel-host')) config.tunnelHost = String(value('tunnel-host')).trim();
   if (value('tunnel-port')) config.tunnelPort = number(value('tunnel-port'), 'tunnel-port', 0, 1, 65535);
 
+  // Resolve the algorithm list once, where a typo is still an error the
+  // operator sees, instead of at login time on a live farm.
+  config.algos = resolveAlgos(config.algo);
+
   if (!LOG_LEVELS.includes(config.logLevel)) {
     throw new ConfigError(`--log-level=${config.logLevel} is not one of ${LOG_LEVELS.join('|')}`);
   }
@@ -185,6 +213,29 @@ function build(argv = [], env = process.env) {
   validate(config);
 
   return { config, positional, help: false };
+}
+
+/// The RandomX variants `--algo=auto` advertises, in the order a pool reads
+/// them. Mirrors `zmrig/src/api.zig` (`auto_algos`) and the C++ side's named
+/// configurations (`src/crypto/rx/RxAlgo.cpp`). `rx/2` is absent on purpose:
+/// its parameters differ per pool fork, and advertising a variant the rig cannot
+/// reproduce means every share is rejected.
+const RANDOMX_FAMILY = ['rx/0', 'rx/wow', 'rx/arq', 'rx/graft', 'rx/sfx', 'rx/yada', 'panthera'];
+
+function resolveAlgos(value) {
+  const text = String(value || '').trim();
+  if (!text || text.toLowerCase() === 'none') return [];
+  if (text.toLowerCase() === 'auto') return [...RANDOMX_FAMILY];
+
+  const names = text.split(',').map((name) => name.trim().toLowerCase()).filter(Boolean);
+
+  for (const name of names) {
+    if (!RANDOMX_FAMILY.includes(name)) {
+      throw new ConfigError(`--algo=${name} is not one of auto, none, ${RANDOMX_FAMILY.join(', ')}`);
+    }
+  }
+
+  return names;
 }
 
 function validate(config) {
@@ -297,6 +348,7 @@ module.exports = {
   ALIASES,
   ConfigError,
   DEFAULTS,
+  RANDOMX_FAMILY,
   TUNNELS,
   VERSION,
   build,
@@ -304,4 +356,5 @@ module.exports = {
   lanAddress,
   missingBinaries,
   parseArgs,
+  resolveAlgos,
 };

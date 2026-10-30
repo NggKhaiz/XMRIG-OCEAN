@@ -37,6 +37,10 @@ class Upstream extends EventEmitter {
     this.user = options.user || '';
     this.password = options.password || 'x';
     this.agent = options.agent || 'ocean-proxy/1.0';
+    // What the pool may switch this proxy between. Every rig behind it runs a
+    // miner that implements the whole RandomX family, so by default the pool is
+    // told the truth: it can move the farm to whatever pays best per hash.
+    this.algos = Array.isArray(options.algos) ? options.algos.filter(Boolean) : [];
     this.rigId = options.rigId || null;
     this.log = options.logger || (() => {});
     this.keepaliveMs = Number(options.keepaliveMs || KEEPALIVE_MS);
@@ -215,6 +219,7 @@ class Upstream extends EventEmitter {
       agent: this.agent,
     };
     if (this.rigId) params.rigid = this.rigId;
+    if (this.algos.length) params.algo = this.algos;
 
     this.loginId = this.nextId++;
     this.write({ id: this.loginId, jsonrpc: '2.0', method: 'login', params });

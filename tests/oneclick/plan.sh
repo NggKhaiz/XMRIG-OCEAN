@@ -36,17 +36,35 @@ engine_of() { printf '%s\n' "$1" | sed -n 's/^ *engine *\([a-z]*\).*/\1/p' | hea
 field_of()  { printf '%s\n' "$1" | sed -n "s/^ *$2 *\([a-z]*\).*/\1/p" | head -1; }
 
 # --- engine follows the pool -------------------------------------------
+# A switching pool now keeps the fee-free engine: zmrig advertises the RandomX
+# family at login, so the pool can still pick the best-paying variant. The C++
+# engine was only ever chosen here because zmrig could not negotiate.
 out=$(plan --pool=gulf.moneroocean.stream:10001)
-if [ "$(engine_of "$out")" = "xmrig" ]; then
-    pass "a switching pool (moneroocean) gets the C++ engine"
+if [ "$(engine_of "$out")" = "zmrig" ]; then
+    pass "a switching pool (moneroocean) keeps the fee-free engine"
 else
-    fail "moneroocean should resolve to xmrig, got '$(engine_of "$out")'"
+    fail "moneroocean should resolve to zmrig, got '$(engine_of "$out")'"
 fi
 
-if printf '%s' "$out" | grep -q "pays for several algorithms"; then
+if printf '%s' "$out" | grep -q "advertises the RandomX family"; then
     pass "the reason is printed"
 else
     fail "the engine decision has no printed reason"
+fi
+
+# The plan has to name the list, or the pool still sees a Monero-only rig.
+if printf '%s' "$out" | grep -q "algo *auto"; then
+    pass "a switching pool plans algo=auto"
+else
+    fail "the plan does not advertise the family"
+fi
+
+# An explicit pin still wins over auto.
+out=$(plan --pool=gulf.moneroocean.stream:10001 --algo=rx/wow)
+if printf '%s' "$out" | grep -q "algo *rx/wow"; then
+    pass "an explicit --algo still pins"
+else
+    fail "--algo=rx/wow was replaced by auto"
 fi
 
 out=$(plan --pool=supportxmr.com:3333)
@@ -113,7 +131,7 @@ else
     fail "zmrig did not plan a thread search"
 fi
 
-out=$(plan --pool=gulf.moneroocean.stream:10001)
+out=$(plan --pool=supportxmr.com:3333 --algo=cn/2)
 if printf '%s' "$out" | grep -q "not applicable"; then
     pass "the C++ engine does not plan a thread search"
 else
