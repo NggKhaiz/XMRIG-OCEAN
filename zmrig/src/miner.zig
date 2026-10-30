@@ -119,6 +119,24 @@ pub const Submitter = struct {
     }
 };
 
+/// One cache line per thread counter.
+///
+/// The hot loop increments this counter once per hash. Left as a bare
+/// `std.atomic.Value(u64)` array, eight neighbours share a cache line, so every
+/// increment invalidates the line for the other seven threads (false sharing).
+/// At mining rates this is a rounding error on a small box -- and it is not
+/// measurable on this 2-vCPU test machine -- but it is free to pad, and on a
+/// 32-core server the line ping-pong is real.
+pub const Counter = struct {
+    value: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    _pad: [56]u8 = [_]u8{0} ** 56,
+};
+
+comptime {
+    // The whole point of the padding: one counter per 64-byte line.
+    if (@sizeOf(Counter) != 64) @compileError("Counter must stay one 64-byte cache line");
+}
+
 pub const Shared = struct {
     job_mutex: std.Thread.Mutex = .{},
     job: job_mod.Job = .{},
@@ -127,11 +145,7 @@ pub const Shared = struct {
     running: std.atomic.Value(bool) = std.atomic.Value(bool).init(true),
     paused: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     bench_limit: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
-    hashes: [max_threads]std.atomic.Value(u64) = blk: {
-        var counters: [max_threads]std.atomic.Value(u64) = undefined;
-        for (&counters) |*counter| counter.* = std.atomic.Value(u64).init(0);
-        break :blk counters;
-    },
+    hashes: [max_threads]Counter = [_]Counter{.{}} ** max_threads,
     thread_count: usize = 0,
     /// Threads used to build the dataset (`--randomx-init`), 0 = hashing threads.
     init_threads: usize = 0,
@@ -162,7 +176,7 @@ pub const Shared = struct {
     pub fn totalHashes(self: *Shared) u64 {
         var total: u64 = 0;
         for (self.hashes[0..self.thread_count]) |*counter| {
-            total += counter.load(.monotonic);
+            total += counter.value.load(.monotonic);
         }
 
         return total;
@@ -306,7 +320,12 @@ pub const Engine = struct {
 
 /// Samples the cumulative hash counter and reports 10s/60s/15m averages.
 pub const Stats = struct {
-    samples: [512]Sample = undefined,
+    /// One sample per second, and enough of them to cover the longest window
+    /// plus a margin: 1024 samples is 17 minutes, so `rate(900)` is a real
+    /// 15-minute average instead of "whatever history happens to exist".
+    /// 512 samples (8.5 min) meant the 15-minute column was silently an
+    /// 8-minute number, which looks like a stable hashrate that never was.
+    samples: [1024]Sample = undefined,
     count: usize = 0,
     head: usize = 0,
     max_rate: f64 = 0,
@@ -646,13 +665,20 @@ fn workerMain(worker: *Worker) void {
         local_job.setNonce(nonce);
         api.xmo_hash_next(vm, &temp, local_job.blobSlice().ptr, local_job.blob_len, &hash);
 
-        _ = shared.hashes[worker.index].fetchAdd(1, .monotonic);
+        _ = shared.hashes[worker.index].value.fetchAdd(1, .monotonic);
 
-        const limit = shared.bench_limit.load(.monotonic);
-        if (limit != 0 and shared.totalHashes() >= limit) {
-            shared.running.store(false, .release);
+        // The benchmark stop condition is checked once per 64 hashes, not once
+        // per hash: `totalHashes()` sums one atomic per thread, and a 32-core
+        // box was doing 32 cross-line atomic loads for every hash it produced
+        // -- in the benchmark, which is where numbers get compared. Overshoot
+        // is bounded by 63 hashes out of billions.
+        if ((rounds & 63) == 0 and shared.bench_limit.load(.monotonic) != 0) {
+            const limit = shared.bench_limit.load(.monotonic);
+            if (shared.totalHashes() >= limit) {
+                shared.running.store(false, .release);
 
-            return;
+                return;
+            }
         }
 
         // RandomX's pipelined API: `hash_next` returns the digest of the input

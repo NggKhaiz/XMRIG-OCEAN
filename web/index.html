@@ -32,7 +32,7 @@
   <div class="wrap">
 
     <section class="hero">
-      <p class="eyebrow">XMRig Ocean 6.26.0-mo9 · engine Zig</p>
+      <p class="eyebrow">XMRig Ocean 6.27.0-mo10 · engine Zig</p>
       <h1>Đào Monero trên VPS kén chọn, không chia hashrate cho ai.</h1>
       <p class="lede">
         0% phí developer — kiểm chứng được bằng script trong repo. Nói được WebSocket + TLS trên cổng 443,
@@ -77,9 +77,11 @@
           <div class="field">
             <label for="b-engine">Engine</label>
             <select id="b-engine">
+              <option value="auto">Tự nhận diện (khuyến nghị)</option>
               <option value="zmrig">zmrig — RandomX, 0% phí dev</option>
               <option value="xmrig">xmrig — C++, mọi thuật toán</option>
             </select>
+            <p class="hint">Auto: pool nhiều thuật toán → xmrig, pool chỉ RandomX → zmrig.</p>
           </div>
           <div class="field" style="flex:1 1 260px">
             <label for="b-pool">Pool</label>
@@ -97,6 +99,15 @@
           <div class="field" id="b-wspath-field" hidden style="flex:0 1 170px">
             <label for="b-wspath">Đường dẫn WebSocket</label>
             <input id="b-wspath" type="text" spellcheck="false" autocomplete="off" value="/stratum">
+          </div>
+          <div class="field" style="flex:1 1 220px">
+            <label for="b-profile">Chế độ</label>
+            <select id="b-profile">
+              <option value="auto">Tự nhận diện (khuyến nghị)</option>
+              <option value="free">Điện free — hashrate tối đa</option>
+              <option value="watt">Tiết kiệm điện — tối đa H/W</option>
+            </select>
+            <p class="hint">Laptop đang dùng pin tự chuyển sang chế độ tiết kiệm điện.</p>
           </div>
           <div class="field" style="flex:0 1 150px">
             <label for="b-cpu">CPU tối đa (%)</label>
@@ -131,11 +142,13 @@
             <li>Clone repo, build engine RandomX và miner cho đúng CPU của máy.</li>
             <li>Bật huge pages, THP, governor và MSR (bỏ qua nếu bạn chọn <code>--no-tune</code>).</li>
             <li>Ghi <code>/etc/xmrig-ocean/config.json</code> với ví và pool ở trên.</li>
+            <li>Đo máy và chọn số thread tốt nhất (khoảng 1 phút, bỏ qua bằng <code>--no-autotune</code>).</li>
             <li>Tạo service systemd, bật chạy cùng máy, chờ share đầu tiên rồi in hashrate.</li>
           </ol>
           <p class="small muted" style="margin-top:10px">
             Script giữ nguyên config cũ trừ khi bạn chọn <code>--force</code>, nên chạy lại nhiều lần là an toàn.
             Toàn bộ mã nằm trong repo; không có binary tải sẵn.
+            Gỡ sạch mọi thứ tool đã cài: <code>sudo ./oneclick.sh purge --dry-run</code> xem trước, bỏ <code>--dry-run</code> để xoá thật.
           </p>
         </details>
       </div>
@@ -416,7 +429,7 @@
 
 <footer>
   <div class="wrap">
-    <span>zmrig · XMRig Ocean 6.26.0-mo9 · 0% phí developer</span>
+    <span>zmrig · XMRig Ocean 6.27.0-mo10 · 0% phí developer</span>
     <span>
       <a href="docs.html">Tài liệu</a> ·
       <a href="https://github.com/NggKhaiz/ZMRIG" target="_blank" rel="noreferrer">Mã nguồn</a> ·

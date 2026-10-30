@@ -99,7 +99,44 @@ topics are visible.
 
 ---
 
-## 3. CI: the site job
+## 3. CI: the installer job (add it by hand, 15 lines)
+
+The installer tests are ready and run locally with `npm run test:oneclick`
+(41 checks, about ten seconds, no build needed). They are **not** in
+`.github/workflows/test.yml` yet: adding a job means editing a file under
+`.github/workflows/`, which needs the `workflows` token scope, and this
+environment cannot push that (the same reason the site job below is manual).
+The push is rejected with *"refusing to allow a GitHub App to create or update
+workflow"*.
+
+Add this job to `.github/workflows/test.yml` yourself:
+
+```yaml
+  installer:
+    name: Installer tests (zero-flag rules, purge, governor)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Shell syntax
+        run: |
+          bash -n oneclick.sh
+          bash -n scripts/tune-linux.sh
+          for f in tests/oneclick/*.sh; do bash -n "$f"; done
+      - name: Zero-flag decisions, config, governor, purge
+        run: |
+          sudo bash tests/oneclick/plan.sh
+          sudo bash tests/oneclick/config.sh
+          sudo bash tests/oneclick/governor.sh
+          sudo bash tests/oneclick/purge.sh
+```
+
+It needs no secrets and no setup: a stock `ubuntu-24.04` runner has the
+passwordless sudo the tests expect. Worth the 15 lines — a shell bug in the
+installer is cheap to catch here and expensive to ship, because it only shows up
+on a user's machine.
+
+## 3b. CI: the site job (still manual)
 
 `.github/workflows/test.yml` builds the C++ miner on Linux x64/arm64, macOS and
 Windows. It does **not** run the site tests, because adding a job means editing a

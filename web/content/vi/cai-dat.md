@@ -9,25 +9,71 @@
 
 Script cần mạng để tải source (hoặc bạn clone sẵn repo). Không tải binary từ nơi khác: mọi thứ được biên dịch tại máy.
 
-## Cài một lệnh
+## Cài một lệnh — chỉ cần địa chỉ ví
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/master/oneclick.sh \
-  | sudo bash -s -- install \
-      --wallet YOUR_WALLET \
-      --pool gulf.moneroocean.stream:10001 \
-      --engine zmrig
+curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/BETA/oneclick.sh \
+  | sudo bash -s -- --wallet YOUR_WALLET
 ```
 
 Nếu đã có repo:
 
 ```bash
-sudo ./oneclick.sh install --wallet YOUR_WALLET --pool gulf.moneroocean.stream:10001 --engine zmrig
+sudo ./oneclick.sh --wallet YOUR_WALLET
 ```
 
-Script làm theo thứ tự: cài phụ thuộc (build-essential, cmake, libuv, …) → build engine hash + miner → tune hệ thống (huge pages, THP, governor, MSR) → viết `/etc/xmrig-ocean/config.json` → tạo systemd unit `xmrig-ocean` → self-check → in hashrate.
+Không cần cờ nào khác. Mọi quyết định còn lại được đọc từ chính cái máy đang chạy:
+
+| Quyết định | Cách script tự chọn |
+| --- | --- |
+| Engine | Theo pool. Pool đổi thuật toán theo lợi nhuận (MoneroOcean…) → engine C++ (34 thuật toán); pool chỉ đào Monero → `zmrig` (nhanh hơn, 0% phí). |
+| Chế độ | `free` (hashrate tối đa) cho mọi máy, trừ laptop đang dùng pin → `watt` (tối đa H/W). |
+| Số thread | Đo thật sau khi build: mỗi ứng viên chạy 8 s trên dataset thật, kết quả tốt nhất ghi vào `config.json`. |
+| Huge pages | Tự đặt theo kích thước dataset; nếu kernel không cấp đủ thì lùi về THP và nói rõ. |
+| Governor | `performance` cho `free`, giữ governor tiết kiệm điện cho `watt`. |
+
+Muốn xem trước mà không thay đổi gì trên máy:
+
+```bash
+./oneclick.sh plan
+```
+
+Script làm theo thứ tự: cài phụ thuộc (build-essential, cmake, libuv, …) → build engine hash + miner → đo và chọn số thread → tune hệ thống (huge pages, THP, governor, MSR) → viết `/etc/xmrig-ocean/config.json` → tạo systemd unit `xmrig-ocean` → self-check → in hashrate.
 
 Toàn bộ idempotent: chạy lại không tạo service trùng, không ghi đè config trừ khi có `--force`, bỏ qua bước build nếu binary mới hơn source.
+
+## Hai chế độ: điện free và tiết kiệm điện
+
+```bash
+# điện free: quán coffee, trường, máy văn phòng — hashrate tối đa
+sudo ./oneclick.sh install --wallet YOUR_WALLET --profile free
+
+# mỗi watt đều tính tiền: laptop, VPS trả theo điện — tối đa H/W
+sudo ./oneclick.sh install --wallet YOUR_WALLET --profile watt
+```
+
+`free` dùng hết logical CPU, `--mode fast`, huge pages, `--priority 5`.
+
+`watt` bớt xuống một thread cho mỗi core vật lý (SMT chỉ thêm 5–15% hashrate nhưng
+tốn thêm 30–40% điện), không ép CPU lên xung cao nhất, và **tự dừng khi laptop
+chuyển sang pin**. Cả hai chế độ đều 0% phí và đều kiểm chứng được bằng
+`sudo ./oneclick.sh verify`.
+
+## Gỡ cài đặt
+
+Hai mức, vì hai câu hỏi khác nhau:
+
+```bash
+sudo ./oneclick.sh uninstall          # dừng, xoá service và binary, giữ config
+sudo ./oneclick.sh uninstall --force  # ... và xoá luôn config (có ví)
+
+sudo ./oneclick.sh purge --dry-run    # liệt kê từng đường dẫn tool đã tạo, kèm dung lượng
+sudo ./oneclick.sh purge              # xoá hết: config, state, build cache, log
+```
+
+`purge` in danh sách trước, bắt gõ đúng chữ `purge` mới xoá, trả `vm.nr_hugepages`
+về 0, và không đụng vào file nào nó không tạo ra. `--yes` để chạy không cần hỏi
+(dùng cho script), `--dry-run` để xem mà không xoá.
 
 ## Chọn branch
 

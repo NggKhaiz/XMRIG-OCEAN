@@ -26,6 +26,7 @@
     rig: el("b-rig"),
     engine: el("b-engine"),
     pool: el("b-pool"),
+    profile: el("b-profile"),
     host: el("b-host"),
     hostField: el("b-host-field"),
     wsPath: el("b-wspath"),
@@ -99,7 +100,10 @@
     var args = ["install"];
     args.push("--wallet", wallet || "YOUR_WALLET");
     if (rig) args.push("--rig-id", rig);
-    args.push("--engine", engine);
+    // "auto" means "let the installer decide", and the installer can only
+    // decide if the flag is absent. Saying --engine auto would also work, but
+    // the shortest correct command is the point of the builder.
+    if (engine !== "auto") args.push("--engine", engine);
     // Without a host, say so in the command instead of silently falling back to
     // the installer default pool.
     args.push("--pool", pool.value || "YOUR_POOL_HOST");
@@ -110,6 +114,10 @@
       if (wsPath[0] !== "/") wsPath = "/" + wsPath;
       args.push("--ws-path", wsPath);
     }
+
+    // Same rule for the profile: absent means "detect it".
+    var profile = nodes.profile ? nodes.profile.value : "auto";
+    if (profile !== "auto") args.push("--profile", profile);
 
     if (proxy) args.push("--proxy", proxy);
     // MSR is on by default for a root install; this switch exists for hosts
@@ -138,7 +146,7 @@
       "sudo journalctl -u xmrig-ocean -n 40 --no-pager"
     ];
 
-    return { text: lines.join("\n"), args: args, wallet: wallet, pool: pool, cloudflare: cloudflare, engine: engine };
+    return { text: lines.join("\n"), args: args, wallet: wallet, pool: pool, cloudflare: cloudflare, engine: engine, profile: profile };
   }
 
   function updateValidation() {
@@ -166,12 +174,12 @@
     nodes.wsPathField.hidden = !nodes.cloudflare.checked;
     nodes.proxyUrl.hidden = !nodes.proxy.checked;
 
-    if (nodes.cloudflare.checked) {
-      nodes.engine.value = "zmrig";
-      nodes.engine.options[1].disabled = true;
-    } else if (!nodes.proxy.checked) {
-      nodes.engine.options[1].disabled = false;
-    }
+    // Index by value, not by position: the option order on the page is a
+    // presentation detail and has already changed once.
+    var xmrigOption = nodes.engine.querySelector('option[value="xmrig"]');
+    if (xmrigOption) xmrigOption.disabled = nodes.cloudflare.checked || nodes.proxy.checked;
+
+    if (nodes.cloudflare.checked || nodes.proxy.checked) nodes.engine.value = "zmrig";
 
     var state = updateValidation();
     var result = build();
@@ -198,7 +206,10 @@
     var notes = [];
     if (result.cloudflare) notes.push("WebSocket trên 443: cần engine zmrig (C++ không có client WS).");
     if (nodes.notune.checked) notes.push("Không tune hệ thống: mất khoảng 20–30% hashrate do huge pages.");
+    if (result.engine === "auto") notes.push("Engine để auto: cài đặt tự chọn theo pool và CPU.");
     if (result.engine === "xmrig") notes.push("Engine C++: dùng được mọi thuật toán, không hỗ trợ --cloudflare/--proxy.");
+    if (result.profile === "watt") notes.push("Chế độ watt: giữ governor tiết kiệm điện và bớt thread SMT, hashrate thấp hơn vài % nhưng H/W cao hơn.");
+    if (result.profile === "free") notes.push("Chế độ free: dùng hết CPU, chỉ hợp với máy dùng điện free.");
     nodes.note.textContent = notes.length ? notes.join(" ") : "Địa chỉ ví chỉ nằm trong lệnh và file cấu hình trên máy bạn.";
 
     return result;
@@ -234,7 +245,8 @@
   function reset() {
     nodes.wallet.value = "";
     nodes.rig.value = "";
-    nodes.engine.value = "zmrig";
+    nodes.engine.value = "auto";
+    if (nodes.profile) nodes.profile.value = "auto";
     nodes.pool.value = "moneroocean";
     nodes.host.value = "";
     nodes.wsPath.value = "/stratum";
