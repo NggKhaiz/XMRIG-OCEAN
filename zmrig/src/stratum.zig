@@ -12,7 +12,7 @@ const options = @import("options.zig");
 const transport = @import("transport.zig");
 const util = @import("util.zig");
 
-pub const agent = "zmrig/6.26.0-mo9";
+pub const agent = "zmrig/6.27.0-mo10";
 
 /// `--user-agent`: some pools and relays only accept a known miner string, and
 /// Cloudflare Workers can route on it. Null keeps the default.

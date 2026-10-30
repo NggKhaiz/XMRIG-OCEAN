@@ -13,7 +13,7 @@
 #define APP_DESC      "XMRig miner"
 // Fee-free / performance fork: distinguishable from upstream XMRig and from
 // the original MoneroOcean 6.26.0-mo5 release.
-#define APP_VERSION   "6.26.0-mo9"
+#define APP_VERSION   "6.27.0-mo10"
 #define APP_DOMAIN    "xmrig.com"
 #define APP_SITE      "www.xmrig.com"
 #define APP_COPYRIGHT "Copyright (C) 2016-2026 xmrig.com"

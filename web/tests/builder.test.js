@@ -140,3 +140,43 @@ test('a corrupted report is rejected with a message, not a crash', () => {
   assert.strictEqual(junk.rigs.length, 0);
   assert.ok(junk.errors.length > 0);
 });
+
+test('the default command carries no engine or profile flag', () => {
+  const window = load();
+  setValue(window, 'b-wallet', VALID_WALLET);
+
+  const text = command(window);
+
+  // The zero-flag promise: absent means "detect it". A builder that always
+  // pins an engine would quietly cancel the installer's own decision.
+  assert.ok(!text.includes('--engine'), 'no --engine on the default path');
+  assert.ok(!text.includes('--profile'), 'no --profile on the default path');
+  assert.match(text, /\| sudo bash -s -- install/);
+});
+
+test('the profile selector adds --profile for free and watt only', () => {
+  const window = load();
+  setValue(window, 'b-wallet', VALID_WALLET);
+  setValue(window, 'b-profile', 'watt');
+  assert.ok(command(window).includes('--profile watt'));
+
+  setValue(window, 'b-profile', 'free');
+  assert.ok(command(window).includes('--profile free'));
+
+  setValue(window, 'b-profile', 'auto');
+  assert.ok(!command(window).includes('--profile'), 'auto means no flag');
+});
+
+test('the C++ engine cannot be combined with the WebSocket switches', () => {
+  const window = load();
+  setValue(window, 'b-wallet', VALID_WALLET);
+  setValue(window, 'b-engine', 'xmrig');
+
+  const cf = window.document.getElementById('b-cloudflare');
+  cf.checked = true;
+  cf.dispatchEvent(new window.Event('change', { bubbles: true }));
+
+  const xmrig = window.document.querySelector('#b-engine option[value="xmrig"]');
+  assert.strictEqual(xmrig.disabled, true, 'the option is disabled while it cannot work');
+  assert.ok(command(window).includes('--engine zmrig'));
+});

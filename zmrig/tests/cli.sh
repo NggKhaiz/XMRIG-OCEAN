@@ -108,5 +108,59 @@ else
     record FAIL "--no-auto-hugepages is documented" "not in --help"
 fi
 
+# --- profiles and autotune -------------------------------------------
+# Both are new contract surface: a typo in either must be an error, not a
+# silently ignored flag that leaves the machine on the wrong profile.
+if "$BIN" -o pool.example.com:3333 -u "$WALLET" --profile=watt --check >/dev/null 2>&1; then
+    record PASS "--profile=watt is accepted" ""
+else
+    record FAIL "--profile=watt is accepted" "exited $?"
+fi
+
+if "$BIN" -o pool.example.com:3333 -u "$WALLET" --profile=free --check >/dev/null 2>&1; then
+    record PASS "--profile=free is accepted" ""
+else
+    record FAIL "--profile=free is accepted" "exited $?"
+fi
+
+expect_exit 1 "--profile=bogus is rejected" -- \
+    "$BIN" -o pool.example.com:3333 -u "$WALLET" --profile=bogus --check
+
+# The profile must actually change the thread count on a machine with a known
+# topology; on a container it may agree with the default, so compare the two
+# numbers rather than asserting a specific one.
+# The line reads "threads 2 (default would be 2)": take the first number only.
+watt_threads=$("$BIN" -o pool.example.com:3333 -u "$WALLET" --profile=watt --check 2>/dev/null \
+    | sed -n 's/^ *threads *\([0-9]*\).*/\1/p' | head -1)
+free_threads=$("$BIN" -o pool.example.com:3333 -u "$WALLET" --profile=free --check 2>/dev/null \
+    | sed -n 's/^ *threads *\([0-9]*\).*/\1/p' | head -1)
+
+if [ -n "$watt_threads" ] && [ -n "$free_threads" ] && [ "$watt_threads" -le "$free_threads" ]; then
+    record PASS "watt never uses more threads than free" "watt ${watt_threads} <= free ${free_threads}"
+else
+    record FAIL "watt never uses more threads than free" "watt '${watt_threads}' free '${free_threads}'"
+fi
+
+if "$BIN" -o pool.example.com:3333 -u "$WALLET" -t 1 --profile=free --check 2>/dev/null | grep -qE '^ *threads +1( |$)'; then
+    record PASS "-t overrides the profile" ""
+else
+    record FAIL "-t overrides the profile" "-t 1 did not win"
+fi
+
+# `--autotune` is a local measurement: it must not demand a pool.
+if "$BIN" --autotune=1 >/dev/null 2>&1; then
+    record PASS "--autotune runs without a pool" ""
+else
+    record FAIL "--autotune runs without a pool" "exited $?"
+fi
+
+expect_exit 1 "--autotune=bogus is rejected" -- "$BIN" --autotune=bogus
+
+if "$BIN" --help | grep -qF -- "--profile=" && "$BIN" --help | grep -qF -- "--autotune"; then
+    record PASS "--profile and --autotune are documented" ""
+else
+    record FAIL "--profile and --autotune are documented" "not in --help"
+fi
+
 printf '\n    %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

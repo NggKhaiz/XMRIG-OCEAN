@@ -17,13 +17,21 @@ That single command:
 1. detects the distribution and installs the build dependencies (cmake, C++,
    libuv, OpenSSL) with `apt`/`dnf`/`pacman`/`zypper`/`apk`/`brew`;
 2. builds a Release binary tuned for the exact CPU it runs on;
-3. reserves huge pages for the RandomX dataset, sets THP to `madvise`, pins the
-   governor to `performance` and enables the MSR module;
-4. writes a validated config with your wallet, the pool and safe defaults;
-5. installs the binary and a `systemd` service that restarts on failure and a
+3. **measures the machine** and picks the thread count (`--autotune`, ~1 minute,
+   skip with `--no-autotune`);
+4. reserves huge pages for the RandomX dataset, sets THP to `madvise`, sets the
+   governor the profile asks for and enables the MSR module;
+5. writes a validated config with your wallet, the pool, the profile and the
+   measured thread count;
+6. installs the binary and a `systemd` service that restarts on failure and a
    oneshot unit that re-applies the tuning on every boot;
-6. starts it, waits for the first real hashrate, runs the 0 %-fee audit and
+7. starts it, waits for the first real hashrate, runs the 0 %-fee audit and
    prints a summary card.
+
+Only the wallet is required. The engine comes from the pool (a switching pool
+like MoneroOcean gets the C++ engine with its 34 algorithms; a RandomX-only pool
+gets `zmrig`), and the profile comes from the battery state. `./oneclick.sh plan`
+prints every decision with its reason and touches nothing.
 
 End state:
 
@@ -45,7 +53,10 @@ sudo ./oneclick.sh bench      # 180 s RandomX measurement
 sudo ./oneclick.sh report     # machine report code for the web dashboard
 sudo ./oneclick.sh verify     # fee audit
 sudo ./oneclick.sh update     # git pull + rebuild + restart
-sudo ./oneclick.sh uninstall  # stop, disable, remove binaries
+sudo ./oneclick.sh plan       # what the installer would do here, and why
+sudo ./oneclick.sh tune       # host tuning + thread search again
+sudo ./oneclick.sh uninstall  # stop, disable, remove binaries (config kept)
+sudo ./oneclick.sh purge      # remove everything, config included (asks first)
 ```
 
 ---
@@ -59,7 +70,11 @@ sudo ./oneclick.sh uninstall  # stop, disable, remove binaries
 | `--pass VALUE` | pool password, default `x` |
 | `--rig-id NAME` | name shown on the pool dashboard |
 | `--algo NAME` | pin one algorithm (`rx/0`, `cn/r`, …). Also **skips the 2-minute calibration**, see below. |
-| `--engine NAME` | `xmrig` (default, every algorithm) or `zmrig` (the Zig miner, RandomX only). See [The Zig engine](#the-zig-engine). |
+| `--engine NAME` | `auto` (default), `xmrig` (every algorithm) or `zmrig` (the Zig miner, RandomX only). `auto` uses the pool: switching pools need all 34 algorithms, RandomX-only pools are best served by `zmrig`. See [The Zig engine](#the-zig-engine). |
+| `--profile NAME` | `auto` (default), `free` (maximum hashrate, watts ignored) or `watt` (maximum hashrate per watt). `auto` is `free`, except on a laptop on battery. See [profiles](#profiles-free-vs-watt). |
+| `--autotune[=SEC]` | search for the best thread count after the build, `SEC` seconds per candidate (default 8). On by default for `zmrig`. |
+| `--no-autotune` | keep the built-in `L3 / 2 MiB` heuristic |
+| `--dry-run` | with `purge`: print what would be removed, delete nothing |
 | `--tls` | TLS stratum |
 | `--cloudflare[=HOST[:PORT]]` | WebSocket inside TLS on 443 and the `zmrig` engine: the one shape that passes HTTPS-only egress and CDNs. See [doc/NETWORK.md](NETWORK.md). |
 | `--transport KIND` | `tcp`, `tls`, `ws` or `wss`, overriding the scheme in `--pool` |
@@ -83,7 +98,41 @@ sudo ./oneclick.sh uninstall  # stop, disable, remove binaries
 Environment variables for unusual setups: `UV_INCLUDE_DIR`, `UV_LIBRARY`
 (locally built libuv), `MINER_REPO_URL`, `MINER_BRANCH`, `MINER_POOL`,
 `MINER_PASS`, `MINER_PREFIX`, `MINER_CONFIG_DIR`, `MINER_STATE_DIR`,
-`MINER_ENGINE` (same as `--engine`), `MINER_ZIG_VERSION` (default `0.13.0`).
+`MINER_SERVICE_DIR` (default `/etc/systemd/system`), `MINER_ENGINE` (same as
+`--engine`), `MINER_PROFILE` (same as `--profile`), `MINER_AUTOTUNE`,
+`MINER_AUTOTUNE_SECONDS`, `MINER_AUTOTUNE_THREADS` (skip the search and pin this
+count), `MINER_ZIG_VERSION` (default `0.13.0`).
+
+---
+
+## Profiles: free vs watt
+
+```bash
+sudo ./oneclick.sh install --wallet 4YourAddress... --profile free
+sudo ./oneclick.sh install --wallet 4YourAddress... --profile watt
+```
+
+`free` — the machine's electricity costs you nothing (a coffee shop, a lab, an
+office PC that is on anyway). Every logical CPU, `--mode fast`, huge pages,
+`--priority 5`, `performance` governor. This is the default everywhere except a
+laptop on battery.
+
+`watt` — every watt is on the bill (a metered VPS, a laptop, expensive power).
+One thread per physical core, no governor forcing, mining paused on battery, and
+hashes per watt in the report code. The full reasoning, including what could not
+be measured here, is in [doc/PERFORMANCE.md](PERFORMANCE.md) §2c.
+
+Both profiles are 0 % fee and both are auditable with
+`sudo ./oneclick.sh verify`.
+
+### Purging
+
+`uninstall` keeps the config (re-installing is common) and the build cache.
+`purge` removes everything the tool created — units, binaries, config, state,
+build directory, logs — after printing the list with sizes and asking you to type
+`purge`. `--dry-run` shows the list and deletes nothing; `--yes` skips the
+prompt. It also returns `vm.nr_hugepages` to the kernel. Nothing outside that
+list is touched, which is what `tests/oneclick/purge.sh` checks on every run.
 
 ---
 
