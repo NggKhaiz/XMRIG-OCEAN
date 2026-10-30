@@ -191,3 +191,21 @@ test('the proxy computes targets with the same code the pool uses', () => {
     assert.strictEqual(proxyTarget.targetHex(difficulty), targetHex(difficulty));
   }
 });
+
+test('the nonce offset follows the algorithm, not a constant', () => {
+  const { nonceOffsetFor, NONCE_OFFSET, NONCE_OFFSET_PANTHERA, applyExtranonce } = require('../src/blob');
+
+  assert.strictEqual(nonceOffsetFor('rx/0'), NONCE_OFFSET);
+  assert.strictEqual(nonceOffsetFor('rx/wow'), NONCE_OFFSET);
+  assert.strictEqual(nonceOffsetFor(undefined), NONCE_OFFSET);
+  assert.strictEqual(nonceOffsetFor('panthera'), NONCE_OFFSET_PANTHERA);
+  assert.strictEqual(nonceOffsetFor('RX/XLA'), NONCE_OFFSET_PANTHERA);
+  assert.notStrictEqual(NONCE_OFFSET_PANTHERA, NONCE_OFFSET);
+
+  // Patching a panthera blob at 39 would corrupt its header.
+  const blob = 'ab'.repeat(147) + '00000000' + 'cd'.repeat(20);
+  const patched = applyExtranonce(blob, { offset: nonceOffsetFor('panthera'), minerPrefix: 7 });
+  assert.strictEqual(patched.mode, 'per-miner');
+  assert.strictEqual(patched.blob.slice(0, 147 * 2), blob.slice(0, 147 * 2), 'the header is untouched');
+  assert.strictEqual(patched.blob.slice(150 * 2, 150 * 2 + 2), '07', 'the prefix lands at byte 150');
+});

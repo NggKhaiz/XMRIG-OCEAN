@@ -216,6 +216,39 @@ bandwidth guarantee. For a farm, WireGuard wins on all three.
 
 ---
 
+## 4b. Which coins the pool may switch the farm to
+
+A pool that pays whatever coin is worth most per hash (MoneroOcean and clones)
+can only do that if the miner tells it what it can hash. The proxy is the one
+holding the pool connection, so it is the one that has to announce the list —
+a rig behind a silent proxy never gets switched, no matter what the rig itself
+supports.
+
+Default: `auto`, i.e. the seven RandomX variants the engine has named
+configurations for (`src/crypto/rx/RxAlgo.cpp`): `rx/0`, `rx/wow`, `rx/arq`,
+`rx/graft`, `rx/sfx`, `rx/yada`, `panthera`.
+
+```bash
+--algo=auto          # the whole family (default)
+--algo=none          # announce nothing: the pool keeps its own default
+--algo=rx/0          # pin the farm to Monero
+--algo=rx/0,rx/wow   # an explicit subset
+```
+
+Two details that are not cosmetic:
+
+* **the nonce offset moves.** Panthera blobs carry the nonce at byte 147, not 39
+  (`zmrig/src/job.zig:88`). Writing the extranonce at 39 for a panthera job
+  corrupts the header and every share comes back rejected while the log looks
+  fine. `proxy/src/blob.js` (`nonceOffsetFor`) follows the algorithm, and a test
+  switches a live fake pool to panthera to prove it.
+* **the share carries its coin.** A forwarded share is submitted with the algo of
+  the job it was found for; a pool that is mid-switch rejects anything else.
+
+`rx/2` is not advertised: its parameters differ between pool forks, and the cost
+of guessing wrong is 100 % rejects. `--algo` is validated at startup, so a typo
+is an error rather than a farm that silently mines Monero.
+
 ## 5. Flags
 
 Every feature is one flag.
@@ -234,6 +267,11 @@ Every feature is one flag.
 | `--max-rigs=<n>` | 255 | one per extranonce byte |
 | `--local-difficulty=<f>` | `1` | local difficulty as a multiple of the pool's |
 | `--target-share=<sec>` | `15` | seconds between a rig's shares |
+| `--algo=auto\|none\|<name>` | `auto` | which coins the pool may switch the farm to (the RandomX family) |
+| `--network-difficulty=<n>` | none | the coin's network difficulty; switches the **XMR/day** column on |
+| `--network-url=<url>` | none | fetch that difficulty instead, every `--network-interval` |
+| `--network-interval=<sec>` | `600` | how often the URL is re-read (60–21600) |
+| `--block-reward=<xmr>` | `0.6` | reward per block (Monero tail emission) |
 | `--no-workers` | off | do not report each rig as its own pool worker |
 | `--tunnel=<none\|wireguard\|tailscale\|cf\|cf-quick>` | `none` | the public path |
 | `--tunnel-token=` `--tunnel-host=` | none | auth key / tunnel token, public hostname |
@@ -316,6 +354,57 @@ instead of only checking that a number came back.
 
 ---
 
+## 7b. What each rig actually earns
+
+`/status` is where a farm's money is visible, so it answers the question an
+operator asks next: *how much is this rig producing, and what is that worth?*
+
+A rig never reports a hashrate over stratum, and inventing one from the CPU model
+would be a guess. The proxy measures instead. Every accepted share at the
+difficulty *this proxy handed out* is proof of `difficulty × 2³²` hashes on
+average, so
+
+```
+H/s ≈ accepted × difficulty × 2³² / seconds
+```
+
+Because the difficulty divisor is the rig's **local** difficulty, a rig on a
+lowered `--local-difficulty` (more shares, each worth less) comes out at the same
+hashrate as an identical rig on the pool's difficulty. That is the property that
+makes the column comparable across a mixed farm.
+
+Money needs two numbers the proxy cannot measure — the network difficulty and the
+block reward — so both are inputs, never guesses:
+
+```bash
+# exact: the operator supplies the network figure (updated by hand or by a cron)
+zmrig-proxy start --user=<wallet> --pool=supportxmr.com:3333 --network-difficulty=3.01e11
+
+# automatic: re-read it every 10 minutes from any JSON endpoint that carries it
+zmrig-proxy start --user=<wallet> --pool=supportxmr.com:3333 \
+    --network-url=https://xmrchain.net/api/networkinfo
+```
+
+```
+XMR/day = (H/s / network_difficulty) × (86400 / 120) × block_reward
+```
+
+With neither flag set, `/status` still reports `hashrate` and `sharesPerHour` for
+every rig and for the fleet, and reports `xmrPerDay: null` — a `null` an operator
+can trust, which is worth more than a number they cannot. `estimate` publishes
+where any figure came from:
+
+```json
+"estimate": { "difficulty": 301000000000, "blockReward": 0.6, "source": "flag", "fetchedAt": null, "error": null }
+"hashrate": 814, "sharesPerHour": 1.9, "xmrPerDay": 0.00042,
+"connections": [ { "worker": "rig1", "hashrate": 814, "sharesPerHour": 1.9, "xmrPerDay": 0.00042, "accepted": 12 } ]
+```
+
+A failed fetch keeps the last good value and logs one line: the network
+difficulty moves by fractions of a percent per hour, and a monitoring feature
+must never be able to take the pool connection down (`proxy/src/network.js`,
+7 tests).
+
 ## 8. What happens when the pool dies
 
 The rigs do not notice.
@@ -383,12 +472,13 @@ Measured, in this repository, with `node --test proxy/tests/`:
 
 | Suite | Tests | What it proves |
 |---|---|---|
-| `core.test.js` | 14 | blob nonce byte order, extranonce allocation, vardiff bounds, target parity with the pool |
-| `plane.test.js` | 8 | two rigs on one upstream connection, share forwarded with the *pool's* job id, absorbed shares counted, pool death survived, failover, extranonce misuse reported once |
-| `config.test.js` | 14 | flag parsing and aliases, refused dangerous combinations, CIDR matching, rate limiting, WireGuard config generation |
+| `core.test.js` | 15 | blob nonce byte order, per-algorithm nonce offset, extranonce allocation, vardiff bounds, target parity with the pool |
+| `plane.test.js` | 12 | two rigs on one upstream connection, share forwarded with the *pool's* job id, absorbed shares counted, pool death survived, failover, extranonce misuse reported once |
+| `config.test.js` | 16 | flag parsing and aliases, refused dangerous combinations, CIDR matching, rate limiting, WireGuard config generation, the money flags |
+| `network.test.js` | 7 | difficulty shapes from public APIs, H/s from shares, XMR/day maths, a failed fetch keeping the last value, "unknown" staying `null` |
 | `e2e.test.js` | 4 | the real binary: TCP rig, WebSocket rig, token gate, status endpoint, `doctor`, SIGTERM leaves no listener behind |
 | `layout.test.js` | 3 | every relative `require` resolves, and the *copied* install layout (`/opt/zmrig-proxy/{proxy,pool}`) still runs |
-| **total** | **43 passing** | |
+| **total** | **57 passing** | |
 
 Timings from the end-to-end run on a 2 vCPU VM: full start → TCP rig job →
 WebSocket rig job → authenticated status read = **213 ms** wall; `doctor`

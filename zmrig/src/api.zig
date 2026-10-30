@@ -56,6 +56,22 @@ pub const Algo = enum(c_int) {
     }
 };
 
+/// Every RandomX variant this engine can hash *correctly*, i.e. the list a
+/// pool may switch a rig between. `--algo=auto` advertises exactly this, and
+/// the order is what the operator reads in `--check`.
+///
+/// The C++ side has a named configuration for each of these
+/// (`src/crypto/rx/RxAlgo.cpp`: Monero, Wownero, Arqma, Graft, Safex, Yada,
+/// Scala), which is what makes advertising them honest rather than
+/// optimistic: a variant without its own configuration would hash with
+/// Monero parameters and every share would be rejected.
+///
+/// `rx/2` is deliberately absent. What it means depends on which fork
+/// compiled the pool (MoneroOcean's V2 tuning), so a rig advertising it can
+/// be handed a job it cannot reproduce; the cost of that guess is a night of
+/// 100 % rejects, and the gain is a fraction of one algorithm among seven.
+pub const auto_algos = [_]Algo{ .rx_0, .rx_wow, .rx_arq, .rx_graft, .rx_sfx, .rx_yada, .rx_xla };
+
 /// xmo_engine_new() flags.
 pub const EngineFlags = struct {
     huge_pages: bool = true,

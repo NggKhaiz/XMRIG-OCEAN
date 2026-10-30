@@ -67,7 +67,7 @@ Re-running it is safe; the config is never overwritten without `--force`.
 
 | Decision | How it is made |
 | --- | --- |
-| Engine | Pool property, not guesswork. A pool that switches algorithms to whatever pays (MoneroOcean and its clones) gets the C++ engine, which speaks 34 algorithms; a plain Monero pool can only ever send `rx/0`, where `zmrig` is both faster and fee-free. `--algo` overrides it. |
+| Engine | `zmrig` by default, and it negotiates. A pool that switches coins to whatever pays (MoneroOcean and its clones) gets a login that advertises the whole RandomX family, so it can move this rig between coins while the rig keeps the fee-free engine; a plain Monero pool simply answers `rx/0`. `--algo=rx/0` pins one coin, and a non-RandomX `--algo` (cn/2, …) or `--engine=xmrig` selects the C++ engine, which speaks all 34 algorithms. |
 | Profile | `free` (maximum hashrate, watts ignored) everywhere, except a laptop running on battery, which gets `watt` (maximum hashrate per watt). |
 | Threads | A short measurement after the build: each candidate runs for 8 s on the real dataset and the winner is written into `config.json`. Skip it with `--no-autotune`. |
 | Huge pages | Reserved automatically for the dataset size; falls back to THP and says so. |
@@ -225,7 +225,7 @@ Xeon at 2.6 GHz with 3.9 GiB of RAM, `--mode fast`, 4000 hashes per run.
 | `--scratchpad-prefetch=0..3` | 1 | Prefetch hint baked into the JIT. All four modes landed in 795–832 H/s on this box: no measurable difference, so the documented default stays. |
 | `--no-jit` | off | Interpreter only, ~6x slower. Kept for CPUs without x86-64/ARM64, never for mining. |
 | `--nicehash` | auto | Masks the nonce to the 24 bits a NiceHash/rental pool owns, so the top extranonce byte survives. Off unless the pool's job carries a non-zero nonce. |
-| `--user-agent=UA` | `zmrig/6.28.0-mo11` | Sent in the WebSocket upgrade; some relays and Cloudflare routes only accept known miner strings. |
+| `--user-agent=UA` | `zmrig/6.29.0-mo12` | Sent in the WebSocket upgrade; some relays and Cloudflare routes only accept known miner strings. |
 | `--donate-level=N` | — | Accepted so XMRig scripts keep working, then ignored with a log line: the developer fee is 0 %, never 1 %. |
 | *nothing below this line* | — | Prefetch mode, `--no-huge-pages-jit`, `--no-affinity`, `--randomx-init`, `--no-optimized-init` and `--priority` all measured inside ±3 % noise on the same box. They exist for hosts where they matter; do not expect a number. VAES-512 was tried and is **3.5 % slower** here — see [`doc/PERFORMANCE.md`](doc/PERFORMANCE.md). |
 
@@ -289,6 +289,35 @@ node src/index.js --config config.json           # stratum + HTTP
 npm test                                         # 28 tests, includes a real miner
 ```
 
+## Getting paid for the coin that pays best
+
+`zmrig` implements seven RandomX variants — the engine has a named configuration
+for each (`src/crypto/rx/RxAlgo.cpp`), so a job for `rx/wow` hashes correctly
+rather than being Monero parameters in disguise. What it did not do until now is
+*tell the pool*:
+
+```bash
+zmrig -o gulf.moneroocean.stream:10001 -u <wallet> -a auto
+```
+
+That one flag sends `"algo":["rx/0","rx/wow","rx/arq","rx/graft","rx/sfx","rx/yada","panthera"]`
+in the login. A pool that pays whatever coin is worth most per hash at that
+moment (MoneroOcean and its clones) needs that list — without it the rig is a
+Monero-only rig and stays on `rx/0` forever.
+
+* `-a auto` — advertise the family. The pool decides, and may switch mid-session; the miner rebuilds the engine and keeps mining (`zmrig/src/miner.zig`, `applyJob`).
+* `-a rx/0` — pin one coin. A pin is a promise: nothing else is advertised.
+* nothing — unchanged: no list, the pool decides from its own defaults.
+
+`rx/2` is deliberately not advertised: what it means depends on which fork
+compiled the pool, and a wrong guess is a night of rejected shares. `zmrig
+--check` prints what will be advertised, because a list the pool ignores is
+otherwise invisible.
+
+The proxy advertises the same list for the whole farm (`--algo=auto`, the
+default there) and writes the extranonce at the right nonce offset for each
+algorithm — 39 for Monero, 147 for panthera ([`doc/PROXY.md`](doc/PROXY.md)).
+
 ## Several rigs, one address: `proxy/`
 
 A farm loses money in three ways that never show up in a miner log: two rigs
@@ -309,7 +338,9 @@ sudo ./proxy/install.sh --user=<wallet> --pool=gulf.moneroocean.stream:10001
   pool that refuses the login is left behind immediately;
 * **one flag for the network**: `--tunnel=wireguard` (fixed `10.66.66.x`, UDP, no
   third party), `--tunnel=tailscale`, `--tunnel=cf`, `--tunnel=cf-quick`;
-* **43 tests**, including real sockets and a WebSocket rig: `cd proxy && npm test`.
+* **H/s and XMR/day per rig** in `/status`, measured from accepted shares, not
+  guessed from a CPU name — and `null` when the network difficulty is unknown;
+* **57 tests**, including real sockets and a WebSocket rig: `cd proxy && npm test`.
 
 Cloudflare quick tunnels are **demo only** — random hostname that changes on every
 restart, 200 concurrent requests, no authentication, and Cloudflare says so. The

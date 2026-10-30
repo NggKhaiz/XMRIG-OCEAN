@@ -18,7 +18,7 @@ const health = @import("health.zig");
 const verify = @import("verify.zig");
 const util = @import("util.zig");
 
-pub const version = "6.28.0-mo11";
+pub const version = "6.29.0-mo12";
 
 var running = std.atomic.Value(bool).init(true);
 
@@ -362,7 +362,10 @@ pub fn main() !void {
             if (pool.transport.usesWs()) (pool.ws_path orelse "/") else "",
         });
 
-        const algo = opts.poolAlgo(&pool);
+        // What this rig tells the pool it can hash: one pinned algorithm, the
+        // whole RandomX family with `--algo=auto`, or nothing at all.
+        var algo_buf: [api.auto_algos.len]api.Algo = undefined;
+        const algos = opts.loginAlgos(&pool, &algo_buf);
         var session = stratum.Session.open(allocator, pool, logger) catch {
             failures += 1;
             if (failures >= opts.retries) {
@@ -383,7 +386,7 @@ pub fn main() !void {
         defer monitor.socket.store(-1, .release);
 
         var first_job = job_mod.Job.init();
-        session.login(algo, &first_job) catch |e| {
+        session.login(algos, &first_job) catch |e| {
             logger.err("login failed: {s}", .{@errorName(e)});
             failures += 1;
             if (failures >= opts.retries) {
@@ -415,7 +418,10 @@ pub fn main() !void {
             continue;
         };
 
-        const result = runSession(allocator, &session, &miner, &opts, &monitor, algo, logger);
+        // `opts.poolAlgo` -- not the advertised list: this is the default used
+        // for a job that names no algorithm, and `--algo=auto` deliberately pins
+        // nothing so the pool stays free to switch.
+        const result = runSession(allocator, &session, &miner, &opts, &monitor, opts.poolAlgo(&pool), logger);
         monitor.view.markDisconnected();
 
         if (session.conn.skipped > 0) {
@@ -912,7 +918,7 @@ fn printConfigSummary(opts: *const options.Options) !void {
             pool.port,
             if (pool.transport.usesWs()) (pool.ws_path orelse "/") else "",
             pool.user,
-            if (opts.poolAlgo(&pool)) |algo| algo.label() else "auto",
+            if (opts.poolAlgo(&pool)) |algo| algo.label() else if (opts.algo_all or pool.algo_all) "auto (all RandomX variants)" else "pool decides",
         });
 
         if (pool.connect_host) |host| {
@@ -1001,7 +1007,7 @@ fn printConfigSummary(opts: *const options.Options) !void {
     _ = api.xmo_msr_probe(&msr_buf, msr_buf.len);
     try out.print("  msr     {s} ({s})\n", .{
         msr_buf[0..std.mem.indexOfScalar(u8, &msr_buf, 0) orelse msr_buf.len],
-        if (opts.msr) "on" else "off, enable with --msr",
+        if (opts.msr) "on" else "off: --msr is worth 5-15% on Zen 3/4 (measured elsewhere, not on this host)",
     });
 }
 

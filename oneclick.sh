@@ -586,8 +586,12 @@ resolve_engine() {
             ENGINE="xmrig"
             info "auto: no zmrig build for $(uname -m), using the C++ engine"
         elif pool_switches_algorithms "$POOL"; then
-            ENGINE="xmrig"
-            info "auto: ${POOL%%:*} pays for several algorithms, using the C++ engine"
+            # A switching pool used to mean the C++ engine, because zmrig could
+            # not advertise more than one algorithm. It can now: the login sends
+            # the whole RandomX family, the pool picks the best-paying variant,
+            # and the rig keeps the 0% fee and the faster engine.
+            ENGINE="zmrig"
+            info "auto: ${POOL%%:*} pays for several algorithms; zmrig advertises the RandomX family (0% fee)"
         else
             ENGINE="zmrig"
             info "auto: ${POOL%%:*} mines RandomX only, using the zmrig engine (0% fee)"
@@ -598,9 +602,13 @@ resolve_engine() {
         xmrig)
             ;;
         zmrig)
+            # No explicit pin: advertise the whole RandomX family. A pool that
+            # pays for several coins then moves this rig to the variant that
+            # pays best per hash, with no reinstall and no fee. A pool with one
+            # coin simply picks rx/0.
             if [ -z "$ALGO" ]; then
-                ALGO="rx/0"
-                info "zmrig mines the RandomX family only, pinning --algo rx/0"
+                ALGO="auto"
+                info "zmrig advertises the RandomX family; the pool picks the best-paying variant"
             fi
             ;;
         *)
@@ -609,7 +617,7 @@ resolve_engine() {
     esac
 
     case "$ALGO" in
-        ""|rx|rx/0|randomx) ;;
+        ""|auto|rx|rx/0|randomx) ;;
         rx/*|panthera) ;;
         *)
             if [ "$ENGINE" = "zmrig" ]; then
@@ -789,7 +797,14 @@ write_config() {
 
     local rig="${RIG_ID:-$(hostname -s 2>/dev/null || echo rig)}"
     local algo_json="null"
-    [ -n "$ALGO" ] && algo_json="\"${ALGO}\""
+    if [ -n "$ALGO" ]; then
+        algo_json="\"${ALGO}\""
+    elif [ "$ENGINE" = "zmrig" ]; then
+        # "auto": advertise every RandomX variant this engine implements, so a
+        # pool that pays the best coin per hash can move the rig between them.
+        # The C++ engine negotiates on its own and takes "null".
+        algo_json="\"auto\""
+    fi
 
     # Restrictive-network presets. Everything lands in the pool section, which
     # zmrig reads and the C++ engine ignores.
@@ -1962,6 +1977,13 @@ cmd_plan() {
 
     printf '    %-14s %s\n' "engine" "${ENGINE}  (${engine_note})"
     printf '    %-14s %s\n' "pool" "${POOL}"
+    local algo_note="pool default"
+    if [ "$ALGO" = "auto" ]; then
+        algo_note="auto  (RandomX family: rx/0, rx/wow, rx/arq, rx/graft, rx/sfx, rx/yada, panthera)"
+    elif [ -n "$ALGO" ]; then
+        algo_note="$ALGO"
+    fi
+    printf '    %-14s %s\n' "algo" "$algo_note"
     printf '    %-14s %s  (%s)\n' "profile" "${PROFILE_EFFECTIVE}" "$(profile_reason)"
     printf '    %-14s %s\n' "mode" "$( [ "$ENGINE" = zmrig ] && echo "auto (fast when RAM allows)" || echo "pool default")"
     printf '    %-14s %s\n' "huge pages" "$(huge_page_plan)"
