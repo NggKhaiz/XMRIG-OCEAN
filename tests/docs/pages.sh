@@ -251,5 +251,32 @@ else
     printf '      %s\n' "$stale"
 fi
 
+# --- 10. a /web/ URL 404s in the other mode, and recovers ------------------
+# Switching the publishing mode changes every URL by one segment. Old links
+# keep arriving, so the 404 page strips the extra segment once and reloads.
+if command -v node >/dev/null 2>&1 &&
+   node -e '
+     const fs = require("fs");
+     const code = fs.readFileSync("web/assets/redirect.js", "utf8");
+     const cases = [
+       ["/ZMRIG/web/docs.html", "/ZMRIG/docs.html"],
+       ["/ZMRIG/web/", "/ZMRIG/"],
+       ["/ZMRIG/web/a/b.html", "/ZMRIG/a/b.html"],
+       ["/ZMRIG/docs.html", null],
+     ];
+     for (const [input, expected] of cases) {
+       let to = null;
+       const store = {};
+       new Function("location", "sessionStorage", code)(
+         { pathname: input, search: "", hash: "", replace(t) { to = t; } },
+         { getItem(k) { return store[k] || null; }, setItem(k, v) { store[k] = v; } });
+       if (to !== expected) { console.log(`${input} -> ${to}, expected ${expected}`); process.exit(1); }
+     }
+   '; then
+    ok "404 page strips a stale /web/ segment (4 cases)"
+else
+    bad "web/assets/redirect.js does not recover a /web/ link"
+fi
+
 printf '\n    %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
