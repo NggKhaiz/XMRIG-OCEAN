@@ -19,6 +19,11 @@ answers with the "does not contain the requested file" page.
   the automation token this release was prepared with has no `workflows`
   permission, so a CI change could not be pushed — and a documented one-off
   beats an undocumented red X on every push.
+- **Two pages still told people to run `/etc/xmrig-ocean/config.json` and
+  `systemctl status xmrig-ocean`**: the home page's install steps and the
+  wizard's "after install" list. Both render perfectly, which is why nothing
+  caught them — `tests/docs/pages.sh` now greps the published files for the old
+  name.
 - **CSP meta tags** on all four pages. GitHub Pages ignores `web/_headers`, so
   the policy only existed for Cloudflare; without the header the deployed site
   had no CSP at all. `tests/docs/pages.sh` fails if a page gains an inline
