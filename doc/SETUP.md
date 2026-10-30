@@ -220,69 +220,108 @@ it; pick one. GitHub Pages matches the `homepage` field that is already set.
 
 ### 4a. GitHub Pages (matches the `homepage` field)
 
-Pages is currently **disabled** (`has_pages: false`). Pages cannot serve a
-subdirectory of a branch, so it needs a workflow too — same scope problem as
-above, so create **`.github/workflows/pages.yml`** by hand:
+The workflow is already in the repository: `.github/workflows/pages.yml`
+publishes `web/` on every push to `BETA`. One setting has to match it, and it is
+the only part of this document that cannot be done from the API.
+
+**Settings → Pages → Build and deployment → Source: `GitHub Actions`.**
+Not "Deploy from a branch".
+
+That distinction is the difference between a working site and the GitHub 404
+page ("The site configured at this address does not contain the requested
+file"): with a branch source, GitHub publishes the repository root, and the
+repository root has no site in it.
+
+If the branch source is what you want anyway (no Actions minutes), the
+repository still works, with one visible difference in the URL:
+
+| Source | Site URL | Notes |
+|---|---|---|
+| GitHub Actions | `https://nggkhaiz.github.io/ZMRIG/` | clean URLs, this is what the README links to |
+| Deploy from a branch → `BETA` / (root) | `https://nggkhaiz.github.io/ZMRIG/web/` | `/index.html` and `/404.html` at the root redirect every path into `web/`, so no link 404s, but `/ZMRIG/` becomes `/ZMRIG/web/` |
+
+Both modes are covered by `npm run test:pages` (17 checks): an entry point in
+`web/`, the branch-root redirect executed against eight paths, no root-absolute
+link (the site is served under `/ZMRIG/`, not `/`), every `href`/`src` and
+in-page `#anchor` resolving, the docs manifest and its Markdown files, only
+existing pages in `sitemap.xml`, a CSP `<meta>` on every page, and the workflow
+uploading `web/` on a push to `BETA`. `.nojekyll` is present at both the root
+and in `web/`, so nothing is passed through Jekyll.
+
+While the source is a branch, the `Deploy site` workflow still runs on a push to
+`BETA` and its `deploy` job fails: `deploy-pages` refuses to publish when the
+site is configured for a branch. That failure is expected in that mode and says
+nothing about the site. If the red X is annoying, this is the replacement for
+`.github/workflows/pages.yml` — it asks the API which mode is active and only
+deploys in `workflow` mode, with the two site checks in front of it:
 
 ```yaml
 name: Deploy site
-
 on:
   push:
     branches: [BETA]
   workflow_dispatch:
-
 permissions:
   contents: read
   pages: write
   id-token: write
-
 concurrency:
   group: pages
-  cancel-in-progress: true
-
+  cancel-in-progress: false
 jobs:
-  build:
+  checks:
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload the site
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/checkout@v5
+      - run: bash tests/docs/links.sh
+      - run: bash tests/docs/pages.sh
+  mode:
+    runs-on: ubuntu-24.04
+    outputs:
+      build_type: ${{ steps.pages.outputs.build_type }}
+    steps:
+      - id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          build_type=$(gh api "repos/${GITHUB_REPOSITORY}/pages" --jq .build_type 2>/dev/null || echo disabled)
+          echo "build_type=${build_type}" >> "$GITHUB_OUTPUT"
+          if [ "$build_type" != workflow ]; then
+            echo "::warning title=Pages source::Set Settings → Pages → Source to \"GitHub Actions\"; the site is currently served from /web/ instead."
+          fi
+  build:
+    needs: [checks, mode]
+    if: needs.mode.outputs.build_type == 'workflow'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: web
-
   deploy:
     needs: build
+    if: needs.mode.outputs.build_type == 'workflow'
     runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - id: deployment
+        uses: actions/deploy-pages@v5
 ```
 
-Then **Settings → Pages → Build and deployment → Source: GitHub Actions**
-(not "Deploy from a branch").
-
-The site uses relative links (`docs.html`, `assets/…`), so it works under the
-`/ZMRIG/` sub-path without changes. `web/404.html` is picked up automatically by
-Pages. `web/_headers` is a Cloudflare Pages file and is ignored by GitHub Pages —
-the CSP then comes from the `<meta>` tags already in the pages; if you want real
-response headers, use 4b.
-
-Check:
+Check the deployed result:
 
 ```bash
-curl -sI https://nggkhaiz.github.io/ZMRIG/ | head -3        # 200
-curl -s  https://nggkhaiz.github.io/ZMRIG/robots.txt        # User-agent: *
+curl -sI https://nggkhaiz.github.io/ZMRIG/ | head -3     # 200
+curl -s  https://nggkhaiz.github.io/ZMRIG/robots.txt     # User-agent: *
 ```
+
+`web/404.html` is used automatically for unknown paths. `web/_headers` is a
+Cloudflare Pages file and is ignored by GitHub Pages — the CSP then comes from
+the `<meta>` tags already in the pages; if you want real response headers, use
+4b.
 
 ### 4b. Cloudflare Pages (best headers, free)
 

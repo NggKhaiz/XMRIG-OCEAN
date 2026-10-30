@@ -6,11 +6,11 @@
 
 by **[@nggkhaiz](https://github.com/NggKhaiz)**
 
-[![release](https://img.shields.io/badge/release-6.32.0-f2763f)](CHANGELOG.md)
+[![release](https://img.shields.io/badge/release-6.32.1-f2763f)](CHANGELOG.md)
 [![licence](https://img.shields.io/badge/licence-GPL--3.0-blue)](LICENSE)
 [![dev fee](https://img.shields.io/badge/developer%20fee-0%25-46b17b)](doc/ZERO_FEE.md)
 [![platform](https://img.shields.io/badge/platform-Linux%20x86--64%20%C2%B7%20macOS%20%C2%B7%20Windows-lightgrey)](#build-from-source)
-[![tests](https://img.shields.io/badge/tests-330%20checks%20%C2%B7%209%20suites-46b17b)](#tests)
+[![tests](https://img.shields.io/badge/tests-347%20checks%20%C2%B7%2010%20suites-46b17b)](#tests)
 [![stars](https://img.shields.io/github/stars/NggKhaiz/ZMRIG?style=flat&color=f2763f)](https://github.com/NggKhaiz/ZMRIG/stargazers)
 [![last commit](https://img.shields.io/github/last-commit/NggKhaiz/ZMRIG)](https://github.com/NggKhaiz/ZMRIG/commits/BETA)
 
@@ -298,13 +298,14 @@ NOTICE                 attribution and upstream lineage
 
 ## Tests
 
-Nine suites, no mocks where a socket will do. Run them all:
+Ten suites, no mocks where a socket will do. Run them all:
 
 ```bash
 sudo apt install -y build-essential cmake nodejs python3   # once
 ./zmrig/build.sh --jobs 2
 cd web && npm install --no-save jsdom && cd ..
-npm run test:web && npm run test:pool && npm run test:oneclick && npm run test:docs
+npm run test:web && npm run test:pool && npm run test:oneclick
+npm run test:docs && npm run test:pages
 cd proxy && npm test
 cd .. && ./zmrig/tests/unit.sh && ./zmrig/tests/cli.sh && ./zmrig/tests/health.sh
 ./zmrig/tests/net.sh --soak
@@ -321,6 +322,7 @@ cd .. && ./zmrig/tests/unit.sh && ./zmrig/tests/cli.sh && ./zmrig/tests/health.s
 | `zmrig/tests/health.sh` | 7 | the watchdog, both directions: an honest pool is not a fault, an all-reject pool is |
 | `tests/oneclick/*.sh` | 56 | plan, config, governor, purge (removes only its own paths), branch switching |
 | `tests/docs/links.sh` | 52 | every relative link and every `#anchor` in the documentation resolves |
+| `tests/docs/pages.sh` | 17 | the site survives the way GitHub Pages serves it: entry point, branch-root redirect, no root-absolute links, every `href`/`src` and `#anchor`, CSP meta, sitemap, workflow |
 
 ## Documentation
 
