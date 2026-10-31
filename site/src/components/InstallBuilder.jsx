@@ -1,11 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
+import { useLocation } from "@docusaurus/router";
 import { POOLS, feeLabel, minLabel } from "../lib/pools.mjs";
+import { COINS, coinOrDefault, findCoin } from "../lib/coins.mjs";
 import { build } from "../lib/command.mjs";
 import { translate } from "../lib/messages.mjs";
 import CopyButton from "./CopyButton";
 
 const INITIAL = {
+  coin: "xmr",
   wallet: "",
   rig: "",
   pool: "moneroocean",
@@ -39,12 +42,28 @@ export default function InstallBuilder() {
   // Links from elsewhere carry the pool as `?pool=c3pool` — the old wizard did
   // this, so the pool table can keep pointing at the builder. Only a known id is
   // accepted: the value is used as a key, never echoed into the command.
+  // The coin is first: the calculator links here with `?coin=wow` after it says
+  // which coin pays best, so the builder opens on the coin the advice was about.
+  // `useLocation` rather than `window.location` because a link to this same page
+  // with a different coin is a route change, not a reload — the effect has to run
+  // again, or the page sits on the previous coin.
+  const { search } = useLocation();
   useEffect(() => {
-    const wanted = new URLSearchParams(window.location.search).get("pool");
-    if (wanted && POOLS.some((pool) => pool.id === wanted)) {
-      setState((prev) => ({ ...prev, pool: wanted }));
-    }
-  }, []);
+    const params = new URLSearchParams(search);
+    const coin = params.get("coin");
+    const pool = params.get("pool");
+    setState((prev) => {
+      const next = { ...prev };
+      if (coin && findCoin(coin)) {
+        next.coin = coin;
+        next.pool = findCoin(coin).pools.length > 0 ? "moneroocean" : "custom";
+      }
+      if (pool && POOLS.some((item) => item.id === pool)) {
+        next.pool = pool;
+      }
+      return next;
+    });
+  }, [search]);
 
   const set = (key) => (event) => {
     const target = event.target;
@@ -61,8 +80,24 @@ export default function InstallBuilder() {
     }));
   };
 
+  // Changing the coin resets what belonged to the old one: a Wownero address in a
+  // Monero pool preset would produce a command that looks certain and is wrong.
+  const setCoin = (event) => {
+    const coin = coinOrDefault(event.target.value);
+    setState((prev) => ({
+      ...prev,
+      coin: coin.id,
+      pool: coin.pools.length > 0 ? prev.pool : "custom",
+      host: coin.pools.length > 0 ? "" : prev.host,
+      failover: coin.pools.length > 0 ? prev.failover : [],
+    }));
+  };
+
+  const coin = coinOrDefault(state.coin);
   const walletMessage = t("builder.wallet." + result.wallet.status, {
     n: result.wallet.length,
+    coin: coin.name,
+    prefixes: (coin.address.prefixes || []).join(", "),
   });
   const hostMessage =
     result.host.status === "ok"
@@ -70,7 +105,7 @@ export default function InstallBuilder() {
       : t("builder.host." + result.host.status);
 
   const blockedMessage = result.blocked
-    ? t("builder.blocked." + result.blocked)
+    ? t("builder.blocked." + result.blocked, { coin: coin.name })
     : null;
   const selectedPool = POOLS.find((pool) => pool.id === state.pool);
   const isCustom = !selectedPool;
@@ -81,6 +116,19 @@ export default function InstallBuilder() {
         <p className="zm-caption">{t("builder.intro")}</p>
 
         <fieldset className="zm-fieldset">
+          <legend>{t("builder.coin")}</legend>
+          <select className="zm-input" value={state.coin} onChange={setCoin}>
+            {COINS.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name} ({item.symbol}) — {item.algo}
+              </option>
+            ))}
+          </select>
+          <p className="zm-hint">{coin.why[locale]}</p>
+          <p className="zm-caption">{t("builder.coinHint")}</p>
+        </fieldset>
+
+        <fieldset className="zm-fieldset">
           <legend>{t("builder.wallet")}</legend>
           <input
             type="text"
@@ -89,7 +137,7 @@ export default function InstallBuilder() {
             onChange={set("wallet")}
             spellCheck="false"
             autoComplete="off"
-            placeholder="4…"
+            placeholder={(coin.address.prefixes || [])[0] || "…"}
             aria-describedby="zm-wallet-hint"
           />
           <p
@@ -119,19 +167,25 @@ export default function InstallBuilder() {
 
         <fieldset className="zm-fieldset">
           <legend>{t("builder.pool")}</legend>
-          <select
-            className="zm-input"
-            value={state.pool}
-            onChange={set("pool")}
-          >
-            {POOLS.map((pool) => (
-              <option key={pool.id} value={pool.id}>
-                {pool.name} — {feeLabel(pool, locale)} ·{" "}
-                {minLabel(pool, locale)}
-              </option>
-            ))}
-            <option value="custom">{t("builder.poolCustom")}</option>
-          </select>
+          {coin.pools.length > 0 ? (
+            <select
+              className="zm-input"
+              value={state.pool}
+              onChange={set("pool")}
+            >
+              {POOLS.map((pool) => (
+                <option key={pool.id} value={pool.id}>
+                  {pool.name} — {feeLabel(pool, locale)} ·{" "}
+                  {minLabel(pool, locale)}
+                </option>
+              ))}
+              <option value="custom">{t("builder.poolCustom")}</option>
+            </select>
+          ) : (
+            <p className="zm-caption">
+              {t("builder.coinNoPools", { coin: coin.name })}
+            </p>
+          )}
 
           {isCustom ? (
             <>
@@ -155,27 +209,31 @@ export default function InstallBuilder() {
             </p>
           )}
 
-          <span className="zm-label">{t("builder.failover")}</span>
-          <div className="zm-chips">
-            {POOLS.filter((pool) => pool.id !== state.pool).map((pool) => (
-              <label
-                key={pool.id}
-                className={
-                  state.failover.includes(pool.id)
-                    ? "zm-chip is-active"
-                    : "zm-chip"
-                }
-              >
-                <input
-                  type="checkbox"
-                  checked={state.failover.includes(pool.id)}
-                  onChange={() => toggleFailover(pool.id)}
-                />
-                <span>{pool.name}</span>
-              </label>
-            ))}
-          </div>
-          <p className="zm-hint">{t("builder.failoverHint")}</p>
+          {coin.pools.length > 0 ? (
+            <>
+              <span className="zm-label">{t("builder.failover")}</span>
+              <div className="zm-chips">
+                {POOLS.filter((pool) => pool.id !== state.pool).map((pool) => (
+                  <label
+                    key={pool.id}
+                    className={
+                      state.failover.includes(pool.id)
+                        ? "zm-chip is-active"
+                        : "zm-chip"
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      checked={state.failover.includes(pool.id)}
+                      onChange={() => toggleFailover(pool.id)}
+                    />
+                    <span>{pool.name}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="zm-hint">{t("builder.failoverHint")}</p>
+            </>
+          ) : null}
 
           <label className="zm-check">
             <input type="checkbox" checked={state.tls} onChange={set("tls")} />

@@ -65,6 +65,7 @@ FAILOVER="${MINER_FAILOVER:-}"
 POOL_PASS="${MINER_PASS:-x}"
 RIG_ID=""
 ALGO=""
+COIN=""
 # "auto" resolves in resolve_engine(): the pool decides. A pool that switches
 # algorithms to whatever pays best (MoneroOcean and its clones) needs the C++
 # engine, which speaks 34 algorithms; a plain Monero pool can only ever send
@@ -176,6 +177,8 @@ Options
   --no-autotune          keep the built-in thread heuristic
   --no-health-restart    never exit to recover from a stalled miner
                          (default: exit after 15 min so systemd restarts it)
+  --coin NAME            xmr | wow | arq | graft | sfx | yada | xla: shorthand
+                         for --algo, and the name appears in the plan output
   --algo NAME            force one algorithm instead of pool auto-selection
   --engine NAME          auto (default) | xmrig (all algorithms) | zmrig (Zig, rx/*).
                          auto reads the pool: switching pools need every algorithm,
@@ -244,6 +247,8 @@ while [ $# -gt 0 ]; do
         --rig-id=*)      RIG_ID="${1#*=}" ;;
         --algo)          ALGO="${2:?}"; shift ;;
         --algo=*)        ALGO="${1#*=}" ;;
+        --coin)          COIN="${2:?}"; shift ;;
+        --coin=*)        COIN="${1#*=}" ;;
         --dry-run)       PURGE_DRY_RUN=1 ;;
         --no-health-restart) HEALTH_RESTART=0 ;;
         --autotune)      AUTOTUNE=1 ;;
@@ -333,6 +338,45 @@ pool_preset() {
     esac
 }
 
+# Every coin these two engines can hash, as a word a person can type. Both
+# engines implement all seven algorithms, so this table is also the honest limit
+# of what the installer will accept: anything else has no algorithm behind it.
+ALGO_LIST="rx/0 rx/wow rx/arq rx/graft rx/sfx rx/yada panthera"
+coin_algo() {
+    case "${1,,}" in
+        xmr|monero)        echo "rx/0" ;;
+        wow|wownero)       echo "rx/wow" ;;
+        arq|arqma)         echo "rx/arq" ;;
+        graft|grft)        echo "rx/graft" ;;
+        sfx|safex|safex-cash) echo "rx/sfx" ;;
+        yada|yadacoin|yda) echo "rx/yada" ;;
+        xla|scala|panthera) echo "panthera" ;;
+        *) return 1 ;;
+    esac
+}
+
+# The reverse, for the plan output: -/algo rx/wow/ -> Wownero.
+algo_coin() {
+    case "${1,,}" in
+        rx/0)     echo "Monero" ;;
+        rx/wow)   echo "Wownero" ;;
+        rx/arq)   echo "ArQmA" ;;
+        rx/graft) echo "Graft" ;;
+        rx/sfx)   echo "Safex Cash" ;;
+        rx/yada)  echo "YadaCoin" ;;
+        panthera) echo "Scala" ;;
+        *) return 1 ;;
+    esac
+}
+
+check_algo() {
+    local wanted="${1,,}" known
+    for known in $ALGO_LIST; do
+        [ "$wanted" = "$known" ] && return 0
+    done
+    return 1
+}
+
 # resolve_pool <name-or-host:port> -> host:port (or tls://host:port)
 resolve_pool() {
     local value="$1"
@@ -349,6 +393,32 @@ resolve_pool() {
 }
 
 POOL="$(resolve_pool "$POOL")"
+
+# --coin is the friendly form of --algo. Applied here, before the engine is
+# resolved, because the engine follows the algorithm: rx/* and panthera are the
+# Zig front end's territory, everything else is the C++ engine's.
+if [ -n "$COIN" ]; then
+    if ! _coin_algo="$(coin_algo "$COIN")"; then
+        die "unknown coin '${COIN}'. Known: xmr wow arq graft sfx yada xla"
+    fi
+    if [ -n "$ALGO" ] && [ "${ALGO,,}" != "$_coin_algo" ]; then
+        die "--coin ${COIN} is ${_coin_algo}, which contradicts --algo ${ALGO}"
+    fi
+    ALGO="$_coin_algo"
+    unset _coin_algo
+fi
+if [ -n "$ALGO" ]; then
+    # The C++ engine implements 34 algorithms, so any name is let through — but
+    # it is interpolated into config.json, so a quote or a space in it would
+    # produce a file the miner cannot parse. The charset check is the guard.
+    case "$ALGO" in
+        *[!a-zA-Z0-9/_-]*) die "algorithm names use letters, digits, / and - only: '${ALGO}'" ;;
+    esac
+    ALGO="${ALGO,,}"
+    if ! check_algo "$ALGO"; then
+        info "algo ${ALGO} is outside the RandomX family; the Zig engine cannot hash it, so auto picks the C++ engine"
+    fi
+fi
 
 FAILOVER_LIST=""
 if [ -n "$FAILOVER" ]; then
@@ -840,6 +910,13 @@ prompt_wallet() {
 
 check_wallet() {
     local w="$1"
+    if [ -n "$ALGO" ] && [ "$ALGO" != "rx/0" ]; then
+        # Only Monero's address format is written down here. For the other coins
+        # the pool validates the checksum, and guessing a rule from a prefix
+        # would reject valid addresses instead of protecting anyone.
+        info "wallet: ${#w} characters, mined as ${ALGO} ($(algo_coin "$ALGO" 2>/dev/null || echo "$ALGO"))"
+        return 0
+    fi
     case "${#w}" in
         95|106) ok "wallet length looks like a Monero address" ;;
         4|34|42|64) info "treating '${w}' as a pool login, not a raw Monero address" ;;
@@ -2130,6 +2207,15 @@ cmd_plan() {
         algo_note="$ALGO"
     fi
     printf '    %-14s %s\n' "algo" "$algo_note"
+    if [ -n "$ALGO" ] && [ "$ALGO" != "auto" ]; then
+        # Only the coins this repository can name; the C++ engine's other
+        # algorithms stay an algorithm, because calling one a coin would be a
+        # claim about a network nothing here knows.
+        if _coin_name="$(algo_coin "$ALGO")"; then
+            printf '    %-14s %s\n' "coin" "$_coin_name"
+        fi
+        unset _coin_name
+    fi
     if [ -n "${FAILOVER_LIST# }" ]; then
         printf '    %-14s %s\n' "failover" "$(printf '%s' "${FAILOVER_LIST# }" | tr ' ' ',')"
     fi

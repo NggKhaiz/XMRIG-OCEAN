@@ -1,3 +1,49 @@
+# Unreleased — seven coins, one installer
+
+Monero was the only coin the site offered, while both engines hashed six more the
+whole time. The installer, the builder, the wizard and the calculator now cover
+the seven algorithms that actually exist in this repository — and refuse to
+pretend about the rest.
+
+### Added
+- **`--coin`**, the short form of `--algo`: `xmr`, `wow`, `arq`, `graft`, `sfx`,
+  `yada`, `xla`. `oneclick.sh plan` now prints the coin next to the algorithm, and
+  `--coin wow --algo rx/0` is refused as a contradiction instead of silently
+  picking one. An unknown coin dies with the list; an algorithm name with a quote
+  in it — the value is interpolated into `config.json` — dies before anything is
+  written.
+- **Coin picker in the builder.** Changing the coin resets what belonged to the
+  previous one: a Wownero address left in a Monero pool preset would have produced
+  a command that looked certain and was wrong. Non-Monero coins get no preset, so
+  the pool field asks for the endpoint instead of inventing one, and the command
+  carries `--algo` for every coin except Monero — pinning `rx/0` there would stop
+  a switching pool from moving the rig to whichever RandomX coin pays best.
+- **Per-coin address checks.** Monero keeps its exact rule (95/106 characters,
+  base58, prefixes 4 and 8). The other six get the alphabet, a plausible length,
+  and a prefix *warning* where a prefix is known — the pool verifies the checksum,
+  and a page that claims otherwise is lying.
+- **The coin comparison** (`site/src/lib/coins.mjs`, `CoinMatrix.jsx`), on the
+  calculator page and on a page of its own: a ranking of what one rig earns per
+  day on each coin, from reward, block time, network hashrate and price. Prices
+  come from CoinGecko **only when the button is pressed**, so the page works
+  offline; a failed request leaves every price untouched and says what failed.
+  A row missing a number says which field is missing and sorts below the ones
+  that can be ranked — a zero would sort to the bottom and look like an answer.
+- **`doc/SETUP.md` §5b** — the whole multi-coin setup: the table, the two things
+  only the user can supply (that coin's wallet, that pool's endpoint), the `plan`
+  → `install` sequence, verification, and where the site's numbers come from.
+- **`site/docs/pools/coins.mdx`** and its Vietnamese mirror, in both sidebars.
+- **`site/tests/coins.test.mjs`** (14 checks) and seven new `plan` checks: every
+  offered coin is an algorithm both engines hash, a non-Monero coin ships no pool
+  preset and no default price, a blank field is never zero, `mergePrices` drops
+  junk instead of guessing, and `--coin` maps to the right algorithm.
+
+### Changed
+- **README** gained the coin table and the `--coin` example; the test table and
+  the badge follow the suites (474 checks).
+- **The builder documents its coin rule** (en + vi); the calculator page explains
+  the comparison and links to the coin page.
+
 # Unreleased — the documentation site is the site
 
 `https://nggkhaiz.github.io/ZMRIG/` used to serve the hand-written site in

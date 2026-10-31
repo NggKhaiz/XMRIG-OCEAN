@@ -1,0 +1,128 @@
+---
+title: Other coins
+description: The seven algorithms both engines hash, how to mine Wownero, ArQmA, Graft, Safex Cash, YadaCoin or Scala with the same installer, and how the site ranks them by what they actually pay.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-en.png
+---
+
+import CoinMatrix from '@site/src/components/CoinMatrix';
+
+# Other coins
+
+Monero is the default because it has the deepest market and the only pool presets
+this repository can vouch for. It is not the only coin these engines can hash.
+
+Both miners implement the whole RandomX family — seven algorithms — plus
+Panthera. That is the honest limit: a coin outside this list has no algorithm
+here, and no amount of configuration will make it mine one.
+
+| Coin | Ticker | Algorithm | Mine it with |
+| --- | --- | --- | --- |
+| Monero | XMR | `rx/0` | `--coin xmr` (the default) |
+| Wownero | WOW | `rx/wow` | `--coin wow` |
+| ArQmA | ARQ | `rx/arq` | `--coin arq` |
+| Graft | GRFT | `rx/graft` | `--coin graft` |
+| Safex Cash | SFX | `rx/sfx` | `--coin sfx` |
+| YadaCoin | YDA | `rx/yada` | `--coin yada` |
+| Scala | XLA | `panthera` | `--coin xla` |
+
+`--coin` is a shorter spelling of `--algo rx/wow`; both end up as the same
+`"algo"` in `config.json`. A name that is not in the table is refused with the
+list, before anything is written to the machine.
+
+## One command, any of them
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/BETA/oneclick.sh \
+  | sudo bash -s -- install --wallet YOUR_ADDRESS --coin wow \
+      --pool pool.example.org:3333 --yes
+```
+
+Look at the plan first — it prints the coin, the algorithm, the engine and the
+profile it resolved, and writes nothing:
+
+```bash
+sudo ./oneclick.sh plan --wallet YOUR_ADDRESS --coin wow --pool pool.example.org:3333
+```
+
+```text
+engine         zmrig  (RandomX family, 0% fee)
+pool           pool.example.org:3333
+algo           rx/wow
+coin           Wownero
+profile        free  (auto: no battery, electricity is treated as free)
+```
+
+The engine is chosen for you: `rx/*` and `panthera` are the Zig engine's
+territory, which is the 0 % fee one. Force the C++ engine with `--engine xmrig`
+if you are debugging, not because it is faster — it is not.
+
+## The endpoint is yours to supply
+
+The seven pool presets in the builder are Monero pools. Fees and endpoints for
+the smaller coins change too often for this repository to keep them accurate, so
+it does not carry them at all: `--coin wow` with no `--pool` is an error, not a
+guess.
+
+Get the endpoint from the coin's own community — usually a page or a pinned
+message in its chat — and pass it as `host:port`. If it publishes a separate TLS
+port, add `--tls`; if your network only allows 443, `--cloudflare=host:port`
+gives you WebSocket over TLS on the Zig engine.
+
+## What is checked, and what is not
+
+The builder validates a Monero address exactly: 95 characters, 106 for an
+integrated address, base58 alphabet only. For the other six coins it checks the
+alphabet and a plausible length, and warns when the prefix is not the one it
+knows — it does not claim to validate a checksum it does not compute. The pool
+does that, and it is the only party that can.
+
+A wrong address mines for somebody else, and no page in a browser can prove an
+address is yours. Copy it from your own wallet, paste it, read the first and last
+six characters against the wallet screen.
+
+## Which coin pays best
+
+There is no fixed answer: it changes with the price, the network hashrate and
+your own hashrate. So the site does not print a recommendation built on numbers
+from last year. It computes one from numbers you supply.
+
+<CoinMatrix />
+
+The arithmetic per coin:
+
+```text
+share       = rig H/s ÷ network H/s
+blocks/day  = 86400 ÷ block time
+coin/day    = share × blocks/day × block reward
+$/day       = coin/day × price
+```
+
+Fill in reward, block time and network hashrate from the coin's explorer, and the
+price either by hand or with the CoinGecko button. A row with a blank field shows
+which field is missing instead of a zero — a zero would sort to the bottom and
+read like a real answer.
+
+Two things this table cannot see:
+
+- **Pool luck and fees.** A small network's blocks are found rarely, so a rig at
+  0.1 % of it can wait days for a payout. That variance is real money on a
+  one-machine setup, and none of it is in a daily average.
+- **Exchange depth.** A coin's listed price means nothing if you cannot sell
+  what you mine. Check that a market exists before pointing a rig at a coin that
+  is new to you.
+
+## Staying current
+
+Nothing here is baked in at build time. Prices are fetched from CoinGecko only
+when you press the button, so the page works offline and no request leaves your
+browser before you ask. The figures you type stay in that browser.
+
+Re-check the numbers when the answer surprises you: a coin that leads by a factor
+of ten is usually a stale network hashrate, not a tenfold opportunity.
+
+:::note Keeping the rig working
+Mining a different coin is a configuration change, not a different installer. If
+the coin's pool also pays for other algorithms, leave `--coin` off and let the
+pool pick: zmrig advertises the whole family at login, so the rig can move
+between them without a reinstall.
+:::

@@ -60,8 +60,9 @@ site/
 ├── sidebars.js             one ordered sidebar; every page is listed by id
 ├── docs/                   English pages (the source of truth for facts)
 ├── i18n/vi/                Vietnamese pages + theme strings
-├── src/lib/                pools, command builder, report codes, messages
-├── src/components/         PoolTable, InstallBuilder, ProfitCalculator, CopyButton
+├── src/lib/                pools, coins, command builder, report codes, messages
+├── src/components/         PoolTable, InstallBuilder, ProfitCalculator,
+│                           CoinMatrix, CopyButton
 ├── src/theme/              ColorModeToggle: system / light / dark
 ├── src/pages/index.jsx     the home page
 ├── static/img/             logo and the donation QR
@@ -71,6 +72,16 @@ site/
 `src/lib/*.mjs` is deliberately free of React and of the DOM: the components
 render it and `site/tests/*.test.mjs` calls it directly, so the page and the
 tests cannot disagree about what a command or a payout means.
+
+`src/lib/coins.mjs` is the one list of coins behind the builder, the calculator
+and the docs page. It carries the algorithm each coin is mined with, the address
+shape this repository can actually check, and network defaults — which only
+Monero has. A coin without numbers is `null`, never a plausible-looking guess:
+`rankCoins` reports the fields a row is missing so the table can say "missing
+network hashrate" instead of drawing a zero that reads like $0.00/day. Adding a
+coin means editing that file and the two pages under `docs/pools/coins.mdx`;
+`site/tests/coins.test.mjs` fails if the new entry claims an algorithm no engine
+implements, ships a pool preset for a non-Monero coin, or invents a price.
 
 ## Search: Algolia DocSearch
 

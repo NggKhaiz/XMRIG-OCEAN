@@ -22,10 +22,12 @@
   --ifm-color-primary-light: #d54a10;
   --ifm-color-primary-lighter: #dd5217;
   --ifm-color-primary-lightest: #ec6f3b;
-  --ifm-font-family-base: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    Roboto, "Helvetica Neue", Arial, sans-serif;
-  --ifm-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono",
-    Menlo, Consolas, "Liberation Mono", monospace;
+  --ifm-font-family-base:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --ifm-font-family-monospace:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
   --ifm-heading-font-weight: 650;
   --ifm-code-font-size: 0.86em;
   --ifm-line-height-base: 1.65;
@@ -735,4 +737,91 @@
     white-space: nowrap;
     border: 0;
   }
+}
+
+/* Coin comparison — a ranking table first, the inputs second. The inputs are
+ * behind a <details> because they are visited once per coin, while the ranking
+ * is read every time. */
+.zm-coins {
+  margin: 1.5rem 0;
+}
+
+.zm-best {
+  border: 1px solid var(--zm-rule);
+  border-left: 3px solid var(--zm-accent);
+  border-radius: 10px;
+  padding: 0.8rem 0.9rem;
+  margin: 1rem 0;
+  background: var(--zm-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  align-items: flex-start;
+}
+
+.zm-best.is-empty {
+  border-left-color: var(--zm-rule);
+}
+
+.zm-best__value {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.zm-best__line {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--zm-ink-soft);
+}
+
+.zm-table--coins .is-best td,
+.zm-table--coins .is-best th {
+  background: var(--zm-accent-soft);
+}
+
+.zm-table--coins .is-best .zm-rig-name {
+  color: var(--zm-accent);
+}
+
+.zm-coins__edit {
+  border: 1px solid var(--zm-rule);
+  border-radius: 10px;
+  padding: 0.6rem 0.9rem;
+  margin: 1rem 0;
+}
+
+.zm-coins__edit > summary {
+  cursor: pointer;
+  font-weight: 650;
+  font-size: 0.9rem;
+}
+
+.zm-coins__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0 1.2rem;
+}
+
+.zm-coins__fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.6rem;
+}
+
+.zm-coins__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.zm-coins__field .zm-label {
+  margin: 0.2rem 0 0;
+  font-size: 0.68rem;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+
+.zm-coins__field .zm-input--tiny {
+  width: 6.5rem;
 }
