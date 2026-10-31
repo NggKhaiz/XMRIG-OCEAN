@@ -1,4 +1,9 @@
-# Website: wizard cài đặt + tài liệu + bảng tính lợi nhuận
+# Website cũ: wizard cài đặt + tài liệu + bảng tính lợi nhuận
+
+> **Trang web đang phục vụ người dùng là `site/`** (Docusaurus, hai ngôn ngữ),
+> xuất bản ở gốc repo bởi `scripts/publish-site.sh`; xem `doc/DOCS-SITE.md`.
+> Thư mục `web/` được giữ lại làm lịch sử và làm wizard dự phòng — nó vẫn chạy
+> nguyên vẹn, nhưng nội dung mới chỉ được viết trong `site/docs/`.
 
 Trang tĩnh, không build step, không dependency. Mở là chạy; deploy được nguyên thư mục `web/` lên Cloudflare Pages hoặc Vercel.
 

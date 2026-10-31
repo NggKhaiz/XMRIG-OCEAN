@@ -1,0 +1,86 @@
+---
+title: Máy tính lợi nhuận
+description: Dán mã ZMRIG1. các máy bạn in ra và xem hashrate, công suất tại ổ cắm, tiền điện, doanh thu và lợi nhuận từng máy và cả fleet. Chạy hoàn toàn trong trình duyệt.
+---
+
+import ProfitCalculator from '@site/src/components/ProfitCalculator';
+
+# Máy tính lợi nhuận
+
+Mục đích của trang này là một quyết định: giữ máy này, bỏ máy kia, và giá điện
+bao nhiêu thì mỗi bên hoà vốn. Nó không ở đây để làm con số trông đẹp hơn.
+
+<ProfitCalculator />
+
+## Công thức
+
+Với mỗi máy:
+
+```text
+hashrate    H/s      từ cửa sổ bạn chọn (10 s / 60 s / 15 phút / tốt nhất)
+công suất   W wall   = W_CPU / (hiệu suất PSU / 100) + điện nền
+điện        kWh/ngày = W wall × 24 / 1000
+tiền điện   $/ngày   = kWh/ngày × giá điện
+doanh thu   XMR/ngày (một trong hai mô hình dưới)
+lợi nhuận   $/ngày   = doanh thu × giá XMR − tiền điện
+hiệu suất   H/W      = hashrate / W wall
+```
+
+Hai mô hình doanh thu, vì chúng trả lời hai câu hỏi khác nhau:
+
+**Theo tỉ lệ của pool.** Bạn nhập `XMR trên mỗi kH/s mỗi ngày` — con số pool hiện
+trên dashboard.
+
+```text
+XMR/ngày = (hashrate / 1000) × xmr_per_khs_day
+```
+
+Đây là con số trung thực với pool đổi thuật toán như MoneroOcean, vì phần đổi
+thuật toán đã nằm trong tỉ lệ của pool.
+
+**Theo hashrate mạng.** Bỏ qua đổi thuật toán, nên dùng để đối chiếu:
+
+```text
+block/ngày = (hashrate / hashrate_mạng) × 720
+XMR/ngày   = block/ngày × thưởng_block × (1 − phí_pool)
+```
+
+Tail emission trả 0.6 XMR mỗi block, 720 block một ngày.
+
+## Vì sao phải đo công suất
+
+Máy tính cộng thêm điện nền (mặc định 25 W) và chia cho hiệu suất PSU (87 %) vì
+con số trong mã báo cáo là công suất **package CPU**: nó không gồm mainboard, ổ
+cứng, quạt và mất mát của PSU.
+
+Ba mức chính xác:
+
+1. **Ổ đo ở ổ cắm** — chỉ đây là chính xác. Đọc watt rồi gõ vào cột công suất,
+   hoặc truyền `--power W`; giá trị `user` được dùng nguyên, không quy đổi.
+2. **RAPL / hwmon** — `zmrig --report` đọc khi kernel cung cấp. Đó là package;
+   cộng thêm 15–30 W cho phần còn lại, hai ô cài đặt chính là để làm việc này.
+3. **Đoán theo TDP** — sai 30–50 % là bình thường. Có máy sẽ cần ổ đo thật.
+
+Trường `pwsrc` trong mã nói con số đến từ đâu. Nếu là `none`, hãy nhập tay.
+
+## Đọc kết quả
+
+Một máy 2 vCPU, 814 H/s, package 45 W, PSU 87 %, điện nền 25 W, điện 0.10 $/kWh:
+
+```text
+W wall    = 45 / 0.87 + 25            = 76.7 W
+điện      = 76.7 × 24 / 1000          = 1.84 kWh/ngày
+tiền điện = 1.84 × 0.10               = $0.184/ngày
+doanh thu = 0.814 × 0.000096 × $300   = $0.0234/ngày
+lợi nhuận = 0.0234 − 0.184            = −$0.16/ngày
+```
+
+Đó là câu trả lời trung thực cho một VPS thuê ở giá điện châu Âu: đào Monero
+trên CPU đa dụng thì lỗ. Một máy bạn đã có sẵn, điện gần như miễn phí, là phép
+tính khác — và đó chính là trường hợp phần mềm này được làm ra.
+
+:::note Máy tính không thể biết
+Độ khó mạng, giá coin và may mắn của share thay đổi liên tục. Mọi thứ ở đây là
+ước lượng dựng trên số đo của chính miner bạn; con số cứng duy nhất là hashrate
+và, khi dùng `--power`, là số watt.
+:::

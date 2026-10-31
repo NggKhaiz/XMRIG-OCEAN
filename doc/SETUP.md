@@ -136,33 +136,21 @@ passwordless sudo the tests expect. Worth the 15 lines — a shell bug in the
 installer is cheap to catch here and expensive to ship, because it only shows up
 on a user's machine.
 
-## 3b. CI: the site job (still manual)
+## 3b. CI: the docs-site job (still manual)
 
-`.github/workflows/test.yml` builds the C++ miner on Linux x64/arm64, macOS and
-Windows. It does **not** run the site tests, because adding a job means editing a
-file under `.github/workflows/`, and that needs the `workflows` token scope —
-this environment has no such token, so the push is rejected. Everything else is
-ready; the job is four lines of YAML.
+`site.yml` exists and runs the previous site's tests (`npm run test:web`). It does
+not run the Docusaurus suite, and adding a job means editing a file under
+`.github/workflows/`, which needs the `workflows` token scope — this environment
+does not have it, so the push is rejected. Everything else is ready; the job is
+twenty lines of YAML.
 
-Create **`.github/workflows/site.yml`** (new file, so no merge conflict with
-upstream):
+Add this job to **`.github/workflows/site.yml`** next to the existing one:
 
 ```yaml
-name: Site tests
-
-on:
-  push:
-  pull_request:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-jobs:
-  site:
-    name: Site tests and donation guard
+  docs:
+    name: Documentation site
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -173,31 +161,37 @@ jobs:
         with:
           node-version: '22'
 
-      # package-lock.json is not committed, so this is `npm install`, not `npm ci`.
-      # --no-save keeps package.json untouched inside the runner.
-      - name: Install jsdom
-        run: npm install --no-audit --no-fund --no-save jsdom
+      # site/package-lock.json is not committed, so this is install, not ci.
+      - name: Install
+        run: cd site && npm install --no-audit --no-fund
 
-      - name: Run site tests
-        run: npm run test:web
+      - name: Unit tests (builder, calculator, pools, i18n)
+        run: cd site && npm test
+
+      - name: Build both locales
+        run: cd site && npm run build
+
+      - name: The committed site is current
+        run: ./scripts/publish-site.sh --check
+
+      - name: Published tree
+        run: bash tests/docs/pages.sh && bash tests/docs/links.sh
 ```
 
-What it proves: the command builder assembles the flags it promises, every
-documentation page renders, raw HTML in Markdown stays escaped, `javascript:`
-links are dropped, and **every published copy of the donation address equals the
-wallet `pool/src/operator.js` decodes to** — a typo in an address fails the build
-instead of sending somebody's money nowhere.
+What it proves: the command builder assembles the flags it promises, the
+calculator's arithmetic matches hand-computed numbers, the pool table agrees with
+`oneclick.sh` and `doc/POOLS.md`, every English page has a Vietnamese
+counterpart, both locales build with no broken link, and the copy committed at the
+repository root is the one that was just built — so a content change cannot ship
+without being published.
 
-Do the same edit in the GitHub web editor if you prefer: *Add file → Create new
-file*, paste, commit straight to `BETA`. There is no scope problem on the web UI
-because there the token is yours, not this session's.
+`publish-site.sh --check` runs `npm run build` again inside itself; on a cold
+runner that is the slowest step, and it can be dropped if the two builds ever
+disagree.
 
-Check:
-
-```bash
-gh workflow list                      # "Site tests" appears
-gh run list --workflow site.yml       # a green run after the next push
-```
+The donation guard it used to run still matters: every published copy of the
+address must equal the wallet `pool/src/operator.js` decodes to. That check lives
+in `web/tests/donate.test.js` and stays in the existing job.
 
 ### Optional: the release workflow
 
@@ -215,148 +209,95 @@ get a prebuilt binary.
 
 ## 4. Publish the documentation site
 
-`web/` is static: no build step, no framework, no analytics. Three ways to host
-it; pick one. GitHub Pages matches the `homepage` field that is already set.
-
-### 4a. GitHub Pages (matches the `homepage` field)
-
-The workflow is already in the repository: `.github/workflows/pages.yml`
-publishes `web/` on every push to `BETA`. One setting has to match it, and it is
-the only part of this document that cannot be done from the API.
-
-**Settings → Pages → Build and deployment → Source: `GitHub Actions`.**
-Not "Deploy from a branch".
-
-That distinction is the difference between a working site and the GitHub 404
-page ("The site configured at this address does not contain the requested
-file"): with a branch source, GitHub publishes the repository root, and the
-repository root has no site in it.
-
-If the branch source is what you want anyway (no Actions minutes), the
-repository still works, with one visible difference in the URL:
-
-| Source | Site URL | Notes |
-|---|---|---|
-| GitHub Actions | `https://nggkhaiz.github.io/ZMRIG/` | clean URLs, this is what the README links to |
-| Deploy from a branch → `BETA` / (root) | `https://nggkhaiz.github.io/ZMRIG/web/` | `/index.html` and `/404.html` at the root redirect every path into `web/`, so no link 404s, but `/ZMRIG/` becomes `/ZMRIG/web/` |
-
-Both modes are covered by `npm run test:pages` (21 checks): an entry point in
-`web/`, the branch-root redirect executed against eight paths, no root-absolute
-link (the site is served under `/ZMRIG/`, not `/`), every `href`/`src` and
-in-page `#anchor` resolving, the docs manifest and its Markdown files, only
-existing pages in `sitemap.xml`, a CSP `<meta>` on every page, and the workflow
-uploading `web/` on a push to `BETA`. `.nojekyll` is present at both the root
-and in `web/`, so nothing is passed through Jekyll.
-
-While the source is a branch, the `Deploy site` workflow still runs on a push to
-`BETA` and its `deploy` job fails: `deploy-pages` refuses to publish when the
-site is configured for a branch. That failure is expected in that mode and says
-nothing about the site. If the red X is annoying, this is the replacement for
-`.github/workflows/pages.yml` — it asks the API which mode is active and only
-deploys in `workflow` mode, with the two site checks in front of it:
-
-```yaml
-name: Deploy site
-on:
-  push:
-    branches: [BETA]
-  workflow_dispatch:
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-concurrency:
-  group: pages
-  cancel-in-progress: false
-jobs:
-  checks:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v5
-      - run: bash tests/docs/links.sh
-      - run: bash tests/docs/pages.sh
-  mode:
-    runs-on: ubuntu-24.04
-    outputs:
-      build_type: ${{ steps.pages.outputs.build_type }}
-    steps:
-      - id: pages
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          build_type=$(gh api "repos/${GITHUB_REPOSITORY}/pages" --jq .build_type 2>/dev/null || echo disabled)
-          echo "build_type=${build_type}" >> "$GITHUB_OUTPUT"
-          if [ "$build_type" != workflow ]; then
-            echo "::warning title=Pages source::Set Settings → Pages → Source to \"GitHub Actions\"; the site is currently served from /web/ instead."
-          fi
-  build:
-    needs: [checks, mode]
-    if: needs.mode.outputs.build_type == 'workflow'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: web
-  deploy:
-    needs: build
-    if: needs.mode.outputs.build_type == 'workflow'
-    runs-on: ubuntu-24.04
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v5
-```
-
-Check the deployed result:
+The site is Docusaurus, in `site/`. Two locales, 21 pages each, and three
+calculators that run entirely in the browser. `doc/DOCS-SITE.md` describes the
+project; this section is only about publishing it.
 
 ```bash
-curl -sI https://nggkhaiz.github.io/ZMRIG/ | head -3     # 200
-curl -s  https://nggkhaiz.github.io/ZMRIG/robots.txt     # User-agent: *
+cd site && npm install && npm run build     # writes site/build
+cd .. && ./scripts/publish-site.sh          # copies it into the repository root
 ```
 
-`web/404.html` is used automatically for unknown paths. `web/_headers` is a
-Cloudflare Pages file and is ignored by GitHub Pages — the CSP then comes from
-the `<meta>` tags already in the pages; if you want real response headers, use
-4b.
+`publish-site.sh` replaces only the paths Docusaurus owns (`index.html`,
+`404.html`, `search.html`, `search-index.json`, `sitemap.xml`, `assets/`,
+`docs/`, `vi/`, `img/`) and never deletes `web/`. `--check` fails when the
+committed copy is older than `site/build`, which is what CI runs.
 
-### 4b. Cloudflare Pages (best headers, free)
+### 4a. GitHub Pages (the live site)
 
-Connect the repository, then set:
+Pages for this repository is set to **Deploy from a branch → `BETA` → `/`**, so
+the branch root is the published site and the built output has to be committed.
+That is why the root contains `docs/`, `vi/` and `assets/` as generated
+directories — do not edit them by hand.
+
+**Settings → Pages → Build and deployment → Source: `Deploy from a branch`,
+Branch: `BETA`, folder: `/ (root)`.**
+
+The API refuses to change this with the token available to a workflow
+(`403` on both `build_type` and `source`), so it stays a manual step.
+
+| URL | What |
+| --- | --- |
+| `https://nggkhaiz.github.io/ZMRIG/` | home page (English) |
+| `https://nggkhaiz.github.io/ZMRIG/docs/intro` | documentation |
+| `https://nggkhaiz.github.io/ZMRIG/vi/docs/intro` | the same page in Vietnamese |
+| `https://nggkhaiz.github.io/ZMRIG/web/wizard.html` | the previous static wizard, still served |
+
+`.nojekyll` at the root stops Jekyll from touching `assets/` (Docusaurus emits
+files beginning with `_`). `404.html` is generated, with the site's own
+navigation, so a wrong URL is a useful page rather than a dead end.
+
+Verify after a publish:
+
+```bash
+curl -sI https://nggkhaiz.github.io/ZMRIG/docs/intro | head -1     # 200
+curl -s  https://nggkhaiz.github.io/ZMRIG/robots.txt | tail -1     # Sitemap: …
+bash tests/docs/pages.sh                                           # 17 checks locally
+```
+
+If Pages is ever switched to **Source: GitHub Actions**, point the workflow at
+`site/build` instead and stop committing the output — `baseUrl` stays
+`/ZMRIG/`. Until then the `Deploy site` workflow's deploy job fails by design in
+branch mode and can be ignored.
+
+### 4b. Cloudflare Pages
+
+Same build, different host, and real response headers:
 
 | Field | Value |
-|---|---|
-| Framework preset | None |
-| Build command | *(empty)* |
-| Build output directory | `web` |
+| --- | --- |
+| Root directory | `site` |
+| Framework preset | Docusaurus |
+| Build command | `npm ci && npm run build` |
+| Build output directory | `build` |
 
-`web/_headers` is honoured here, so the strict CSP (no inline script, no
-third-party origin except `api.coingecko.com`) is sent as a real header.
+Set `ALGOLIA_APP_ID`, `ALGOLIA_API_KEY` and `ALGOLIA_INDEX_NAME` as environment
+variables if DocSearch is approved. On a custom domain, change `url` in
+`site/docusaurus.config.js` first — `baseUrl` stays `/` only for a root domain.
 
 ### 4c. Vercel
 
-Import the repository, **Root Directory = `web`**, Framework preset *Other*,
-build command empty, output directory `.`. `web/vercel.json` already carries the
-same CSP and cache headers. Or from a terminal:
+Root directory `site`, framework *Docusaurus*, build `npm run build`, output
+`build`. Or from a terminal:
 
 ```bash
-cd web && npx vercel deploy --prod
+cd site && npx vercel deploy --prod
 ```
 
 ### After choosing a domain
 
-`web/sitemap.xml` and `web/robots.txt` contain absolute URLs for
-`https://nggkhaiz.github.io/ZMRIG/`. If you deploy elsewhere, one command fixes
-both the files and every cross-reference:
+`site/docusaurus.config.js` holds `url` and `baseUrl`, and every canonical link,
+sitemap entry and `og:url` is derived from them. Change those two values, then:
 
 ```bash
-NEW=https://pool.example.com
-sed -i "s#https://nggkhaiz.github.io/ZMRIG#$NEW#g" web/sitemap.xml web/robots.txt web/index.html web/docs.html README.md
-grep -rn "nggkhaiz.github.io" web README.md    # must print nothing
+cd site && npm run build && cd ..
+./scripts/publish-site.sh
+sed -i "s#https://nggkhaiz.github.io/ZMRIG#https://your.domain#g" robots.txt
+bash tests/docs/pages.sh
 ```
+
+`tests/docs/pages.sh` derives its expectations from `baseUrl`, so a forgotten
+path fails there rather than in a browser.
 
 ---
 
