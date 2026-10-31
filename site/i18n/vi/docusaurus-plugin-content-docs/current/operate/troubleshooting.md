@@ -11,7 +11,7 @@ image: https://nggkhaiz.github.io/ZMRIG/img/og-vi.png
 | Triệu chứng | Nguyên nhân thường gặp | Làm gì |
 | --- | --- | --- |
 | `dataset ready` mất 20–30 s | bình thường: dựng 2 GiB | không phải lỗi; `--mode light` mất 0.6 s nhưng chỉ còn 9 % hashrate |
-| hashrate thấp hơn kỳ vọng 20–30 % | không được cấp huge pages | `grep HugePages /proc/meminfo`; log phải ghi `huge pages 2336 MB` |
+| hashrate thấp hơn kỳ vọng 20–30 % | không được cấp huge pages | `grep HugePages /proc/meminfo`; log phải ghi `huge pages … (explicit)`, không phải `(THP fallback)` |
 | process bị kill, exit 137 | hết RAM khi dựng dataset (huge pages đã giữ phần còn lại) | sửa phần đặt trước huge page, hoặc dùng `--mode light` |
 | `cannot read …: check the path or run as root` | config chỉ root đọc được | chạy bằng `sudo` |
 | `config ok` nhưng không đào gì | thiếu `-c`, hoặc chưa có pool | `--check` chỉ kiểm tra file được đưa |
@@ -23,6 +23,23 @@ image: https://nggkhaiz.github.io/ZMRIG/img/og-vi.png
 | `--tls-ca` không có tác dụng | file nằm trong `/tmp` mà unit dùng `PrivateTmp` | đặt ở `/etc/zmrig/tls-ca.pem` |
 
 ## Những bug đã sửa, để bạn không phải gặp
+
+- **Light mode crash trên Panthera/Scala.** Đoạn JIT đọc dataset dùng mask 2 GiB
+  của Monero, nên coin có dataset 32 MB truy cập vào vùng nhớ nó không sở hữu,
+  xa tới 2 GiB quá cuối cache 128 MB: `SIGSEGV` chỉ vài phần trăm giây sau khi
+  `--check` báo cấu hình ổn. Đoạn mã đó giờ được vá bằng mask của đúng thuật toán
+  đang chạy, giống cách đường đọc dataset vẫn làm. Mỗi thuật toán đều có vector
+  tham chiếu trong `--self-test`, nên lỗi này không quay lại trong im lặng.
+- **Mọi thuật toán bị tính theo cỡ Monero.** Miner đặt 2416 MB huge pages và từ
+  chối chạy nếu thiếu, bất kể coin nào. Panthera chỉ cần 192 MB; một VPS 512 MB
+  đào được nó ở fast mode. Mức đặt huge pages, quyết định `--mode=auto`, bước
+  kiểm tra RAM trước `--bench` và `zmrig-tune --algo` giờ đều đọc cấu hình đã
+  biên dịch của thuật toán.
+- **Đổi thuật toán làm rò 2.3 GiB.** Cache cấp bằng `posix_memalign` nhưng giải
+  phóng bằng `munmap`, nên các trang vẫn nằm trong ánh xạ. Pool xoay coin
+  (MoneroOcean có làm) sẽ làm máy hết RAM sau vài lần đổi. Cấp và giải phóng giờ
+  đi cùng một đường — `mmap`, nên bộ nhớ cũng không bị ghi hai lần trước khi
+  bộ khởi tạo dataset điền vào.
 
 - **`--background` bị bỏ qua** và miner ở lại foreground. Giờ nó fork, gọi
   `setsid` và đóng stdio.

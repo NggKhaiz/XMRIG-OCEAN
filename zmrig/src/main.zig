@@ -6,6 +6,7 @@ const std = @import("std");
 const api = @import("api.zig");
 const autotune = @import("autotune.zig");
 const hugepages_mod = @import("hugepages.zig");
+const memory_mod = @import("memory.zig");
 const job_mod = @import("job.zig");
 const log = @import("log.zig");
 const miner_mod = @import("miner.zig");
@@ -147,13 +148,22 @@ pub fn main() !void {
     }
 
     if (opts.self_test) {
-        const ok = try selfTest(allocator, opts.self_test_light);
+        const ok = try selfTest(allocator, firstAlgo(&opts), opts.self_test_light);
         std.process.exit(if (ok) 0 else 1);
     }
 
     // Both of these build their own dataset. If the machine cannot hold it
     // (another miner owns the huge pages), say so instead of being OOM-killed.
-    const dataset_mb: u64 = if (opts.mode == .light) 400 else 2400;
+    // The number follows the algorithm: asking for Monero's 2400 MB before a
+    // Panthera run that needs 192 MB refused to start on exactly the small
+    // hosts Scala is supposed to make usable.
+    const dataset_mb: u64 = blk: {
+        const algo = firstAlgo(&opts);
+        const mode: options.Mode = if (opts.mode == .auto) .fast else opts.mode;
+        const scratch_mb: u64 = 2 * @as(u64, opts.threads orelse 2);
+
+        break :blk memoryMb(algo, mode, miner_mod.totalMemory()) + scratch_mb + 64;
+    };
 
     if (opts.benchmark) {
         try requireMemory(dataset_mb);
@@ -1107,7 +1117,18 @@ fn printConfigSummary(opts: *const options.Options) !void {
     // that nobody reserved huge pages. Say it during --check, before the user
     // spends a night comparing screenshots of hashrate.
     if (opts.huge_pages) {
-        try out.print("  memory  {s}\n", .{hugePageStatus(opts.mode)});
+        // Say how much this coin needs, not just whether the pool is empty: on a
+        // host sized for Panthera (192 MB) a Monero run needs 2336 MB and the
+        // number is the only way to find that out before starting.
+        const algo = firstAlgo(opts);
+        const need_mb = memoryMb(algo, opts.mode, miner_mod.totalMemory());
+        var mem_buf: [160]u8 = undefined;
+
+        try out.print("  memory  {s}\n", .{
+            std.fmt.bufPrint(&mem_buf, "{s} maps {d} MB, {d} pages of 2 MiB: {s}", .{
+                algo.label(), need_mb, (need_mb + 1) / 2, hugePageStatus(opts),
+            }) catch "cannot describe the memory this mode needs",
+        });
     }
 
     // MSR is read-only here: probe the first CPU, never write during --check.
@@ -1281,7 +1302,8 @@ fn runAutotune(
 fn autoReserveHugePages(opts: *const options.Options, logger: *@import("log.zig").Logger) void {
     if (!opts.huge_pages or !opts.auto_hugepages) return;
 
-    const need_mb = datasetMb(opts.mode, miner_mod.totalMemory());
+    const algo = firstAlgo(opts);
+    const need_mb = memoryMb(algo, opts.mode, miner_mod.totalMemory());
     const before = hugepages_mod.read();
 
     switch (hugepages_mod.shouldReserve(need_mb, true, before)) {
@@ -1301,8 +1323,8 @@ fn autoReserveHugePages(opts: *const options.Options, logger: *@import("log.zig"
     };
 
     if (after >= want) {
-        logger.info("huge pages: reserved {d} pages of 2 MiB ({d} MB), the RandomX dataset now uses 2 MiB pages", .{
-            after, after * before.page_kb / 1024,
+        logger.info("huge pages: reserved {d} pages of 2 MiB ({d} MB) for {s}, so RandomX reads its cache and dataset through 2 MiB pages", .{
+            after, after * before.page_kb / 1024, algo.label(),
         });
 
         return;
@@ -1312,23 +1334,40 @@ fn autoReserveHugePages(opts: *const options.Options, logger: *@import("log.zig"
     logger.warn("huge pages: only {d} of {d} pages could be reserved (fragmented memory?); mining continues on a mix of page sizes", .{ after, want });
 }
 
-/// How much RandomX memory a mode needs, in MiB. `auto` resolves exactly the
-/// way `Miner.init` does, so `--check` cannot promise 2 MiB pages for a dataset
-/// the miner will not build on a small box.
-fn datasetMb(mode: options.Mode, total_ram: u64) u64 {
-    const fast = switch (mode) {
-        .light => false,
-        .fast => true,
-        .auto => total_ram >= 3 * 1024 * 1024 * 1024,
-    };
+/// The algorithm this run will hash first. `--algo` pins one; without it the
+/// pool decides, and the honest assumption before the first job is Monero —
+/// the largest configuration in the tree, so a reservation made for it covers
+/// the others too.
+fn firstAlgo(opts: *const options.Options) api.Algo {
+    return opts.algo orelse .rx_0;
+}
 
-    return if (fast) 2416 else 320;
+/// Bytes of RandomX memory a mode needs for one algorithm. `auto` resolves
+/// exactly the way `Miner.init` does, so `--check` cannot promise 2 MiB pages
+/// for a dataset the miner will not build on a small box.
+///
+/// The number is per algorithm because the configurations are not the same
+/// size: RandomX/Scala (Panthera) needs 128 MiB of cache and a 64 MiB dataset,
+/// where Monero wants 256 MiB and 2080. Assuming Monero's 2.4 GiB is what made
+/// a 512 MiB VPS fall back to light mode on a coin it could have mined in fast
+/// mode with 2 MiB pages.
+fn sizesFor(algo: api.Algo) memory_mod.Sizes {
+    return .{ .cache = algo.cacheBytes(), .dataset = algo.datasetBytes() };
+}
+
+fn memoryFor(algo: api.Algo, mode: options.Mode, total_ram: u64) u64 {
+    return memory_mod.bytesFor(sizesFor(algo), mode, total_ram);
+}
+
+/// The same figure in MiB, rounded up, for the messages and the huge-page plan.
+fn memoryMb(algo: api.Algo, mode: options.Mode, total_ram: u64) u64 {
+    return memory_mod.mibFor(sizesFor(algo), mode, total_ram);
 }
 
 /// Reads the kernel's huge page pool and turns it into one sentence a human can
 /// act on. Kept separate so --check and the warning in miner.zig agree.
-fn hugePageStatus(mode: options.Mode) []const u8 {
-    const needed_mb = datasetMb(mode, miner_mod.totalMemory());
+fn hugePageStatus(opts: *const options.Options) []const u8 {
+    const needed_mb = memoryMb(firstAlgo(opts), opts.mode, miner_mod.totalMemory());
     const pages_needed = (needed_mb + 1) / 2;
 
     var buf: [32]u8 = undefined;
@@ -1419,10 +1458,30 @@ const vectors = struct {
     const input_a = "xmrig-mo-check-hashes input A";
     const input_b = "xmrig-mo-check-hashes input B";
     const input_c = "xmrig-mo-check-hashes input C";
-    const rx0_a = "1833ff322e60dad7d6885bcd5e0844ec8e4808a47d8d354806668f0c241a6af5";
+
+    /// One known answer per configuration, taken from `tests/hash/main.cpp` -
+    /// the vectors this repository already trusts. Before this existed the self
+    /// test only knew how to hash Monero, so `--self-test --algo=panthera`
+    /// happily verified rx/0 and reported success for a coin it never touched.
+    /// rx/2 is absent because no coin uses it and upstream v6.26's interpreter
+    /// and JIT disagree on it - there is no answer to check against.
+    const Known = struct {
+        algo: api.Algo,
+        hex: []const u8,
+    };
+
+    const known = [_]Known{
+        .{ .algo = .rx_0, .hex = "1833ff322e60dad7d6885bcd5e0844ec8e4808a47d8d354806668f0c241a6af5" },
+        .{ .algo = .rx_wow, .hex = "45896210539d9ba37377b9c186b7343304cd6bf797c75f3d1087ee63f22a73e4" },
+        .{ .algo = .rx_arq, .hex = "ca2b7afe5c50ab45296c5457337ff7cf27624139f05ec5d44c1e4ae8bfe95bb6" },
+        .{ .algo = .rx_graft, .hex = "c4a9cfd2f0a9359c78f089902b44b42623fbf18a1a01786879bfed3f0be255f7" },
+        .{ .algo = .rx_sfx, .hex = "3b88936e289ff3240dc074b289fe6464194bdfe31a80c9dc10c9c1eaa1975513" },
+        .{ .algo = .rx_yada, .hex = "04d68fb9c445f4437dfce6ebb8028367b060140066ebaa416a4cd2ca63cdb723" },
+        .{ .algo = .rx_xla, .hex = "1805aa4fd26f5686dada26d9e16ccb290811b2a79404fdd1064f1ca092902212" },
+    };
 };
 
-fn selfTest(allocator: std.mem.Allocator, light_only: bool) !bool {
+fn selfTest(allocator: std.mem.Allocator, primary: api.Algo, light_only: bool) !bool {
     _ = allocator;
 
     var failures: usize = 0;
@@ -1430,73 +1489,33 @@ fn selfTest(allocator: std.mem.Allocator, light_only: bool) !bool {
 
     try out.print("hash engine: {s}\n", .{api.xmo_engine_name()});
 
-    // Light mode first: 256 MiB cache, no dataset.
-    {
-        var engine = api.Wrapped.create(.rx_0, .{ .full_memory = false }) catch {
-            try out.writeAll("FAIL cannot create the hash engine\n");
-
-            return false;
-        };
-        defer engine.destroy();
-
-        engine.seed(vectors.seed, 1) catch {
-            try out.writeAll("FAIL cannot initialise the cache\n");
-
-            return false;
-        };
-
-        const vm = engine.createVm(false) catch {
-            try out.writeAll("FAIL cannot create a VM\n");
-
-            return false;
-        };
-        defer api.xmo_vm_free(vm);
-
-        var expected: [32]u8 = undefined;
-        _ = try util.hexToBytes(&expected, vectors.rx0_a);
-
-        var hash_a: [32]u8 = undefined;
-        var hash_b: [32]u8 = undefined;
-        api.xmo_hash(vm, vectors.input_a.ptr, vectors.input_a.len, &hash_a);
-
-        if (std.mem.eql(u8, &hash_a, &expected)) {
-            try out.writeAll("PASS rx/0 reference vector\n");
-        } else {
-            const got = try util.bytesToHex(std.heap.page_allocator, &hash_a);
-            defer std.heap.page_allocator.free(got);
-
-            try out.print("FAIL rx/0 reference vector\n  got  {s}\n  want {s}\n", .{ got, vectors.rx0_a });
+    // Light mode proves the cache, the JIT and every algorithm's program: the
+    // cache is what defines the hash, and it fits in a few hundred MiB, so all
+    // seven configurations can be checked in one run on any machine.
+    for (vectors.known) |known| {
+        const checked = lightCheck(known.algo, known.hex, out) catch |e| {
+            try out.print("FAIL {s} light mode: {s}\n", .{ known.algo.label(), @errorName(e) });
             failures += 1;
-        }
 
-        api.xmo_hash(vm, vectors.input_b.ptr, vectors.input_b.len, &hash_b);
+            continue;
+        };
 
-        var temp: [8]u64 align(64) = undefined;
-        var next_a: [32]u8 = undefined;
-        var next_b: [32]u8 = undefined;
-
-        api.xmo_hash_first(vm, vectors.input_a.ptr, vectors.input_a.len, &temp);
-        api.xmo_hash_next(vm, &temp, vectors.input_b.ptr, vectors.input_b.len, &next_a);
-        api.xmo_hash_next(vm, &temp, vectors.input_c.ptr, vectors.input_c.len, &next_b);
-
-        if (std.mem.eql(u8, &next_a, &hash_a) and std.mem.eql(u8, &next_b, &hash_b)) {
-            try out.writeAll("PASS pipelined hashing\n");
-        } else {
-            try out.writeAll("FAIL pipelined hashing does not match one-shot hashing\n");
-            failures += 1;
-        }
+        if (!checked) failures += 1;
     }
 
-    // Full memory mode must produce the same hashes. It needs 2.25 GiB, so it
-    // only runs when the machine can actually hold the dataset right now - a
-    // running miner that already owns the pages would otherwise get OOM-killed.
-    const need: u64 = 2600 * 1024 * 1024;
+    // Full memory mode must produce the same hashes. It needs this
+    // algorithm's dataset, so it only runs when the machine can hold it right
+    // now - a running miner that already owns the pages would be OOM-killed.
+    const known = knownFor(primary) orelse vectors.known[0];
+    const sizes = memory_mod.Sizes{ .cache = primary.cacheBytes(), .dataset = primary.datasetBytes() };
+    const need = sizes.total() + memory_mod.slack_bytes;
+
     if (light_only) {
         try out.writeAll("SKIP full-memory test (light mode requested)\n");
-    } else if (miner_mod.totalMemory() < 3 * 1024 * 1024 * 1024 or miner_mod.memoryForDataset() < need) {
+    } else if (miner_mod.totalMemory() < need or miner_mod.memoryForDataset() < sizes.total()) {
         try out.writeAll("SKIP full-memory test (not enough free RAM while the miner is running)\n");
     } else {
-        var engine_full = api.Wrapped.create(.rx_0, .{ .full_memory = true }) catch null;
+        var engine_full = api.Wrapped.create(primary, .{ .full_memory = true }) catch null;
         if (engine_full) |*full| {
             defer full.destroy();
 
@@ -1513,16 +1532,16 @@ fn selfTest(allocator: std.mem.Allocator, light_only: bool) !bool {
             };
             defer api.xmo_vm_free(full_vm);
 
-            var expected: [32]u8 = undefined;
-            _ = try util.hexToBytes(&expected, vectors.rx0_a);
-
             var hash_full: [32]u8 = undefined;
             api.xmo_hash(full_vm, vectors.input_a.ptr, vectors.input_a.len, &hash_full);
 
+            var expected: [32]u8 = undefined;
+            _ = try util.hexToBytes(&expected, known.hex);
+
             if (std.mem.eql(u8, &hash_full, &expected)) {
-                try out.writeAll("PASS full-memory dataset matches the cache\n");
+                try out.print("PASS {s} full-memory dataset matches the cache\n", .{primary.label()});
             } else {
-                try out.writeAll("FAIL full-memory hash differs from the reference\n");
+                try out.print("FAIL {s} full-memory hash differs from the reference\n", .{primary.label()});
                 failures += 1;
             }
         } else {
@@ -1533,13 +1552,67 @@ fn selfTest(allocator: std.mem.Allocator, light_only: bool) !bool {
     if (failures == 0) {
         try out.writeAll("\nself test passed\n");
     } else {
-        try out.print("\n{d} self test failure(s)\n", .{failures});
+        try out.print("\n{d} check(s) failed\n", .{failures});
     }
 
     return failures == 0;
 }
 
-/// Exits with a readable message when the dataset cannot fit.
+fn knownFor(algo: api.Algo) ?vectors.Known {
+    for (vectors.known) |known| {
+        if (known.algo == algo) return known;
+    }
+
+    return null;
+}
+
+/// One light-mode engine, one reference hash, plus the pipelined path. Returns
+/// false when the hash is wrong; errors mean the engine could not start.
+fn lightCheck(algo: api.Algo, hex: []const u8, out: anytype) !bool {
+    var engine = try api.Wrapped.create(algo, .{ .full_memory = false });
+    defer engine.destroy();
+
+    try engine.seed(vectors.seed, 1);
+
+    const vm = try engine.createVm(false);
+    defer api.xmo_vm_free(vm);
+
+    var expected: [32]u8 = undefined;
+    _ = try util.hexToBytes(&expected, hex);
+
+    var hash_a: [32]u8 = undefined;
+    var hash_b: [32]u8 = undefined;
+    api.xmo_hash(vm, vectors.input_a.ptr, vectors.input_a.len, &hash_a);
+    api.xmo_hash(vm, vectors.input_b.ptr, vectors.input_b.len, &hash_b);
+
+    if (!std.mem.eql(u8, &hash_a, &expected)) {
+        const got = try util.bytesToHex(std.heap.page_allocator, &hash_a);
+        defer std.heap.page_allocator.free(got);
+
+        try out.print("FAIL {s} reference vector\n  got  {s}\n  want {s}\n", .{ algo.label(), got, hex });
+
+        return false;
+    }
+
+    try out.print("PASS {s} reference vector\n", .{algo.label()});
+
+    var temp: [8]u64 align(64) = undefined;
+    var next_a: [32]u8 = undefined;
+    var next_b: [32]u8 = undefined;
+
+    api.xmo_hash_first(vm, vectors.input_a.ptr, vectors.input_a.len, &temp);
+    api.xmo_hash_next(vm, &temp, vectors.input_b.ptr, vectors.input_b.len, &next_a);
+    api.xmo_hash_next(vm, &temp, vectors.input_c.ptr, vectors.input_c.len, &next_b);
+
+    if (!std.mem.eql(u8, &next_a, &hash_a) or !std.mem.eql(u8, &next_b, &hash_b)) {
+        try out.print("FAIL {s} pipelined hashing does not match one-shot hashing\n", .{algo.label()});
+
+        return false;
+    }
+
+    return true;
+}
+
 fn requireMemory(needed_mb: u64) !void {
     const memory = report.checkMemory(needed_mb);
     if (memory.ok) return;
@@ -1693,14 +1766,3 @@ test "reconnect backoff: quick first tries, then the configured pause" {
     try testing.expectEqual(@as(u64, 200), retryDelayMs(1, 1));
 }
 
-test "the memory a mode needs follows the same rule as the miner" {
-    const testing = std.testing;
-
-    const three_gib = 3 * 1024 * 1024 * 1024;
-
-    try testing.expectEqual(@as(u64, 320), datasetMb(.light, three_gib));
-    try testing.expectEqual(@as(u64, 2416), datasetMb(.fast, 512 * 1024 * 1024));
-    // auto: fast only on a box that can hold the 2 GiB dataset.
-    try testing.expectEqual(@as(u64, 2416), datasetMb(.auto, three_gib));
-    try testing.expectEqual(@as(u64, 320), datasetMb(.auto, 2 * 1024 * 1024 * 1024));
-}

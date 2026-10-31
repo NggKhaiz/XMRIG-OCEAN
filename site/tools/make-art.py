@@ -90,6 +90,23 @@ def clamp(text, width, fnt, draw):
     return text + "…"
 
 
+def draw_mark(d, x, y, size, colour):
+    """Pastes the ZMRIG mark into a card.
+
+    The geometry lives in `make-logo.py`, which is also what writes the SVGs and
+    the favicons; drawing it again here would be a second source of truth that
+    drifts the first time the mark changes.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("make_logo", Path(__file__).resolve().parent / "make-logo.py")
+    make_logo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(make_logo)
+
+    mark = make_logo.png(size, ink=(0, 0, 0, 255))
+    d._image.paste(mark, (int(x), int(y)), mark)
+
+
 def social_card(path, title, subtitle, rows, footer, locale_label, vietnamese=False):
     W, H = 1200, 630
     img = Image.new("RGB", (W, H), PAPER)
@@ -97,10 +114,8 @@ def social_card(path, title, subtitle, rows, footer, locale_label, vietnamese=Fa
 
     d.rectangle([0, 0, W, 6], fill=ACCENT)
 
-    # wordmark
-    d.rounded_rectangle([64, 56, 116, 108], radius=12, fill=ACCENT)
-    zf = font(MONO_BOLD, 34)
-    d.text((78, 68), "z", font=zf, fill=(255, 255, 255))
+    # wordmark: the same mark the site uses (cache core inside the dataset ring)
+    draw_mark(d, 64, 56, 52, INK)
     d.text((132, 68), "ZMRIG", font=font(SANS_BOLD, 30), fill=INK)
     tag = font(MONO, 17)
     d.text((132, 100), locale_label, font=font(SANS if vietnamese else MONO, 17), fill=INK_DIM)

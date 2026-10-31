@@ -91,7 +91,7 @@ is not.
 | --- | --- |
 | `/usr/local/bin/zmrig` | the Zig miner |
 | `/usr/local/bin/xmrig` | the C++ miner, when that engine is selected |
-| `/usr/local/bin/zmrig-tune` | host tuning (`--status`, `--hugepages 1G`, …) |
+| `/usr/local/bin/zmrig-tune` | host tuning (`--status`, `--hugepages 1G`, `--algo panthera` sizes the reservation for that coin, …) |
 | `/usr/local/bin/zmrig-bench` | reproducible hashrate measurement |
 | `/usr/local/bin/zmrig-verify` | the zero-fee audit |
 | `/etc/zmrig/config.json` | configuration, mode 600 |

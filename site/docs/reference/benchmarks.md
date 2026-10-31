@@ -58,17 +58,20 @@ The largest and least ambiguous effect. RandomX reads a 2 GiB dataset in a rando
 pattern, and 4 KiB pages mean constant TLB misses.
 
 ```bash
-# reserve 1234 pages of 2 MiB (≈2.4 GiB)
-echo 1234 | sudo tee /proc/sys/vm/nr_hugepages
+# reserve 1168 pages of 2 MiB (≈2.3 GiB) — the size of rx/0, not of every coin
+echo 1168 | sudo tee /proc/sys/vm/nr_hugepages
 grep HugePages_ /proc/meminfo
 ```
 
 The installer does this and writes it into the systemd unit
-(`LimitMEMLOCK=infinity`). To check the miner got them: startup logs
-`huge pages 2336 MB`, and the API reports `"hugepages": [1168, 1168]` (granted /
-needed).
+(`LimitMEMLOCK=infinity`). The count follows the coin: `panthera` needs 96 pages
+(192 MB), not 1168. `sudo zmrig-tune --algo panthera` writes the right one, and
+`zmrig` sizes its own reservation the same way. To check the miner got them:
+startup logs `huge pages … MB (explicit)`, and the API reports
+`"hugepages": [granted, needed]` — `[1168, 1168]` for `rx/0`, `[96, 96]` for
+`panthera`.
 
-A practical warning: with 1234 pages reserved, ordinary RAM is down to about
+A practical warning: with the full reservation in place, ordinary RAM is down to about
 1.2 GB. Running `--no-huge-pages` at that point gets OOM-killed (exit 137),
 because the 2 GiB dataset has nowhere to live. Lower `nr_hugepages` to 0 first.
 

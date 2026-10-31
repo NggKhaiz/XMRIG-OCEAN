@@ -6,8 +6,8 @@ image: https://nggkhaiz.github.io/ZMRIG/img/og-vi.png
 
 # Hiệu năng
 
-RandomX là proof-of-work phụ thuộc bộ nhớ: vòng hash đọc dataset 2 GiB theo thứ
-tự ngẫu nhiên. Gần như mọi thứ quan trọng suy ra từ đúng một câu đó.
+RandomX là proof-of-work phụ thuộc bộ nhớ: vòng hash đọc dataset theo thứ tự
+ngẫu nhiên. Gần như mọi thứ quan trọng suy ra từ đúng một câu đó.
 
 ## Ba đòn bẩy thật sự
 
@@ -15,13 +15,20 @@ tự ngẫu nhiên. Gần như mọi thứ quan trọng suy ra từ đúng một
 dataset lại thành một TLB miss.
 
 ```bash
-echo 1234 | sudo tee /proc/sys/vm/nr_hugepages    # ~2.4 GiB trang 2 MiB
+echo 1168 | sudo tee /proc/sys/vm/nr_hugepages    # ~2.3 GiB trang 2 MiB, cho Monero
 grep HugePages_ /proc/meminfo
 ```
 
-Installer làm việc này và đặt `LimitMEMLOCK=infinity` trong unit. Kiểm tra miner
-có lấy được: log khởi động in `huge pages 2336 MB`, API trả
-`"hugepages": [1168, 1168]` (được cấp / cần).
+Installer làm việc này và đặt `LimitMEMLOCK=infinity` trong unit. Con số này
+không cố định: nó là cache cộng dataset của coin đang đào — 1168 trang cho
+Monero, 96 trang cho Panthera/Scala (bảng bên dưới). `zmrig` tự tính mức đặt
+theo từng thuật toán, và `zmrig-tune --algo=` ghi đúng con số đó, nên
+`sudo zmrig-tune --algo panthera` chỉ đặt 192 MB chứ không phải 2.3 GB.
+
+Kiểm tra miner có lấy được: log khởi động in số byte thật sự đến từ huge pages
+tường minh (`huge pages 2336 MB (explicit)`), API trả
+`"hugepages": [được cấp, cần]` — `[1168, 1168]` với `rx/0`, `[96, 96]` với
+`panthera`.
 
 :::warning Đo khi không có huge pages
 Khi đã đặt 1234 trang, RAM thường chỉ còn khoảng 1.2 GB. Chạy `--no-huge-pages`
@@ -29,10 +36,32 @@ lúc đó sẽ bị OOM-kill (exit 137), vì dataset 2 GiB thứ hai không có 
 `nr_hugepages` về 0 trước khi đo trường hợp đó, và nhớ đặt lại.
 :::
 
-**Chế độ fast hay light.** `fast` dựng một dataset 2 GiB dùng chung cho mọi
-thread. `light` giữ cache 256 MiB và dựng lại dataset cho mỗi hash: 76 H/s so với
-814 H/s trên cùng máy. Light mode tồn tại cho VPS không cho nổi 2 GiB, không
-phải để tiết kiệm điện.
+**Chế độ fast hay light.** `fast` dựng một dataset dùng chung cho mọi thread.
+`light` giữ cache và dựng lại dataset cho mỗi hash: 76 H/s so với 814 H/s trên
+cùng máy (`rx/0`). Light mode tồn tại cho VPS không cho nổi RAM, không phải để
+tiết kiệm điện.
+
+`--mode=auto` chọn chế độ nào là tuỳ **coin**, vì các coin không cùng kích thước.
+Đây là số đo, không phải suy ra từ một hằng số:
+
+| Thuật toán | Coin | Cache | Dataset | Tổng | Vừa VPS 1 GiB? |
+| --- | --- | ---: | ---: | ---: | --- |
+| `rx/0` | Monero | 256 MB | 2080 MB | 2336 MB | chỉ light |
+| `rx/wow` | Wownero | 256 MB | 2080 MB | 2336 MB | chỉ light |
+| `rx/arq` | ArQmA | 256 MB | 2080 MB | 2336 MB | chỉ light |
+| `rx/graft` | Graft | 256 MB | 2080 MB | 2336 MB | chỉ light |
+| `rx/sfx` | Safex Cash | 256 MB | 2080 MB | 2336 MB | chỉ light |
+| `rx/yada` | YadaCoin | 256 MB | 2080 MB | 2336 MB | chỉ light |
+| `panthera` | Scala (XLA) | 128 MB | 64 MB | **192 MB** | được |
+
+Sáu nhánh RandomX có dataset cùng kích thước vì chúng chỉ đổi cấu hình chương
+trình, salt argon và số vòng lặp; Panthera là một cấu hình khác (`ArgonMemory`
+128 MB, `DatasetBaseSize` 32 MB).
+
+`zmrig --check` in con số cho đúng thuật toán bạn hỏi, và dataset được cấp theo
+cấu hình đã biên dịch chứ không theo `RANDOMX_DATASET_MAX_SIZE` — hằng số đó là
+2 GiB, và dùng nó cho một dataset 64 MB là cách một VPS 512 MB từ chối khởi động
+trên coin mà nó đào được.
 
 **Số thread.** Một thread mỗi core vật lý, hai mỗi core chỉ khi SMT giúp: trên
 máy test, hai thread trên hai vCPU cho 814 H/s và một thread cho 408 H/s, tức là

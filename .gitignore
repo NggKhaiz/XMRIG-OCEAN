@@ -17,6 +17,9 @@ scripts/deps
 # local tooling for the web tests (npm install --no-save jsdom)
 /node_modules
 
+# python bytecode from the site asset generators (site/tools/*.py)
+__pycache__/
+
 # proxy: generated WireGuard keys and per-rig configs (private keys)
 /proxy/wg
 /wg

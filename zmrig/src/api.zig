@@ -42,6 +42,24 @@ pub const Algo = enum(c_int) {
         return null;
     }
 
+    /// Bytes the dataset for this variant occupies, straight from the
+    /// configuration compiled into RandomX. Wownero is not Monero-sized and
+    /// Panthera is 64 MiB, not 2080: anything that reserves memory has to ask.
+    pub fn datasetBytes(self: Algo) usize {
+        return xmo_algo_dataset_memory(@intFromEnum(self));
+    }
+
+    /// Cache only. `--mode=light` never builds a dataset, so this is all it
+    /// needs.
+    pub fn cacheBytes(self: Algo) usize {
+        return xmo_algo_cache_memory(@intFromEnum(self));
+    }
+
+    /// Cache plus dataset — what a full-memory engine maps.
+    pub fn memoryBytes(self: Algo, full_memory: bool) usize {
+        return self.cacheBytes() + if (full_memory) self.datasetBytes() else 0;
+    }
+
     pub fn label(self: Algo) []const u8 {
         return switch (self) {
             .rx_0 => "rx/0",
@@ -111,6 +129,12 @@ pub extern fn xmo_msr_restore(report: [*]u8, report_len: usize) c_int;
 pub extern fn xmo_msr_probe(report: [*]u8, report_len: usize) c_int;
 pub extern fn xmo_set_optimized_dataset_init(value: c_int) void;
 pub extern fn xmo_engine_name() [*:0]const u8;
+
+/// Pure queries: they read the configuration table without creating an engine
+/// or touching the global RandomX state.
+pub extern fn xmo_algo_memory(algo: c_int, full_memory: c_int) usize;
+pub extern fn xmo_algo_dataset_memory(algo: c_int) usize;
+pub extern fn xmo_algo_cache_memory(algo: c_int) usize;
 
 /// Zig-side wrapper that keeps the "did it work" bookkeeping out of the miner.
 pub const Wrapped = struct {

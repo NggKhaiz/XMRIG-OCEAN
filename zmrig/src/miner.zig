@@ -13,6 +13,7 @@ const job_mod = @import("job.zig");
 const topology = @import("topology.zig");
 const log = @import("log.zig");
 const options = @import("options.zig");
+const memory_mod = @import("memory.zig");
 const stratum = @import("stratum.zig");
 
 pub const max_threads = 128;
@@ -247,6 +248,10 @@ pub const Engine = struct {
     flags: api.EngineFlags = .{},
     seed: [32]u8 = [_]u8{0} ** 32,
     has_seed: bool = false,
+    /// Suppress the "no huge pages" advisory when whoever reserved them has
+    /// already said it. Two warnings and two different page counts about the
+    /// same problem is how a reader stops trusting the log.
+    advise_hugepages: bool = true,
 
     const Self = @This();
 
@@ -316,7 +321,7 @@ pub const Engine = struct {
             huge_text,
         });
 
-        if (huge_total != 0 and huge_explicit != huge_total) {
+        if (self.advise_hugepages and huge_total != 0 and huge_explicit != huge_total) {
             // One actionable line, once per engine start. The exact command
             // depends on how much memory this mode needs.
             const need_pages = (huge_total + (2 * 1024 * 1024) - 1) / (2 * 1024 * 1024);
@@ -481,10 +486,21 @@ pub const Miner = struct {
         };
 
         if (opts.mode == .auto) {
-            // Fast mode needs ~2.25 GiB of RAM; use it when the box can hold it.
-            flags.full_memory = totalMemory() >= 3 * 1024 * 1024 * 1024;
+            // Fast mode is chosen per algorithm, because the algorithms are not
+            // the same size: Monero needs 2336 MiB, Panthera 192 MiB. A 1 GiB
+            // VPS can hash Scala through a 2 MiB-page dataset and cannot hash
+            // Monero that way at all, and the old fixed 3 GiB threshold sent
+            // both of them into light mode.
+            const algo = opts.algo orelse .rx_0;
+            const sizes = memory_mod.Sizes{ .cache = algo.cacheBytes(), .dataset = algo.datasetBytes() };
+            const need = sizes.total() + memory_mod.slack_bytes;
+            flags.full_memory = memory_mod.fullMemory(sizes, .auto, totalMemory());
             if (!flags.full_memory) {
-                logger.warn("less than 3 GiB of RAM, starting in light mode (256 MB cache)", .{});
+                logger.warn("less than {d} MB of RAM for {s}, starting in light mode ({d} MB cache, no dataset)", .{
+                    need / (1024 * 1024),
+                    algo.label(),
+                    algo.cacheBytes() / (1024 * 1024),
+                });
             }
         }
 
@@ -497,7 +513,11 @@ pub const Miner = struct {
 
         var miner = Self{
             .logger = logger,
-            .engine = Engine.init(logger, flags),
+            .engine = blk: {
+                var engine = Engine.init(logger, flags);
+                engine.advise_hugepages = !opts.auto_hugepages;
+                break :blk engine;
+            },
             .hw_threads = hw_threads,
             .affinity = opts.affinity,
             .affinity_mask = opts.affinity_mask,

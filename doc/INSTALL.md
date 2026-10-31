@@ -42,7 +42,7 @@ End state:
 | Path | What |
 |---|---|
 | `/usr/local/bin/zmrig` | the miner (the C++ engine installs as `xmrig`) |
-| `/usr/local/bin/zmrig-tune` | host tuning (`--status`, `--hugepages 1G`, …) |
+| `/usr/local/bin/zmrig-tune` | host tuning (`--status`, `--hugepages 1G`, `--algo panthera` sizes the reservation for that coin, …) |
 | `/usr/local/bin/zmrig-bench` | reproducible hashrate measurement |
 | `/usr/local/bin/zmrig-verify` | proves the binary has no developer fee |
 | `/etc/zmrig/config.json` | configuration (rewritten by autosave) |
