@@ -1,6 +1,7 @@
 ---
 title: Tham chiếu lệnh
 description: Mọi cờ của zmrig, nhóm theo thứ nó tác động, kèm kiểm tra config, self-test và autotune.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-vi.png
 ---
 
 # Tham chiếu lệnh

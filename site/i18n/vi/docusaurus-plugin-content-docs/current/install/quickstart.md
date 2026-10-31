@@ -1,6 +1,7 @@
 ---
 title: Cài trong một lệnh
 description: Cài ZMRIG bằng một lệnh và một địa chỉ ví. Installer tự quyết định những gì, in ra những gì, và kiểm tra thế nào là xong.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-vi.png
 ---
 
 # Cài trong một lệnh

@@ -1,6 +1,7 @@
 ---
 title: Tự dựng pool
 description: Một pool Monero bằng Node.js không dependency — phí 1 % đổi lấy gì, chạy thử trong năm phút, các lựa chọn hosting miễn phí, và quy tắc vận hành.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-vi.png
 ---
 
 # Tự dựng pool

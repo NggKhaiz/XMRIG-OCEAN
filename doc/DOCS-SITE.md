@@ -129,6 +129,36 @@ system. Docusaurus already stores `null` for that choice; the component exposes
 it. `docusaurus.config.js` sets `defaultMode: "light"` and
 `respectPrefersColorScheme: true`, so a first visit follows the operating system.
 
+## Social previews
+
+Two 1200×630 cards exist, `site/static/img/og-en.png` and `og-vi.png`. They are
+generated, not drawn by hand:
+
+```bash
+python3 site/tools/make-art.py
+```
+
+The script reads the pool rows out of `site/src/lib/pools.mjs`, so the card
+quotes the same fees and endpoints the page does. Vietnamese needs
+`DejaVu Sans` — the mono face on this machine has no Latin Extended Additional,
+and the diacritics come out as empty boxes.
+
+`themeConfig` sets **no** `image`. A theme-level default is not locale-aware, so
+every Vietnamese page previewed with the English card; a root-relative path is
+also resolved against the locale base (`/ZMRIG/vi/img/…`), which Docusaurus
+fills with a second copy of every static file. Instead every page carries an
+absolute URL in its front matter:
+
+```yaml
+image: https://nggkhaiz.github.io/ZMRIG/img/og-vi.png
+```
+
+The home page sets the same tags in `src/pages/index.jsx` (`Layout` in
+Docusaurus 3 takes only `title` and `description`). If the site moves to a
+custom domain, those 42 front-matter lines and the two constants in
+`src/pages/index.jsx` are what has to change — `grep -rn "og-" site/docs
+site/i18n site/src` finds them.
+
 ## Manual settings this repository still needs
 
 These cannot be done by a token and are the only steps left for a maintainer:

@@ -26,7 +26,6 @@ const INITIAL = {
   noHealthRestart: false,
   force: false,
   clone: false,
-  cpu: 0,
 };
 
 export default function InstallBuilder() {
@@ -60,7 +59,9 @@ export default function InstallBuilder() {
       ? t("builder.host.ok", { host: result.host.host, port: result.host.port })
       : t("builder.host." + result.host.status);
 
-  const blockedMessage = result.blocked ? t("builder.blocked." + result.blocked) : null;
+  const blockedMessage = result.blocked
+    ? t("builder.blocked." + result.blocked)
+    : null;
   const selectedPool = POOLS.find((pool) => pool.id === state.pool);
   const isCustom = !selectedPool;
 
@@ -84,7 +85,11 @@ export default function InstallBuilder() {
           <p
             id="zm-wallet-hint"
             className={
-              result.wallet.ok ? "zm-hint is-ok" : state.wallet ? "zm-hint is-bad" : "zm-hint"
+              result.wallet.ok
+                ? "zm-hint is-ok"
+                : state.wallet
+                  ? "zm-hint is-bad"
+                  : "zm-hint"
             }
           >
             {walletMessage}
@@ -104,10 +109,15 @@ export default function InstallBuilder() {
 
         <fieldset className="zm-fieldset">
           <legend>{t("builder.pool")}</legend>
-          <select className="zm-input" value={state.pool} onChange={set("pool")}>
+          <select
+            className="zm-input"
+            value={state.pool}
+            onChange={set("pool")}
+          >
             {POOLS.map((pool) => (
               <option key={pool.id} value={pool.id}>
-                {pool.name} — {feeLabel(pool, locale)} · {minLabel(pool, locale)}
+                {pool.name} — {feeLabel(pool, locale)} ·{" "}
+                {minLabel(pool, locale)}
               </option>
             ))}
             <option value="custom">{t("builder.poolCustom")}</option>
@@ -125,7 +135,9 @@ export default function InstallBuilder() {
                 spellCheck="false"
                 autoComplete="off"
               />
-              <p className={result.host.ok ? "zm-hint is-ok" : "zm-hint"}>{hostMessage}</p>
+              <p className={result.host.ok ? "zm-hint is-ok" : "zm-hint"}>
+                {hostMessage}
+              </p>
             </>
           ) : (
             <p className="zm-hint">
@@ -139,7 +151,9 @@ export default function InstallBuilder() {
               <label
                 key={pool.id}
                 className={
-                  state.failover.includes(pool.id) ? "zm-chip is-active" : "zm-chip"
+                  state.failover.includes(pool.id)
+                    ? "zm-chip is-active"
+                    : "zm-chip"
                 }
               >
                 <input
@@ -161,25 +175,43 @@ export default function InstallBuilder() {
 
         <fieldset className="zm-fieldset">
           <legend>{t("builder.engine")}</legend>
-          <select className="zm-input" value={state.engine} onChange={set("engine")}>
+          <select
+            className="zm-input"
+            value={state.engine}
+            onChange={set("engine")}
+          >
             <option value="auto">{t("builder.engineAuto")}</option>
-            <option value="zmrig">zmrig — RandomX, Zig</option>
-            <option value="xmrig">xmrig — C++, all algorithms</option>
+            <option value="zmrig">{t("builder.engineZmrig")}</option>
+            <option value="xmrig">{t("builder.engineXmrig")}</option>
           </select>
           <p className="zm-hint">{t("builder.engineAutoHint")}</p>
 
-          <select className="zm-input" value={state.profile} onChange={set("profile")}>
-            <option value="auto">{t("builder.profile")} — {t("builder.profileAuto")}</option>
+          <select
+            className="zm-input"
+            value={state.profile}
+            onChange={set("profile")}
+          >
+            <option value="auto">
+              {t("builder.profile")} — {t("builder.profileAuto")}
+            </option>
             <option value="free">{t("builder.profileFree")}</option>
             <option value="watt">{t("builder.profileWatt")}</option>
           </select>
 
           <label className="zm-check">
-            <input type="checkbox" checked={state.autotuneOff} onChange={set("autotuneOff")} />
+            <input
+              type="checkbox"
+              checked={state.autotuneOff}
+              onChange={set("autotuneOff")}
+            />
             <span>{t("builder.autotune")}</span>
           </label>
           <label className="zm-check">
-            <input type="checkbox" checked={state.nicehash} onChange={set("nicehash")} />
+            <input
+              type="checkbox"
+              checked={state.nicehash}
+              onChange={set("nicehash")}
+            />
             <span>{t("builder.nicehash")}</span>
           </label>
         </fieldset>
@@ -187,7 +219,11 @@ export default function InstallBuilder() {
         <fieldset className="zm-fieldset">
           <legend>{t("builder.network")}</legend>
           <label className="zm-check">
-            <input type="checkbox" checked={state.cloudflare} onChange={set("cloudflare")} />
+            <input
+              type="checkbox"
+              checked={state.cloudflare}
+              onChange={set("cloudflare")}
+            />
             <span>{t("builder.cloudflare")}</span>
           </label>
           {state.cloudflare ? (
@@ -202,7 +238,11 @@ export default function InstallBuilder() {
           ) : null}
 
           <label className="zm-check">
-            <input type="checkbox" checked={state.proxy} onChange={set("proxy")} />
+            <input
+              type="checkbox"
+              checked={state.proxy}
+              onChange={set("proxy")}
+            />
             <span>{t("builder.proxy")}</span>
           </label>
           {state.proxy ? (
@@ -217,12 +257,29 @@ export default function InstallBuilder() {
             />
           ) : null}
 
+          <span className="zm-label">{t("builder.connectTo")}</span>
+          <input
+            type="text"
+            className="zm-input"
+            value={state.connectTo}
+            onChange={set("connectTo")}
+            placeholder="203.0.113.10:3333"
+            aria-label={t("builder.connectTo")}
+            spellCheck="false"
+            autoComplete="off"
+          />
+          <p className="zm-hint">{t("builder.connectToHint")}</p>
+
           <label className="zm-check">
             <input type="checkbox" checked={state.msr} onChange={set("msr")} />
             <span>{t("builder.msr")}</span>
           </label>
           <label className="zm-check">
-            <input type="checkbox" checked={state.notune} onChange={set("notune")} />
+            <input
+              type="checkbox"
+              checked={state.notune}
+              onChange={set("notune")}
+            />
             <span>{t("builder.notune")}</span>
           </label>
           <label className="zm-check">
@@ -234,11 +291,19 @@ export default function InstallBuilder() {
             <span>{t("builder.noHealth")}</span>
           </label>
           <label className="zm-check">
-            <input type="checkbox" checked={state.force} onChange={set("force")} />
+            <input
+              type="checkbox"
+              checked={state.force}
+              onChange={set("force")}
+            />
             <span>{t("builder.force")}</span>
           </label>
           <label className="zm-check">
-            <input type="checkbox" checked={state.clone} onChange={set("clone")} />
+            <input
+              type="checkbox"
+              checked={state.clone}
+              onChange={set("clone")}
+            />
             <span>{t("builder.clone")}</span>
           </label>
         </fieldset>
@@ -252,13 +317,16 @@ export default function InstallBuilder() {
               text={result.install}
               label={t("builder.copy")}
               copiedLabel={t("builder.copied")}
+              manualLabel={t("common.manualCopy")}
               className="zm-btn zm-btn--primary"
             />
           </div>
           <pre>
             <code>{result.install}</code>
           </pre>
-          {blockedMessage ? <p className="zm-hint is-bad">{blockedMessage}</p> : null}
+          {blockedMessage ? (
+            <p className="zm-hint is-bad">{blockedMessage}</p>
+          ) : null}
         </div>
 
         {result.warnings.length > 0 || result.notes.length > 0 ? (
@@ -271,7 +339,9 @@ export default function InstallBuilder() {
                 </li>
               ))}
               {result.notes.map((item) => (
-                <li key={item.key}>{t("builder.note." + item.key, item.params)}</li>
+                <li key={item.key}>
+                  {t("builder.note." + item.key, item.params)}
+                </li>
               ))}
             </ul>
           </section>
@@ -290,10 +360,18 @@ export default function InstallBuilder() {
               <code>{result.commands.remove}</code>
             </pre>
           </div>
+          <h4>{t("builder.plan")}</h4>
+          <div className="zm-copy-scope">
+            <pre>
+              <code>{result.plan}</code>
+            </pre>
+          </div>
+          <p className="zm-hint">{t("builder.planHint")}</p>
           <CopyButton
             text={result.plan}
             label={t("builder.copyPlan")}
             copiedLabel={t("builder.copied")}
+            manualLabel={t("common.manualCopy")}
             className="zm-btn"
           />
         </section>

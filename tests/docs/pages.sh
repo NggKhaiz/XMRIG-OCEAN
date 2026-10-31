@@ -199,7 +199,32 @@ else
     bad "no search is published (no DocSearch, no local index)"
 fi
 
-# --- 7. the committed copy is the current build ---------------------------
+# --- 7. every page advertises exactly one social card, in its own language --
+# A duplicate og:image is what happens when a theme-wide default is left in
+# place next to a per-page one; crawlers take whichever comes first, and the
+# Vietnamese tree used to hand them the English card.
+social_bad=0
+social_n=0
+while IFS= read -r page; do
+    case "$page" in *search.html|*404.html) continue ;; esac
+    social_n=$((social_n + 1))
+    opens=$(grep -o 'property="og:image"' "$page" | wc -l | tr -d ' ')
+    tweets=$(grep -o 'name="twitter:image"' "$page" | wc -l | tr -d ' ')
+    wanted="img/og-en.png"
+    case "$page" in vi/*) wanted="img/og-vi.png" ;; esac
+    if [ "$opens" -ne 1 ] || [ "$tweets" -ne 1 ] || ! grep -q "og:image\" content=\"[^\"]*/$wanted\"" "$page"; then
+        social_bad=$((social_bad + 1))
+        printf '      %s: og:image x%s, twitter:image x%s, expected %s\n' \
+            "$page" "$opens" "$tweets" "$wanted"
+    fi
+done < <(find docs vi/docs -name '*.html' 2>/dev/null; echo index.html; echo vi/index.html)
+if [ "$social_bad" -eq 0 ] && [ "$social_n" -ge 40 ]; then
+    ok "all ${social_n} pages carry one localised social card"
+else
+    bad "${social_bad} page(s) with a missing, duplicated or wrong-language card"
+fi
+
+# --- 8. the committed copy is the current build ---------------------------
 stale=0
 for file in index.html 404.html sitemap.xml docs/intro.html vi/docs/intro.html \
             docs/economics/profitability.html; do
@@ -213,7 +238,7 @@ else
     bad "${stale} published file(s) differ from site/build; run ./scripts/publish-site.sh"
 fi
 
-# --- 8. the old product name is gone from the published pages -------------
+# --- 9. the old product name is gone from the published pages -------------
 # The installer page documents the migration from the pre-6.32.0 name on
 # purpose, so it is the one page allowed to say it.
 # Only HTML pages are checked: the search index and the JS bundles legitimately

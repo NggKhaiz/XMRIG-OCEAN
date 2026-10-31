@@ -252,7 +252,7 @@ Verify after a publish:
 ```bash
 curl -sI https://nggkhaiz.github.io/ZMRIG/docs/intro | head -1     # 200
 curl -s  https://nggkhaiz.github.io/ZMRIG/robots.txt | tail -1     # Sitemap: …
-bash tests/docs/pages.sh                                           # 17 checks locally
+bash tests/docs/pages.sh                                           # 18 checks locally
 ```
 
 If Pages is ever switched to **Source: GitHub Actions**, point the workflow at

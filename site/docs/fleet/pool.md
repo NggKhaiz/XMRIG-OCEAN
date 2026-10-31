@@ -1,6 +1,7 @@
 ---
 title: Run your own pool
 description: A Monero pool in Node.js with no dependencies — the 1 % fee and what it buys, a five-minute local run, free hosting options, and the operating rules.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-en.png
 ---
 
 # Run your own pool
