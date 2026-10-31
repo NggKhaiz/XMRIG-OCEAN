@@ -1,6 +1,7 @@
 ---
 title: Bộ dựng lệnh
 description: Dựng đúng lệnh oneclick.sh cho máy của bạn. Mỗi công tắc ứng với một cờ, và lệnh xem trước không thay đổi gì trên máy.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-vi.png
 ---
 
 import InstallBuilder from '@site/src/components/InstallBuilder';
@@ -21,6 +22,7 @@ import InstallBuilder from '@site/src/components/InstallBuilder';
 | Ép profile | `--profile free` hoặc `--profile watt` (không đặt = tự động) |
 | Mạng chỉ mở 443 | `--cloudflare --ws-path <path>` |
 | Proxy | `--proxy <url>` |
+| Tên pool bị lọc DNS | `--connect-to <host:port>` |
 | Host chặn ghi MSR | `--no-msr` |
 | Hash thuê | `--nicehash` |
 | Không tinh chỉnh host | `--no-tune` |
@@ -39,6 +41,11 @@ Hai quy tắc đáng biết vì chúng đổi cả lệnh, không chỉ thêm m�
 Monero chuẩn, 106 cho integrated, chỉ dùng bảng chữ base58. Host pool được kiểm
 tra dạng `host:port`, và URL đầy đủ `stratum+tcp://…` dán từ trang nhà cung cấp
 vẫn được chấp nhận.
+
+Ô proxy nhận cả URL — `socks5://host:port` hoặc `http://user:pass@host:port` —
+vì đó là thứ miner phân tích. Địa chỉ dial chỉ là `host:port`; nó thay IP đã
+phân giải nhưng giữ hostname của pool trong SNI và header `Host`, và đó chính là
+mục đích: một tên bị resolver nội bộ chặn vẫn dùng được nếu bạn biết nó ở đâu.
 
 ## Xem trước đã
 

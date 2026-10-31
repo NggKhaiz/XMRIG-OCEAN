@@ -2,6 +2,7 @@
 title: What ZMRIG is
 description: A RandomX miner with no developer fee, the installer that sets it up, a farm proxy and a self-hosted pool. What each part does, what it costs, and where the code came from.
 slug: /intro
+image: https://nggkhaiz.github.io/ZMRIG/img/og-en.png
 ---
 
 # What ZMRIG is

@@ -1,6 +1,7 @@
 ---
 title: Phí 0 %, kiểm chứng được
 description: Một khoản phí developer tốn gì trên RandomX, những gì đã xoá trong cây mã này, và các lệnh chứng minh binary không có pool thứ hai và không có ví.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-vi.png
 ---
 
 # Phí 0 %, kiểm chứng được

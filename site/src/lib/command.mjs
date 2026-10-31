@@ -48,13 +48,34 @@ export function walletState(value) {
 // `host:port`, with an optional scheme. A pool URL pasted from a provider page
 // is `stratum+tcp://host:3333`, and rejecting that would be a needless round
 // trip. The value ends up in a URL and in a JSON file, so no spaces.
+// `http://user:pass@host:port` or `socks5://host:port`. The installer passes the
+// value straight to the miner, which refuses anything else, so the builder
+// refuses it first rather than handing over a command that cannot connect.
+export function proxyState(value) {
+  const text = String(value || "").trim();
+  if (!text) return { status: "empty", ok: false };
+  const match =
+    /^(https?|socks5h?):\/\/(?:[^@\s/]+@)?([^\s:/]+):(\d{1,5})\/?$/i.exec(text);
+  if (!match) return { status: "shape", ok: false };
+  const port = Number(match[3]);
+  if (!(port > 0 && port < 65536)) return { status: "port", ok: false, port };
+  return {
+    status: "ok",
+    ok: true,
+    scheme: match[1].toLowerCase(),
+    host: match[2],
+    port,
+  };
+}
+
 export function hostState(value) {
   const text = String(value || "").trim();
   if (!text) return { status: "empty", ok: false };
 
-  const match = /^(?:(?:tls|stratum\+ssl|stratum\+tcp|stratum|wss?):\/\/)?([^\s:/]+):(\d{1,5})\/?([^\s]*)$/i.exec(
-    text
-  );
+  const match =
+    /^(?:(?:tls|stratum\+ssl|stratum\+tcp|stratum|wss?):\/\/)?([^\s:/]+):(\d{1,5})\/?([^\s]*)$/i.exec(
+      text,
+    );
   if (!match) return { status: "shape", ok: false };
 
   const port = Number(match[2]);
@@ -67,7 +88,9 @@ function normalise(state) {
   const s = state || {};
   return {
     wallet: String(s.wallet || "").trim(),
-    rig: String(s.rig || "").trim().slice(0, 32),
+    rig: String(s.rig || "")
+      .trim()
+      .slice(0, 32),
     engine: s.engine === "xmrig" || s.engine === "zmrig" ? s.engine : "auto",
     profile: s.profile === "free" || s.profile === "watt" ? s.profile : "auto",
     pool: String(s.pool || "moneroocean"),
@@ -91,9 +114,7 @@ function normalise(state) {
 }
 
 function quoteArgs(args) {
-  return args
-    .map((arg) => (/^--/.test(arg) ? arg : shellQuote(arg)))
-    .join(" ");
+  return args.map((arg) => (/^--/.test(arg) ? arg : shellQuote(arg))).join(" ");
 }
 
 export function build(state) {
@@ -104,6 +125,8 @@ export function build(state) {
   const host = s.host || (known ? known.host : "");
   const wallet = walletState(s.wallet);
   const hostCheck = hostState(host);
+  const connectCheck = s.connectTo ? hostState(s.connectTo) : null;
+  const proxyCheck = s.proxy ? proxyState(s.proxyUrl) : null;
 
   const notes = [];
   const warnings = [];
@@ -187,9 +210,12 @@ export function build(state) {
     : `curl -fsSL ${RAW_URL} \\\n  | sudo bash -s -- ${quoteArgs(planArgs)}`;
 
   // --- state that must block the copy button -------------------------------
-  if (!wallet.ok) blocked = wallet.status === "empty" ? "wallet-empty" : "wallet-invalid";
+  if (!wallet.ok)
+    blocked = wallet.status === "empty" ? "wallet-empty" : "wallet-invalid";
   else if (isCustom && !hostCheck.ok) blocked = "host-invalid";
   else if (s.proxy && !s.proxyUrl) blocked = "proxy-missing";
+  else if (s.proxy && !proxyCheck.ok) blocked = "proxy-invalid";
+  else if (s.connectTo && !connectCheck.ok) blocked = "connect-to-invalid";
 
   if (s.notune) notes.push({ key: "notune" });
   if (s.autotuneOff) notes.push({ key: "autotuneOff" });
@@ -202,6 +228,8 @@ export function build(state) {
     flags: args.filter((arg) => arg.startsWith("--")),
     wallet,
     host: hostCheck,
+    connectTo: connectCheck,
+    proxy: proxyCheck,
     pool: {
       id: isCustom ? "custom" : known.id,
       name: isCustom ? null : known.name,

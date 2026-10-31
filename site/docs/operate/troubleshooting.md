@@ -1,6 +1,7 @@
 ---
 title: Troubleshooting
 description: A symptom-to-cause table for the failures that actually happen, the bugs that were fixed so they cannot happen again, and what to include in a bug report.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-en.png
 ---
 
 # Troubleshooting

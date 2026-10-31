@@ -1,34 +1,34 @@
 {
   "version.label": {
-    "message": "Next",
+    "message": "Bản hiện tại",
     "description": "The label for version current"
   },
   "sidebar.docs.category.Install": {
-    "message": "Install",
+    "message": "Cài đặt",
     "description": "The label for category 'Install' in sidebar 'docs'"
   },
   "sidebar.docs.category.Configure": {
-    "message": "Configure",
+    "message": "Cấu hình",
     "description": "The label for category 'Configure' in sidebar 'docs'"
   },
   "sidebar.docs.category.Run": {
-    "message": "Run",
+    "message": "Chạy",
     "description": "The label for category 'Run' in sidebar 'docs'"
   },
   "sidebar.docs.category.Pools and money": {
-    "message": "Pools and money",
+    "message": "Pool và tiền",
     "description": "The label for category 'Pools and money' in sidebar 'docs'"
   },
   "sidebar.docs.category.A whole fleet": {
-    "message": "A whole fleet",
+    "message": "Cả một fleet",
     "description": "The label for category 'A whole fleet' in sidebar 'docs'"
   },
   "sidebar.docs.category.Reference": {
-    "message": "Reference",
+    "message": "Tra cứu",
     "description": "The label for category 'Reference' in sidebar 'docs'"
   },
   "sidebar.docs.category.Development": {
-    "message": "Development",
+    "message": "Phát triển",
     "description": "The label for category 'Development' in sidebar 'docs'"
   }
 }

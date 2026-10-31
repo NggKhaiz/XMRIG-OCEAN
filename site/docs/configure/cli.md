@@ -1,6 +1,7 @@
 ---
 title: Command reference
 description: Every zmrig flag, grouped by what it touches, plus config validation, self-test and autotune.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-en.png
 ---
 
 # Command reference

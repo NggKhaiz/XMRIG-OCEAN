@@ -1,6 +1,7 @@
 ---
 title: Architecture
 description: The three engines, the Zig miner's module map, how a job travels from a pool to the CPU and back, and which threads exist at runtime.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-en.png
 ---
 
 # Architecture

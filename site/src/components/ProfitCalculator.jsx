@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
-import { DEFAULTS, decodeMany, compute, totals, PREFIX } from "../lib/report.mjs";
+import {
+  DEFAULTS,
+  decodeMany,
+  compute,
+  totals,
+  PREFIX,
+} from "../lib/report.mjs";
 import { translate } from "../lib/messages.mjs";
 
 const STORAGE_KEY = "zmrig.calc.v2";
@@ -58,7 +64,10 @@ function encodeRig(rig) {
   const bytes = new TextEncoder().encode(json);
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return PREFIX + btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return (
+    PREFIX +
+    btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+  );
 }
 
 function loadState() {
@@ -72,7 +81,8 @@ function loadState() {
 }
 
 function money(value, locale) {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  if (value === null || value === undefined || !Number.isFinite(value))
+    return "—";
   return new Intl.NumberFormat(locale, {
     style: "currency",
     currency: "USD",
@@ -80,15 +90,31 @@ function money(value, locale) {
   }).format(value);
 }
 
-function hash(value, locale) {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+// Electricity is quoted per kWh and the useful digits are the third one: a
+// break-even of 0.012 $/kWh rounded to cents reads as "0.01", which is wrong by
+// 20 %.
+function price(value, locale) {
+  if (value === null || value === undefined || !Number.isFinite(value))
+    return "—";
   return (
-    new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value) + " H/s"
+    "$" +
+    new Intl.NumberFormat(locale, { maximumFractionDigits: 4 }).format(value) +
+    "/kWh"
+  );
+}
+
+function hash(value, locale) {
+  if (value === null || value === undefined || !Number.isFinite(value))
+    return "—";
+  return (
+    new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value) +
+    " H/s"
   );
 }
 
 function fixed(value, digits, locale) {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  if (value === null || value === undefined || !Number.isFinite(value))
+    return "—";
   return new Intl.NumberFormat(locale, {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
@@ -112,10 +138,16 @@ export default function ProfitCalculator() {
   useEffect(() => {
     const saved = loadState();
     if (saved) {
-      if (saved.settings) setSettings((prev) => ({ ...prev, ...saved.settings }));
+      if (saved.settings)
+        setSettings((prev) => ({ ...prev, ...saved.settings }));
       if (Array.isArray(saved.codes) && saved.codes.length > 0) {
         const decoded = decodeMany(saved.codes.join("\n"));
-        setRows(decoded.rigs.map((rig, index) => ({ key: `${rig.id}-${index}`, rig })));
+        setRows(
+          decoded.rigs.map((rig, index) => ({
+            key: `${rig.id}-${index}`,
+            rig,
+          })),
+        );
       }
       if (saved.overrides) setOverrides(saved.overrides);
     }
@@ -131,7 +163,7 @@ export default function ProfitCalculator() {
           settings,
           overrides,
           codes: rows.map((row) => encodeRig(row.rig)),
-        })
+        }),
       );
     } catch {
       /* storage full or blocked: the calculator still works for this visit */
@@ -145,7 +177,7 @@ export default function ProfitCalculator() {
         rig: row.rig,
         result: compute(row.rig, settings, overrides[row.key]),
       })),
-    [rows, settings, overrides]
+    [rows, settings, overrides],
   );
 
   const sum = useMemo(() => totals(computed), [computed]);
@@ -156,14 +188,22 @@ export default function ProfitCalculator() {
     if (decoded.rigs.length > 0) {
       setRows((prev) => [
         ...prev,
-        ...decoded.rigs.map((rig, index) => ({ key: `${rig.id}-${Date.now()}-${index}`, rig })),
+        ...decoded.rigs.map((rig, index) => ({
+          key: `${rig.id}-${Date.now()}-${index}`,
+          rig,
+        })),
       ]);
       setText("");
     }
   }
 
   function loadSample() {
-    setRows(SAMPLE.map((rig, index) => ({ key: `sample-${index}`, rig: decodeManyJson(rig) })));
+    setRows(
+      SAMPLE.map((rig, index) => ({
+        key: `sample-${index}`,
+        rig: decodeManyJson(rig),
+      })),
+    );
     setErrors([]);
   }
 
@@ -177,13 +217,21 @@ export default function ProfitCalculator() {
       setSettings((prev) => ({
         ...prev,
         [key]:
-          typeof DEFAULTS[key] === "number" ? (value === "" ? "" : Number(value)) : value,
+          typeof DEFAULTS[key] === "number"
+            ? value === ""
+              ? ""
+              : Number(value)
+            : value,
       }));
     };
   }
 
   function exportJson() {
-    const payload = JSON.stringify({ settings, rigs: rows.map((row) => row.rig) }, null, 2);
+    const payload = JSON.stringify(
+      { settings, rigs: rows.map((row) => row.rig) },
+      null,
+      2,
+    );
     const blob = new Blob([payload], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -218,13 +266,22 @@ export default function ProfitCalculator() {
         />
         <p className="zm-hint">{t("calc.pasteHint")}</p>
         <div className="zm-btn-row">
-          <button type="button" className="zm-btn zm-btn--primary" onClick={add}>
+          <button
+            type="button"
+            className="zm-btn zm-btn--primary"
+            onClick={add}
+          >
             {t("calc.add")}
           </button>
           <button type="button" className="zm-btn" onClick={loadSample}>
             {t("calc.sample")}
           </button>
-          <button type="button" className="zm-btn" onClick={exportJson} disabled={rows.length === 0}>
+          <button
+            type="button"
+            className="zm-btn"
+            onClick={exportJson}
+            disabled={rows.length === 0}
+          >
             {t("calc.export")}
           </button>
           <button
@@ -249,7 +306,9 @@ export default function ProfitCalculator() {
                 if (!file) return;
                 try {
                   const parsed = JSON.parse(await file.text());
-                  const list = Array.isArray(parsed) ? parsed : parsed.rigs || [parsed];
+                  const list = Array.isArray(parsed)
+                    ? parsed
+                    : parsed.rigs || [parsed];
                   const added = [];
                   for (const item of list) {
                     const decoded = decodeMany(encodeRig(item));
@@ -257,9 +316,13 @@ export default function ProfitCalculator() {
                   }
                   setRows((prev) => [
                     ...prev,
-                    ...added.map((rig, index) => ({ key: `${rig.id}-f-${Date.now()}-${index}`, rig })),
+                    ...added.map((rig, index) => ({
+                      key: `${rig.id}-f-${Date.now()}-${index}`,
+                      rig,
+                    })),
                   ]);
-                  if (parsed.settings) setSettings((prev) => ({ ...prev, ...parsed.settings }));
+                  if (parsed.settings)
+                    setSettings((prev) => ({ ...prev, ...parsed.settings }));
                   setErrors([]);
                 } catch {
                   setErrors([{ code: file.name, reason: "JSON" }]);
@@ -338,7 +401,10 @@ export default function ProfitCalculator() {
               className="zm-input"
               value={settings.window}
               onChange={(event) =>
-                setSettings((prev) => ({ ...prev, window: Number(event.target.value) }))
+                setSettings((prev) => ({
+                  ...prev,
+                  window: Number(event.target.value),
+                }))
               }
             >
               {windows.map((item) => (
@@ -354,7 +420,10 @@ export default function ProfitCalculator() {
               className="zm-input"
               value={settings.payoutMode}
               onChange={(event) =>
-                setSettings((prev) => ({ ...prev, payoutMode: event.target.value }))
+                setSettings((prev) => ({
+                  ...prev,
+                  payoutMode: event.target.value,
+                }))
               }
             >
               <option value="pool">{t("calc.payoutPool")}</option>
@@ -418,7 +487,12 @@ export default function ProfitCalculator() {
         </div>
       </details>
 
-      {rows.length === 0 ? (
+      {/* The saved fleet is restored in an effect, so the first paint always has
+          zero rows. Showing "nothing here yet" for that one frame reads as a
+          flicker; the empty state waits until the restore has run. Server-side
+          this renders nothing at all, which is also what the first client
+          render produces — no hydration mismatch. */}
+      {!ready ? null : rows.length === 0 ? (
         <p className="zm-empty">{t("calc.empty")}</p>
       ) : (
         <>
@@ -434,13 +508,16 @@ export default function ProfitCalculator() {
               <span className="zm-card__label">{t("calc.totalWatts")}</span>
               <strong>{fixed(sum.wallWatts, 0, locale)} W</strong>
               <span className="zm-card__sub">
-                {fixed(sum.kwhDay, 2, locale)} kWh · {t("calc.totalKwh").toLowerCase()}
+                {fixed(sum.kwhDay, 2, locale)} kWh ·{" "}
+                {t("calc.totalKwh").toLowerCase()}
               </span>
             </div>
             <div className="zm-card">
               <span className="zm-card__label">{t("calc.totalRevenue")}</span>
               <strong>{money(sum.revenueDay, locale)}</strong>
-              <span className="zm-card__sub">{fixed(sum.xmrDay, 6, locale)} XMR</span>
+              <span className="zm-card__sub">
+                {fixed(sum.xmrDay, 6, locale)} XMR
+              </span>
             </div>
             <div className="zm-card">
               <span className="zm-card__label">{t("calc.totalProfit")}</span>
@@ -453,8 +530,15 @@ export default function ProfitCalculator() {
             </div>
             <div className="zm-card">
               <span className="zm-card__label">{t("calc.efficiency")}</span>
-              <strong>{sum.efficiency ? fixed(sum.efficiency, 2, locale) : "—"}</strong>
+              <strong>
+                {sum.efficiency ? fixed(sum.efficiency, 2, locale) : "—"}
+              </strong>
               <span className="zm-card__sub">H/W</span>
+            </div>
+            <div className="zm-card">
+              <span className="zm-card__label">{t("calc.breakEven")}</span>
+              <strong>{price(sum.breakEvenPrice, locale)}</strong>
+              <span className="zm-card__sub">{t("calc.breakEvenSub")}</span>
             </div>
           </div>
 
@@ -482,7 +566,9 @@ export default function ProfitCalculator() {
                         {row.rig.cpu} · {row.rig.threads} thr · {row.rig.algo}
                       </span>
                     </th>
-                    <td className="zm-num">{hash(row.result.hashrate, locale)}</td>
+                    <td className="zm-num">
+                      {hash(row.result.hashrate, locale)}
+                    </td>
                     <td className="zm-num">
                       <input
                         type="number"
@@ -490,20 +576,37 @@ export default function ProfitCalculator() {
                         className="zm-input zm-input--tiny"
                         value={overrides[row.key] ?? ""}
                         placeholder={
-                          row.result.wallWatts ? fixed(row.result.wallWatts, 0, locale) : "—"
+                          row.result.wallWatts
+                            ? fixed(row.result.wallWatts, 0, locale)
+                            : "—"
                         }
                         onChange={(event) => {
                           const value = event.target.value;
-                          setOverrides((prev) => ({ ...prev, [row.key]: value }));
+                          setOverrides((prev) => ({
+                            ...prev,
+                            [row.key]: value,
+                          }));
                         }}
                         aria-label={`${row.rig.id} ${t("calc.override")}`}
                       />
                     </td>
-                    <td className="zm-num">{fixed(row.result.kwhDay, 2, locale)}</td>
-                    <td className="zm-num">{money(row.result.costDay, locale)}</td>
-                    <td className="zm-num">{fixed(row.result.xmrDay, 6, locale)}</td>
-                    <td className="zm-num">{money(row.result.revenueDay, locale)}</td>
-                    <td className={row.result.profitDay < 0 ? "zm-num is-bad" : "zm-num"}>
+                    <td className="zm-num">
+                      {fixed(row.result.kwhDay, 2, locale)}
+                    </td>
+                    <td className="zm-num">
+                      {money(row.result.costDay, locale)}
+                    </td>
+                    <td className="zm-num">
+                      {fixed(row.result.xmrDay, 6, locale)}
+                    </td>
+                    <td className="zm-num">
+                      {money(row.result.revenueDay, locale)}
+                    </td>
+                    <td
+                      className={
+                        row.result.profitDay < 0 ? "zm-num is-bad" : "zm-num"
+                      }
+                    >
                       {money(row.result.profitDay, locale)}
                     </td>
                     <td className="zm-num">
@@ -511,7 +614,11 @@ export default function ProfitCalculator() {
                         type="button"
                         className="zm-icon-btn"
                         aria-label={t("calc.remove")}
-                        onClick={() => setRows((prev) => prev.filter((item) => item.key !== row.key))}
+                        onClick={() =>
+                          setRows((prev) =>
+                            prev.filter((item) => item.key !== row.key),
+                          )
+                        }
                       >
                         ×
                       </button>
@@ -523,7 +630,9 @@ export default function ProfitCalculator() {
           </div>
 
           {sum.unknownPower > 0 ? (
-            <p className="zm-hint is-bad">{t("calc.unknownPower", { n: sum.unknownPower })}</p>
+            <p className="zm-hint is-bad">
+              {t("calc.unknownPower", { n: sum.unknownPower })}
+            </p>
           ) : null}
         </>
       )}
