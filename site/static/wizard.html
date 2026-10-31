@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>Moved — the wizard is now the command builder</title>
+<meta name="description" content="The four-step wizard and the command builder are one page inside the ZMRIG documentation, in English and Vietnamese.">
 <link rel="canonical" href="https://nggkhaiz.github.io/ZMRIG/docs/install/builder">
 <meta http-equiv="refresh" content="2; url=/ZMRIG/docs/install/builder">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -22,6 +23,13 @@
   <p><a href="/ZMRIG/docs/install/builder">Open the command builder</a> ·
      <a href="/ZMRIG/vi/docs/install/builder">Bộ dựng lệnh (tiếng Việt)</a></p>
 </main>
-<script>location.replace("/ZMRIG/docs/install/builder" + location.search + location.hash);</script>
+<script>
+  // Docusaurus copies this file into /vi/ as well, so the destination follows
+  // the language of the URL that was asked for.
+  var target = location.pathname.indexOf("/vi/") !== -1
+    ? "/ZMRIG/vi/docs/install/builder"
+    : "/ZMRIG/docs/install/builder";
+  location.replace(target + location.search + location.hash);
+</script>
 </body>
 </html>

@@ -39,8 +39,9 @@ content in both languages. No binary changed.
 
 ### Tests
 - **`tests/docs/pages.sh`** runs against `web/` (the tree Pages actually
-  uploads), 21 checks: adds the two redirect stubs and the archive check, and
-  still refuses a stale copy.
+  uploads), 22 checks: every local reference on every page (2040 of them, not a
+  sample of six), a title, a description and the right `lang` on each page with
+  no leaked placeholder, the two redirect stubs, and still refuses a stale copy.
 - **`legacy/tests/`** keeps running: the archived site is not deployed, but the
   checks that guard branch names, the donation address and the pool table are
   still cheap and still true.
