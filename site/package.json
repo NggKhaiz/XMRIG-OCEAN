@@ -1,0 +1,27 @@
+{
+  "name": "zmrig-docs",
+  "version": "6.32.1",
+  "private": true,
+  "description": "Documentation site for ZMRIG, built with Docusaurus.",
+  "scripts": {
+    "start": "docusaurus start",
+    "build": "docusaurus build",
+    "serve": "docusaurus serve",
+    "clear": "docusaurus clear",
+    "write-translations": "docusaurus write-translations",
+    "swizzle": "docusaurus swizzle",
+    "test": "node --test tests/*.test.mjs",
+    "check:i18n": "node --test tests/i18n.test.mjs"
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.10.2",
+    "@docusaurus/preset-classic": "3.10.2",
+    "@easyops-cn/docusaurus-search-local": "0.55.3",
+    "clsx": "^2.1.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

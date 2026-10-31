@@ -1,0 +1,74 @@
+{
+  "link.title.Documentation": {
+    "message": "Tài liệu",
+    "description": "The title of the footer links column with title=Documentation in the footer"
+  },
+  "link.title.Operations": {
+    "message": "Vận hành",
+    "description": "The title of the footer links column with title=Operations in the footer"
+  },
+  "link.title.Project": {
+    "message": "Dự án",
+    "description": "The title of the footer links column with title=Project in the footer"
+  },
+  "link.item.label.What ZMRIG is": {
+    "message": "ZMRIG là gì",
+    "description": "The label of footer link with label=What ZMRIG is linking to /docs/intro"
+  },
+  "link.item.label.Install": {
+    "message": "Cài đặt",
+    "description": "The label of footer link with label=Install linking to /docs/install/quickstart"
+  },
+  "link.item.label.Configuration": {
+    "message": "Cấu hình",
+    "description": "The label of footer link with label=Configuration linking to /docs/configure/config-file"
+  },
+  "link.item.label.Command reference": {
+    "message": "Tham chiếu lệnh",
+    "description": "The label of footer link with label=Command reference linking to /docs/configure/cli"
+  },
+  "link.item.label.Pools": {
+    "message": "Pool",
+    "description": "The label of footer link with label=Pools linking to /docs/pools/choosing"
+  },
+  "link.item.label.Networks that only allow 443": {
+    "message": "Mạng chỉ mở 443",
+    "description": "The label of footer link with label=Networks that only allow 443 linking to /docs/operate/networks"
+  },
+  "link.item.label.Performance": {
+    "message": "Hiệu năng",
+    "description": "The label of footer link with label=Performance linking to /docs/operate/performance"
+  },
+  "link.item.label.Troubleshooting": {
+    "message": "Lỗi thường gặp",
+    "description": "The label of footer link with label=Troubleshooting linking to /docs/operate/troubleshooting"
+  },
+  "link.item.label.Profitability calculator": {
+    "message": "Máy tính lợi nhuận",
+    "description": "The label of footer link with label=Profitability calculator linking to /docs/economics/profitability"
+  },
+  "link.item.label.Farm proxy": {
+    "message": "Proxy cho farm",
+    "description": "The label of footer link with label=Farm proxy linking to /docs/fleet/proxy"
+  },
+  "link.item.label.Self-hosted pool": {
+    "message": "Pool tự dựng",
+    "description": "The label of footer link with label=Self-hosted pool linking to /docs/fleet/pool"
+  },
+  "link.item.label.Testing": {
+    "message": "Kiểm thử",
+    "description": "The label of footer link with label=Testing linking to /docs/development/testing"
+  },
+  "link.item.label.Source": {
+    "message": "Mã nguồn",
+    "description": "The label of footer link with label=Source linking to https://github.com/NggKhaiz/ZMRIG"
+  },
+  "link.item.label.Issues": {
+    "message": "Báo lỗi",
+    "description": "The label of footer link with label=Issues linking to https://github.com/NggKhaiz/ZMRIG/issues"
+  },
+  "copyright": {
+    "message": "ZMRIG 6.32.1 · GPL-3.0 · làm bởi <a href=\"https://github.com/NggKhaiz\">@nggkhaiz</a> · không tracking, không tài khoản, không phí developer",
+    "description": "The footer copyright"
+  }
+}
