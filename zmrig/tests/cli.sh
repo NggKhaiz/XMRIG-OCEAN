@@ -101,6 +101,25 @@ else
     record FAIL "--check does not touch nr_hugepages" "$before -> $after"
 fi
 
+# -- the memory --check reports must belong to the coin -------------------
+# Both engines hash seven coins and the coins are not the same size. Reporting
+# Monero's 2336 MB for a Panthera run is how a 512 MB VPS is told it cannot do
+# something it can do.
+xmr_mem=$("$BIN" -o pool.example.com:3333 -u "$WALLET" -a rx/0 --check 2>/dev/null | grep -c '2336 MB, 1168 pages')
+xla_mem=$("$BIN" -o pool.example.com:3333 -u "$WALLET" -a panthera --check 2>/dev/null | grep -c '192 MB, 96 pages')
+
+if [ "$xmr_mem" = "1" ]; then
+    record PASS "--check sizes rx/0 memory" "2336 MB, 1168 pages"
+else
+    record FAIL "--check sizes rx/0 memory" "expected '2336 MB, 1168 pages'"
+fi
+
+if [ "$xla_mem" = "1" ]; then
+    record PASS "--check sizes panthera memory" "192 MB, 96 pages"
+else
+    record FAIL "--check sizes panthera memory" "expected '192 MB, 96 pages'"
+fi
+
 # The opt-out must be visible in --help (it is a safety valve, not a hidden knob)
 if "$BIN" --help | grep -qF -- "--no-auto-hugepages"; then
     record PASS "--no-auto-hugepages is documented" ""

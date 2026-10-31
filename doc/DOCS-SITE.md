@@ -142,6 +142,30 @@ system. Docusaurus already stores `null` for that choice; the component exposes
 it. `docusaurus.config.js` sets `defaultMode: "light"` and
 `respectPrefersColorScheme: true`, so a first visit follows the operating system.
 
+## The mark
+
+One geometry, drawn once and reused: `site/tools/make-logo.py` writes
+`logo.svg` (black), `logo-dark.svg` (white), `favicon.svg` and the three PNG
+icons; `site/tools/make-art.py` pastes the same render into the social cards.
+
+```bash
+python3 site/tools/make-logo.py     # the mark, all formats
+python3 site/tools/make-art.py      # the social cards, which use it
+```
+
+The shape is the cache (solid core) inside the dataset (the ring) — the two
+layers of memory every supported coin builds before it can hash — with two
+corners cut at 45° so the block has an axis. It is deliberately one tone: no
+accent colour, no gradient, no letterform, nothing that turns to mush at 16 px.
+Light and dark pages get the same file in opposite tones (`logo.svg` /
+`logo-dark.svg`), the navbar swaps them with `srcDark`, the home page swaps them
+with `.zm-mark--light` / `.zm-mark--dark`, and `favicon.svg` picks its tone from
+`prefers-color-scheme` so it survives either tab bar.
+
+Both copies of `static/img` are committed — `site/static/img/` for the build and
+`img/` for the branch-root mirror — and `scripts/publish-site.sh` keeps them
+identical.
+
 ## Social previews
 
 Two 1200×630 cards exist, `site/static/img/og-en.png` and `og-vi.png`. They are

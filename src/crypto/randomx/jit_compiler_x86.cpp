@@ -365,7 +365,29 @@ namespace randomx {
 
 	void JitCompilerX86::generateProgramLight(Program& prog, ProgramConfiguration& pcfg, uint32_t datasetOffset) {
 		generateProgramPrologue(prog, pcfg);
+
+		const uint32_t lightStart = codePos;
 		emit(codeReadDatasetLightSshInit, readDatasetLightInitSize, code, codePos);
+
+		// MoneroOcean: the snippet masks the dataset block number with the
+		// compile-time 2 GiB mask. A fork with a smaller dataset - Panthera's
+		// DatasetBaseSize is 32 MiB - then addresses cache lines that this
+		// instance does not own: light mode (cache only, no dataset) reads up
+		// to 2 GiB into a 128 MiB mapping and dies with SIGSEGV inside the JIT
+		// code. `.inc` line: `and ebx, RANDOMX_DATASET_BASE_MASK / 64`.
+		{
+			const uint32_t mask = RandomX_CurrentConfig.DatasetBaseSize / RANDOMX_DATASET_ITEM_SIZE - 1;
+
+			for (uint32_t i = 0; i + 6 <= codePos - lightStart; ++i) {
+				uint8_t *const instr = code + lightStart + i;
+				if (instr[0] == 0x81 && instr[1] == 0xe3) {
+					std::memcpy(instr + 2, &mask, sizeof(mask));
+
+					break;
+				}
+			}
+		}
+
 		*(uint32_t*)(code + codePos) = 0xc381;
 		codePos += 2;
 		emit32(datasetOffset / CacheLineSize, code, codePos);

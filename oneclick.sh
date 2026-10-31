@@ -1258,11 +1258,17 @@ run_tune() {
         info "skipped (--no-tune)"
         return 0
     fi
+    # The reservation is sized for the coin that will actually be mined.
+    # Monero needs 2336 MB; Panthera/Scala needs 192 MB and would be refused a
+    # start on a 1 GB box if we reserved for Monero.
+    local algo_arg="${ALGO:-rx/0}"
+    [ "$algo_arg" = "auto" ] && algo_arg="rx/0"
+
     if is_root; then
-        "${CONFIGURED_ROOT}/scripts/tune-linux.sh" --profile="${PROFILE_EFFECTIVE}" \
+        "${CONFIGURED_ROOT}/scripts/tune-linux.sh" --profile="${PROFILE_EFFECTIVE}" --algo="$algo_arg" \
             || warn "tuning reported problems, continuing"
     elif have sudo; then
-        sudo "${CONFIGURED_ROOT}/scripts/tune-linux.sh" --profile="${PROFILE_EFFECTIVE}" \
+        sudo "${CONFIGURED_ROOT}/scripts/tune-linux.sh" --profile="${PROFILE_EFFECTIVE}" --algo="$algo_arg" \
             || warn "tuning reported problems, continuing"
     else
         warn "not root, skipping host tuning"
@@ -1359,7 +1365,7 @@ After=local-fs.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=${BIN_DIR}/zmrig-tune --quiet
+ExecStart=${BIN_DIR}/zmrig-tune --quiet --algo=${ALGO:-rx/0}
 
 [Install]
 WantedBy=multi-user.target

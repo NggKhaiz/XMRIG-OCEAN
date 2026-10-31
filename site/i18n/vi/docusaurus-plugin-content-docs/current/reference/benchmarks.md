@@ -58,16 +58,19 @@ Hiệu ứng lớn nhất và rõ ràng nhất. RandomX đọc dataset 2 GiB the
 nhiên, và trang 4 KiB nghĩa là TLB miss liên tục.
 
 ```bash
-# đặt trước 1234 trang 2 MiB (≈2.4 GiB)
-echo 1234 | sudo tee /proc/sys/vm/nr_hugepages
+# đặt trước 1168 trang 2 MiB (≈2.3 GiB) — cỡ của rx/0, không phải của mọi coin
+echo 1168 | sudo tee /proc/sys/vm/nr_hugepages
 grep HugePages_ /proc/meminfo
 ```
 
 Installer làm việc này và ghi vào unit systemd (`LimitMEMLOCK=infinity`). Kiểm
-tra miner có lấy được: log khởi động in `huge pages 2336 MB`, API trả
-`"hugepages": [1168, 1168]` (được cấp / cần).
+tra miner có lấy được: log khởi động in `huge pages … MB (explicit)`, API trả
+`"hugepages": [được cấp, cần]` — `[1168, 1168]` với `rx/0`, `[96, 96]` với
+`panthera`. Số trang đi theo coin: `panthera` cần 96 trang (192 MB) chứ không
+phải 1168; `sudo zmrig-tune --algo panthera` ghi đúng con số đó, và `zmrig` tự
+tính mức đặt của mình theo cùng cách.
 
-Cảnh báo thực tế: khi đã đặt 1234 trang, RAM thường còn khoảng 1.2 GB. Chạy
+Cảnh báo thực tế: khi đã đặt 1168 trang, RAM thường còn khoảng 1.2 GB. Chạy
 `--no-huge-pages` lúc đó sẽ bị OOM-kill (exit 137), vì dataset 2 GiB không còn
 chỗ. Hạ `nr_hugepages` về 0 trước.
 

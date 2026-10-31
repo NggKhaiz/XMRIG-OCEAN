@@ -112,7 +112,23 @@ export default function Home() {
           <p className="zm-eyebrow">
             {c.eyebrow} · by <a href="https://github.com/NggKhaiz">@nggkhaiz</a>
           </p>
-          <h1>ZMRIG</h1>
+          <h1>
+            <img
+              className="zm-mark zm-mark--light"
+              src="/ZMRIG/img/logo.svg"
+              alt=""
+              width="44"
+              height="44"
+            />
+            <img
+              className="zm-mark zm-mark--dark"
+              src="/ZMRIG/img/logo-dark.svg"
+              alt=""
+              width="44"
+              height="44"
+            />
+            ZMRIG
+          </h1>
           <p className="zm-lede">{c.lede}</p>
 
           <div className="zm-term">

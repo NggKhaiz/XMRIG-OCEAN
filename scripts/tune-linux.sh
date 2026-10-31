@@ -13,6 +13,8 @@
 #   sudo ./scripts/tune-linux.sh --hugepages 1G # reserve 1GB pages instead of 2MB
 #   sudo ./scripts/tune-linux.sh --profile watt # keep the CPU's power saving
 #                                               # governor (max hashrate per watt)
+#   sudo ./scripts/tune-linux.sh --algo panthera # reserve for Scala instead of
+#                                               # Monero (192 MB, not 2336 MB)
 #   ./scripts/tune-linux.sh --status            # read-only report (no root needed)
 #
 # Revert:
@@ -34,8 +36,14 @@ DRY_RUN=0
 STATUS_ONLY=0
 QUIET=0
 
-DATASET_MB=2080          # RandomX dataset (rx/0 family)
+# RandomX memory per algorithm. The seven configurations are not the same size:
+# the RandomX family needs a 2080 MB dataset behind a 256 MB cache, while
+# Panthera/Scala needs 64 MB behind 128 MB. Reserving Monero's 2.3 GB for a coin
+# that fits in 192 MB is how a 1 GB VPS ends up refusing to start.
+ALGO="${ALGO:-rx/0}"
+DATASET_MB=2080          # RandomX dataset (set per algorithm after parsing)
 CACHE_MB=256             # RandomX cache
+
 
 color() {
     if [ -t 1 ]; then printf '\033[%sm%s\033[0m' "$1" "$2"; else printf '%s' "$2"; fi
@@ -63,12 +71,28 @@ while [ $# -gt 0 ]; do
         --no-governor)    SET_GOVERNOR="" ;;
         --profile)        PROFILE="${2:-auto}"; shift ;;
         --profile=*)      PROFILE="${1#*=}" ;;
+        --algo)           ALGO="${2:-rx/0}"; shift ;;
+        --algo=*)         ALGO="${1#*=}" ;;
         -q|--quiet)       QUIET=1 ;;
         -h|--help)        usage ;;
         *)                warn "unknown option: $1"; usage ;;
     esac
     shift
 done
+
+# Sized here, after parsing: `--algo` decides how much memory this host has to
+# reserve, and it is the argument that was just read.
+case "${ALGO,,}" in
+    panthera|rx/xla|xla|scala) DATASET_MB=64;  CACHE_MB=128 ;;
+    rx/0|rx|randomx|xmr|monero) DATASET_MB=2080; CACHE_MB=256 ;;
+    rx/2|rx/wow|rx/arq|rx/graft|rx/sfx|rx/yada|wow|arq|graft|sfx|yada)
+        # Same consensus sizes as Monero; only the configuration differs.
+        DATASET_MB=2080; CACHE_MB=256 ;;
+    *)
+        # An algorithm this script does not know about: reserve for the largest
+        # configuration in the tree. Too much is harmless, too little is not.
+        DATASET_MB=2080; CACHE_MB=256 ;;
+esac
 
 read_meminfo() { awk -v k="$1" '$1 == k":" { print $2 }' /proc/meminfo; }
 

@@ -6,8 +6,8 @@ image: https://nggkhaiz.github.io/ZMRIG/img/og-en.png
 
 # Performance
 
-RandomX is a memory-bound proof of work: the hash loop reads a 2 GiB dataset in
-a random order. Almost everything that matters follows from that one sentence.
+RandomX is a memory-bound proof of work: the hash loop reads a dataset in a
+random order. Almost everything that matters follows from that one sentence.
 
 ## The three levers that matter
 
@@ -15,13 +15,20 @@ a random order. Almost everything that matters follows from that one sentence.
 dataset walk a TLB miss every few accesses.
 
 ```bash
-echo 1234 | sudo tee /proc/sys/vm/nr_hugepages    # ~2.4 GiB of 2 MiB pages
+echo 1168 | sudo tee /proc/sys/vm/nr_hugepages    # ~2.3 GiB of 2 MiB pages, for Monero
 grep HugePages_ /proc/meminfo
 ```
 
-The installer does this and sets `LimitMEMLOCK=infinity` in the unit. To check
-the miner got them: the startup log prints `huge pages 2336 MB`, and the API
-reports `"hugepages": [1168, 1168]` (granted / needed).
+The installer does this and sets `LimitMEMLOCK=infinity` in the unit. The number
+is not a constant: it is the cache plus the dataset of the coin being mined —
+1168 pages for Monero, 96 for Panthera/Scala (see the table below). `zmrig`
+sizes its own reservation per algorithm and `zmrig-tune --algo=` writes the same
+number, so `sudo zmrig-tune --algo panthera` reserves 192 MB and not 2.3 GB.
+
+To check the miner got them: the startup log prints how many bytes really came
+from explicit huge pages (`huge pages 2336 MB (explicit)`), and the API reports
+`"hugepages": [granted, needed]` — `[1168, 1168]` for `rx/0`, `[96, 96]` for
+`panthera`.
 
 :::warning Measuring without huge pages
 Once 1234 pages are reserved, only about 1.2 GB of ordinary RAM is left. Running
@@ -30,10 +37,32 @@ Once 1234 pages are reserved, only about 1.2 GB of ordinary RAM is left. Running
 and remember to put it back.
 :::
 
-**Fast or light mode.** `fast` builds one 2 GiB dataset shared by every thread.
-`light` keeps a 256 MiB cache and rebuilds the dataset per hash: 76 H/s against
-814 H/s on the same machine. Light mode exists for a VPS that cannot give 2 GiB,
-not as a power-saving option.
+**Fast or light mode.** `fast` builds one dataset shared by every thread. `light`
+keeps the cache and rebuilds the dataset per hash: 76 H/s against 814 H/s on the
+same machine (`rx/0`). Light mode exists for a VPS that cannot give the RAM, not
+as a power-saving option.
+
+Which one you get in `--mode=auto` depends on the **coin**, because the coins are
+not the same size. This is measured, not estimated from a constant:
+
+| Algorithm | Coin | Cache | Dataset | Total | Fits in 1 GiB VPS? |
+| --- | --- | ---: | ---: | ---: | --- |
+| `rx/0` | Monero | 256 MB | 2080 MB | 2336 MB | light only |
+| `rx/wow` | Wownero | 256 MB | 2080 MB | 2336 MB | light only |
+| `rx/arq` | ArQmA | 256 MB | 2080 MB | 2336 MB | light only |
+| `rx/graft` | Graft | 256 MB | 2080 MB | 2336 MB | light only |
+| `rx/sfx` | Safex Cash | 256 MB | 2080 MB | 2336 MB | light only |
+| `rx/yada` | YadaCoin | 256 MB | 2080 MB | 2336 MB | light only |
+| `panthera` | Scala (XLA) | 128 MB | 64 MB | **192 MB** | yes |
+
+The dataset size is the same for the six RandomX forks because they only change
+the program configuration, the argon salt and the iteration count; Panthera is a
+different configuration (`ArgonMemory` 128 MB, `DatasetBaseSize` 32 MB).
+
+`zmrig --check` prints the number for the algorithm you asked about, and the
+datasets are sized from the compiled configuration rather than from
+`RANDOMX_DATASET_MAX_SIZE` — that constant is 2 GiB and using it for a 64 MB
+dataset is how a 512 MB VPS ends up refusing to start on a coin it can mine.
 
 **Threads.** One per physical core, two per core only when SMT helps: on the test
 host, two threads on two vCPUs gave 814 H/s and one thread gave 408 H/s, which is
