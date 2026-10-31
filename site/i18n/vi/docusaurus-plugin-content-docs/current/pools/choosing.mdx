@@ -1,0 +1,104 @@
+---
+title: Chọn pool
+description: Phí, mức trả tối thiểu và endpoint của những pool đáng dùng, vì sao thứ tự là như vậy, và những hành vi giữ cho IP không bị ban.
+---
+
+import PoolTable from '@site/src/components/PoolTable';
+
+# Chọn pool
+
+Có hai khoản chi phí không bao giờ hiện trên biểu đồ hashrate: pool trả ít hơn
+quảng cáo, và cái IP không kết nối được nữa. Khoản đầu là vài phần trăm; khoản
+sau là 100 % thu nhập.
+
+<PoolTable />
+
+Tên ngắn dùng trực tiếp với installer: `--pool=moneroocean`, `supportxmr`,
+`c3pool`, `herominers`, `xmrpool`, `p2pool`, `p2pool-nano`. Muốn xem repo sẽ dùng
+đúng cái gì mà không cài:
+
+```bash
+./oneclick.sh plan --pool=supportxmr --wallet 4YourMoneroAddress
+```
+
+## Vì sao thứ tự này
+
+1. **MoneroOcean trả nhiều nhất trên mỗi hash với CPU**, vì nó chuyển rig sang
+   coin RandomX đang trả tốt nhất rồi trả bằng XMR. Các phép đo độc lập ghi mức
+   chênh 10–30 % so với pool một thuật toán, lớn hơn mọi khác biệt phí trong
+   bảng. Nó cần `--algo=auto`, là mặc định ở đây.
+2. **SupportXMR là lựa chọn ít dao động.** Pool lớn nhất tìm block thường xuyên,
+   nên con số mỗi ngày ít nhảy. Chọn khi sự đều đặn quan trọng hơn mức tối đa,
+   hoặc làm pool dự phòng sau MoneroOcean.
+3. **C3Pool** phí 0 %, tối thiểu 0.003 XMR — cùng hình dạng với MoneroOcean nhưng
+   không đổi thuật toán, trên hạ tầng hoàn toàn khác. Dự phòng thứ hai tốt nhất.
+
+Phí và mức tối thiểu đọc từ trang của chính các pool trong tháng 10/2026. Phí
+thay đổi; port và chính sách ban thì ít đổi hơn.
+
+## Không bị ban
+
+Pool ban IP vì ba lý do, và cả ba trước đây đều vô hình:
+
+| Nguyên nhân | Miner ngây thơ | Bản này |
+| --- | --- | --- |
+| Sai ví, sai port, TLS nhầm chỗ | thử lại mỗi 5 s, mãi mãi, từ đúng cái IP đó | nhận diện từ chối, **bỏ pool đó 30 phút**, in cách sửa |
+| `your IP is banned` | kết nối lại ngay và ban kéo dài thêm | 15 phút mỗi pool, rồi sang pool kế |
+| Rig ép xung sinh share sai | gửi tiếp, ăn ban 10 phút rồi 1 giờ | sau ba share invalid, **dừng 10 phút** và nói rõ lý do |
+| Hai mươi rig reboot cùng lúc | trùng thời điểm, login flood | mỗi lần thử lệch ±20 % |
+
+Cooldown tính theo từng pool: pool từ chối ví không chặn pool dự phòng.
+`--ban-cooldown=<giây>` đổi mặc định 900; trường hợp sai ví bị kẹp tối thiểu 30
+phút, vì chờ năm giây không sửa được một lỗi gõ.
+
+## Khi chặn là do DNS, không phải pool
+
+Rig mất kết nối vì DNS bị lọc nhiều hơn vì ban. Trường hợp đã ghi nhận: Quad9
+trả NXDOMAIN cho `gulf.moneroocean.stream`, resolver lọc mã độc của Cloudflare
+làm điều tương tự với `pool.supportxmr.com`, một số ISP chặn cả nhóm domain đào
+coin, và nhiều mạng VPS hoặc công ty chỉ mở 80 và 443.
+
+Bốn cách sống qua, theo thứ tự nên thử:
+
+1. **Pool dự phòng khác domain.** `--failover=moneroocean,c3pool` ghi thêm pool
+   vào `config.json`; chúng chỉ được dùng khi pool đầu không tới được hoặc từ
+   chối IP này.
+2. **Hostname theo khu vực** — cùng pool, khác tên DNS. Chỉ giúp khi alias mặc
+   định là cái bị lọc.
+3. **Port 443 kèm TLS**, trông như HTTPS bình thường: MoneroOcean
+   `gulf.moneroocean.stream:443`, SupportXMR `pool.supportxmr.com:443`, xmrpool.eu
+   `xmrpool.eu:443`. Dùng `--pool=tls://host:443` để miner biết port đó cần TLS.
+4. **`--connect-to`** với địa chỉ phân giải ở nơi khác. SNI và `Host` giữ nguyên,
+   chỉ địa chỉ dial đổi.
+
+```bash
+dig +short gulf.moneroocean.stream    # từ một mạng phân giải được
+zmrig -o gulf.moneroocean.stream:10001 --connect-to 203.0.113.10:10001 -u 4YourMoneroAddress
+```
+
+Cách 4 là chữa cháy, không phải giải pháp: IP đổi là mất kết nối. Ưu tiên 1–3.
+Chi tiết và công thức cho proxy ở
+[Mạng chỉ mở 443](/docs/operate/networks).
+
+## Những gì không sửa được từ đây
+
+- **Chặn theo quốc gia.** Client chỉ thấy một câu từ chối, không thấy lý do.
+  Cooldown giúp không thành ban; nó không làm pool đó chạy được.
+- **Mạng chỉ có IPv6** mà bản ghi AAAA bị lọc — dùng `--connect-to`.
+- **Giới hạn tần suất share** (không phải login) ở một số pool. Chúng đến dưới
+  dạng reject và quarantine sẽ dừng luồng, nhưng cách đúng là ít share hơn, mỗi
+  share lớn hơn, qua thời gian share mục tiêu cao hơn.
+
+## MoneroOcean hay SupportXMR, cụ thể
+
+Chạy mỗi bên một tuần rồi so `xmrPerDay` ở cùng hashrate:
+
+```bash
+./oneclick.sh install --pool=moneroocean --wallet 4YourMoneroAddress
+# một tuần sau
+./oneclick.sh install --pool=supportxmr --wallet 4YourMoneroAddress --failover=moneroocean --force
+```
+
+MoneroOcean thắng khi phần chênh đổi thuật toán là thật với CPU của bạn (nó đổi
+theo coin đang hot); SupportXMR thắng khi không, và luôn thắng về độ ổn định. Đo
+rồi quyết — câu trả lời đổi theo tháng.

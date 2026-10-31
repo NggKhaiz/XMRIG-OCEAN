@@ -1,0 +1,109 @@
+---
+title: Choosing a pool
+description: Fees, minimum payouts and endpoints for the pools worth using, why the order is what it is, and the behaviours that keep an IP from being banned.
+---
+
+import PoolTable from '@site/src/components/PoolTable';
+
+# Choosing a pool
+
+Two costs never show up on a hashrate chart: a pool paying less than it
+advertises, and an IP that can no longer connect. The first is a few percent; the
+second is 100 % of the income.
+
+<PoolTable />
+
+Short names work directly with the installer: `--pool=moneroocean`,
+`supportxmr`, `c3pool`, `herominers`, `xmrpool`, `p2pool`, `p2pool-nano`. To see
+exactly what the repository would use, without installing:
+
+```bash
+./oneclick.sh plan --pool=supportxmr --wallet 4YourMoneroAddress
+```
+
+## Why the order
+
+1. **MoneroOcean pays the most per hash on a CPU**, because it moves the rig to
+   whichever RandomX coin is paying best and settles in XMR. Independent
+   measurements put the gap at 10-30 % against a single-algorithm pool, which is
+   larger than every fee difference in the table. It needs `--algo=auto`, which
+   is the default here.
+2. **SupportXMR is the low-variance choice.** The largest pool finds blocks
+   often, so the daily number moves less. Pick it when a steady figure matters
+   more than the maximum, or as the backup behind MoneroOcean.
+3. **C3Pool** is 0 % with a 0.003 XMR minimum — the same shape as MoneroOcean
+   without algorithm switching, on completely different infrastructure. The best
+   second backup.
+
+Fees and minimums were read from the pools' own pages in October 2026. Fees
+change; ports and ban policies change less.
+
+## Not getting banned
+
+A pool bans an IP for three reasons, and all three used to be invisible:
+
+| Cause | A naive miner | This one |
+| --- | --- | --- |
+| Wrong wallet, wrong port, TLS in the wrong place | retries every 5 s, forever, from the same IP | identifies the refusal, **skips that pool for 30 minutes**, prints the fix |
+| `your IP is banned` | reconnects at once and extends the ban | 15 minutes per pool, then the next one |
+| An overclocked rig producing bad shares | keeps submitting, earns a 10-minute ban, then an hour | after three invalid shares, **stops for 10 minutes** and says why |
+| Twenty rigs rebooting at once | identical timestamps, login flood | every retry jittered ±20 % |
+
+Cooldowns are per pool: a pool that refused your wallet does not block the
+backup. `--ban-cooldown=<seconds>` changes the default of 900; the
+wrong-wallet case is floored at 30 minutes, because waiting five seconds does not
+fix a typo.
+
+## When the block is DNS, not the pool
+
+Rigs lose their connection to DNS filtering more often than to a ban. Documented
+cases: Quad9 returns NXDOMAIN for `gulf.moneroocean.stream`, Cloudflare's
+malware resolver does the same for `pool.supportxmr.com`, some ISPs block mining
+domains wholesale, and many VPS or corporate networks allow only 80 and 443.
+
+Four ways through, in the order worth trying:
+
+1. **A backup pool on another domain.** `--failover=moneroocean,c3pool` writes
+   the extra pools into `config.json`; they are used only when the first cannot
+   be reached or refuses this IP.
+2. **A regional hostname** — the same pool, a different DNS name. That only helps
+   when the default alias is the filtered one.
+3. **Port 443 with TLS**, which looks like ordinary HTTPS: MoneroOcean
+   `gulf.moneroocean.stream:443`, SupportXMR `pool.supportxmr.com:443`,
+   xmrpool.eu `xmrpool.eu:443`. Use `--pool=tls://host:443` so the miner knows
+   that port expects TLS.
+4. **`--connect-to`** with an address resolved somewhere else. SNI and `Host`
+   stay intact; only the dial address changes.
+
+```bash
+dig +short gulf.moneroocean.stream    # from a network that resolves it
+zmrig -o gulf.moneroocean.stream:10001 --connect-to 203.0.113.10:10001 -u 4YourMoneroAddress
+```
+
+Option 4 is a workaround, not a solution: when the address changes, the
+connection breaks. Prefer 1–3. Details and the proxy recipes are in
+[Networks that only allow 443](/docs/operate/networks).
+
+## What cannot be fixed from here
+
+- **Country blocks.** The client sees a refusal, not a reason. The cooldown stops
+  it becoming a ban; it does not make that pool work.
+- **IPv6-only networks** where the AAAA record is filtered — use `--connect-to`.
+- **Share rate limits** (not login limits) on some pools. They arrive as rejects
+  and the quarantine will stop the stream, but the right fix is fewer, larger
+  shares via a higher target share time.
+
+## MoneroOcean or SupportXMR, concretely
+
+Run one for a week, then the other, and compare `xmrPerDay` at the same
+hashrate:
+
+```bash
+./oneclick.sh install --pool=moneroocean --wallet 4YourMoneroAddress
+# a week later
+./oneclick.sh install --pool=supportxmr --wallet 4YourMoneroAddress --failover=moneroocean --force
+```
+
+MoneroOcean wins when the algorithm spread is real for your CPU (it changes with
+whichever coin is hot); SupportXMR wins when it is not, and always wins on
+steadiness. Measure, then decide — the answer changes from month to month.

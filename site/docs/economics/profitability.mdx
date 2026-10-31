@@ -1,0 +1,93 @@
+---
+title: Profitability calculator
+description: Paste the ZMRIG1. codes your machines print and see hashrate, wall power, energy cost, revenue and profit per machine and for the fleet. Runs entirely in the browser.
+---
+
+import ProfitCalculator from '@site/src/components/ProfitCalculator';
+
+# Profitability calculator
+
+The point of this page is a decision: keep this machine, retire that one, and at
+what electricity price does either break even. It is not here to make the numbers
+look better.
+
+<ProfitCalculator />
+
+## The arithmetic
+
+For each machine:
+
+```text
+hashrate    H/s      from the window you pick (10 s / 60 s / 15 min / best)
+power       W wall   = W_cpu / (PSU efficiency / 100) + system overhead
+energy      kWh/day  = W wall × 24 / 1000
+cost        $/day    = kWh/day × price
+revenue     XMR/day  (one of two models, below)
+profit      $/day    = revenue × XMR price − cost
+efficiency  H/W      = hashrate / W wall
+```
+
+Two revenue models, because they answer different questions:
+
+**Per pool rate.** You supply `XMR per kH/s per day` — the figure the pool shows
+on its dashboard.
+
+```text
+XMR/day = (hashrate / 1000) × xmr_per_khs_day
+```
+
+This is the honest number for a switching pool such as MoneroOcean, because the
+algorithm switching is already inside the pool's rate.
+
+**From network hashrate.** Ignores switching, so use it to cross-check:
+
+```text
+blocks/day = (hashrate / network_hashrate) × 720
+XMR/day    = blocks/day × block_reward × (1 − pool_fee)
+```
+
+The tail emission pays 0.6 XMR per block, 720 blocks a day.
+
+## Why power has to be measured
+
+The calculator adds a system overhead (25 W by default) and divides by PSU
+efficiency (87 %) because the number inside a report code is **CPU package**
+power: it excludes the mainboard, disks, fans and the losses of the PSU.
+
+Three levels of accuracy:
+
+1. **A meter at the wall** — the only exact one. Read the watts and either type
+   them into the power column or pass `--power W`; a `user` value is used as-is
+   and not scaled.
+2. **RAPL / hwmon** — `zmrig --report` reads it when the kernel exposes it. That
+   is package power; add 15–30 W for the rest, which is what the two settings are
+   for.
+3. **Guessing from TDP** — 30–50 % error is normal. Some machines will simply
+   need the meter.
+
+The `pwsrc` field in a code says where the number came from. If it says `none`,
+type one.
+
+## Reading the result
+
+One 2 vCPU machine, 814 H/s, 45 W package, PSU 87 %, 25 W overhead, electricity
+at $0.10/kWh:
+
+```text
+W wall    = 45 / 0.87 + 25            = 76.7 W
+energy    = 76.7 × 24 / 1000          = 1.84 kWh/day
+cost      = 1.84 × 0.10               = $0.184/day
+revenue   = 0.814 × 0.000096 × $300   = $0.0234/day
+profit    = 0.0234 − 0.184            = −$0.16/day
+```
+
+That is the honest answer for a rented VPS at European electricity prices:
+mining Monero on a general-purpose CPU loses money. A machine you already own,
+whose power is free or nearly free, is a different calculation — and that is the
+case this software is built for.
+
+:::note What the calculator cannot know
+Network difficulty, coin price and share luck move constantly. Everything here is
+an estimate built on your miner's measurements; the only hard numbers are the
+hashrate and, when `--power` is used, the watts.
+:::

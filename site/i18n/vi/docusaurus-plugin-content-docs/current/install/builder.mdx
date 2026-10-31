@@ -1,0 +1,50 @@
+---
+title: Bộ dựng lệnh
+description: Dựng đúng lệnh oneclick.sh cho máy của bạn. Mỗi công tắc ứng với một cờ, và lệnh xem trước không thay đổi gì trên máy.
+---
+
+import InstallBuilder from '@site/src/components/InstallBuilder';
+
+# Bộ dựng lệnh
+
+<InstallBuilder />
+
+## Mỗi công tắc thành gì
+
+| Bạn chọn | Installer nhận |
+| --- | --- |
+| Ví | `--wallet <address>` |
+| Tên rig | `--rig-id <name>` |
+| Pool | `--pool <host:port>` hoặc `--pool tls://<host:port>` |
+| Pool dự phòng | `--failover <host:port>,<host:port>` |
+| Ép engine | `--engine zmrig` hoặc `--engine xmrig` (không đặt = tự động) |
+| Ép profile | `--profile free` hoặc `--profile watt` (không đặt = tự động) |
+| Mạng chỉ mở 443 | `--cloudflare --ws-path <path>` |
+| Proxy | `--proxy <url>` |
+| Host chặn ghi MSR | `--no-msr` |
+| Hash thuê | `--nicehash` |
+| Không tinh chỉnh host | `--no-tune` |
+| Không dò thread | `--no-autotune` |
+| Giữ config | *(không có `--force`)* |
+
+Hai quy tắc đáng biết vì chúng đổi cả lệnh, không chỉ thêm một cờ:
+
+- Chọn WebSocket hoặc proxy sẽ ép `--engine zmrig`. Engine C++ không có client
+  WebSocket và không hỗ trợ proxy, nên phương án còn lại là một config không gì
+  chạy được.
+- Pool TLS trở thành một phần của giá trị `--pool` (`tls://host:port`), vì đó là
+  dạng mà `oneclick.sh` phân tích.
+
+Địa chỉ bạn gõ được kiểm tra trước khi nút sao chép mở: 95 ký tự cho địa chỉ
+Monero chuẩn, 106 cho integrated, chỉ dùng bảng chữ base58. Host pool được kiểm
+tra dạng `host:port`, và URL đầy đủ `stratum+tcp://…` dán từ trang nhà cung cấp
+vẫn được chấp nhận.
+
+## Xem trước đã
+
+Nút xem trước sao chép đúng lệnh đó với `plan` thay cho `install`. `plan` phân
+giải pool, engine, profile, chiến lược huge page và kế hoạch autotune, in ra rồi
+dừng. Nó không ghi gì cả.
+
+Không lệnh nào chứa bí mật nào của ví: địa chỉ công khai là thứ duy nhất liên
+quan, và pool thấy nó là chuyện đương nhiên.

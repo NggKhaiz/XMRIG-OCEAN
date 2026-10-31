@@ -69,6 +69,24 @@ for file in "${files[@]}"; do
             *'#'*) anchor=${target#*#} ;;
         esac
 
+        # A site route (`/docs/pools/choosing`) is a Docusaurus page, not a file
+        # relative to the Markdown it was written in. Resolve it against the
+        # docs directory; the built site is checked by tests/docs/pages.sh.
+        case "$path" in
+            /docs/*)
+                route=${path#/docs/}
+                route=${route%/}
+                if [ -f "site/docs/${route}.md" ] || [ -f "site/docs/${route}.mdx" ] \
+                   || [ -f "site/docs/${route%/}/index.md" ]; then
+                    ok "$file -> $path (site route)"
+                else
+                    bad "$file -> $path (no such page in site/docs)"
+                fi
+                continue
+                ;;
+            /*) continue ;;
+        esac
+
         if [ -n "$path" ]; then
             # Strip a trailing query string, which only matters for site links.
             path=${path%%\?*}

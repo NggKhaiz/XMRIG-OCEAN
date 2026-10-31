@@ -1,0 +1,51 @@
+---
+title: Command builder
+description: Build the exact oneclick.sh command for your machine. Every switch maps to one flag, and the preview command changes nothing on the host.
+---
+
+import InstallBuilder from '@site/src/components/InstallBuilder';
+
+# Command builder
+
+<InstallBuilder />
+
+## What each switch turns into
+
+| You choose | The installer receives |
+| --- | --- |
+| Wallet | `--wallet <address>` |
+| Rig name | `--rig-id <name>` |
+| Pool | `--pool <host:port>` or `--pool tls://<host:port>` |
+| Backup pools | `--failover <host:port>,<host:port>` |
+| Fixed engine | `--engine zmrig` or `--engine xmrig` (absent = automatic) |
+| Fixed profile | `--profile free` or `--profile watt` (absent = automatic) |
+| 443-only network | `--cloudflare --ws-path <path>` |
+| Proxy | `--proxy <url>` |
+| Host refuses MSR writes | `--no-msr` |
+| Rented hash | `--nicehash` |
+| Do not tune the host | `--no-tune` |
+| No thread search | `--no-autotune` |
+| Keep the config | *(no `--force`)* |
+
+Two rules are worth knowing because they change the command rather than just
+adding a flag:
+
+- Asking for WebSocket or a proxy forces `--engine zmrig`. The C++ engine has no
+  WebSocket client and no proxy support, so the alternative would be a config
+  nothing can run.
+- A TLS pool becomes part of the `--pool` value (`tls://host:port`), because
+  that is the form `oneclick.sh` parses.
+
+The address you type is validated before the copy button unlocks: 95 characters
+for a standard Monero address, 106 for an integrated one, base58 alphabet only.
+A pool host is validated as `host:port`, and a full `stratum+tcp://…` URL pasted
+from a provider page is accepted.
+
+## Preview first
+
+The preview button copies the same command with `plan` in place of `install`.
+`plan` resolves the pool, the engine, the profile, the huge-page strategy and
+the autotune plan, prints them, and stops. It writes nothing.
+
+Neither command contains your wallet's private anything: a public address is the
+only credential involved, and it is visible to the pool by design.

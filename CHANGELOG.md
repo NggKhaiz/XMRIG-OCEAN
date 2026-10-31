@@ -1,3 +1,58 @@
+# Unreleased — the documentation site
+
+The site is no longer hand-written HTML. It is Docusaurus 3, in `site/`, with
+21 pages in English and 21 in Vietnamese, and the three calculators live inside
+the docs instead of beside them. No binary changed in this work.
+
+### Added
+- **`site/`**: Docusaurus 3.10 with one ordered sidebar — what it is, install,
+  configure, run, pools and money, a whole fleet, reference, development,
+  support. English is the default; Vietnamese is a full translation at `/vi/`,
+  including the navbar, the footer and the theme strings.
+- **Calculators inside the docs.** The command builder is
+  `/docs/install/builder`, the profitability calculator is
+  `/docs/economics/profitability`, and the pool table is a component both pages
+  and the tests read. `src/lib/` holds the rules as plain modules — no DOM, no
+  React — so the page and the tests cannot disagree about what a command or a
+  payout means.
+- **Three-state theme control** (`System` / `Light` / `Dark`). Docusaurus ships
+  two states, which traps a visitor who once picked dark: they can never return
+  to following the system. The swizzled toggle exposes the `null` choice the
+  config already stores.
+- **Algolia DocSearch wiring.** `themeConfig.algolia` is attached when
+  `ALGOLIA_APP_ID`, `ALGOLIA_API_KEY` and `ALGOLIA_INDEX_NAME` are present;
+  until the crawl is approved, a local index is built so there is exactly one
+  search box and never two. Application and keys: `doc/DOCS-SITE.md`.
+- **`doc/DOCS-SITE.md`**: how the site is built, why the output is committed,
+  how to add a page in two languages, and the four settings only a maintainer
+  can change.
+- **`site/tests/`** (44 checks): command-builder rules, calculator arithmetic
+  against hand-computed numbers, the pool table against `oneclick.sh` and
+  `doc/POOLS.md`, en/vi file-tree parity, and the donation address against the
+  wallet `pool/src/operator.js` decodes to.
+
+### Changed
+- **Publishing.** Pages for this repository is set to a branch source, so the
+  built site is copied into the branch root by `scripts/publish-site.sh`, which
+  replaces only the paths Docusaurus owns and never deletes `web/`.
+  `--check` fails when the committed copy is stale, and `tests/docs/pages.sh`
+  verifies it.
+- **`tests/docs/pages.sh`** rewritten for the real site (17 checks): Docusaurus
+  entry point, 21 pages in both locales, every local `href`/`src`, both
+  sitemaps, the language and theme controls, and the stale-build guard. The old
+  branch-root redirect and CSP-meta checks are gone with the pages they tested.
+- **`tests/docs/links.sh`** understands `/docs/…` routes, so a link between docs
+  pages is checked as a page rather than as a file next to the Markdown (80
+  checks, was 52).
+- **`doc/SETUP.md` §4** describes the Docusaurus build for GitHub Pages,
+  Cloudflare and Vercel, and §3b gives the CI job that has to be pasted by hand
+  (workflow files need a token scope this session does not have).
+- **README**: new docs links, the layout, and the test table.
+
+### Removed
+- The root `index.html` redirect and the `404.html` rewrite script. The
+  published site now owns both files.
+
 # v6.32.1 — the 404 on the published site
 
 The site worked and the URL was dead, because GitHub Pages was publishing the
