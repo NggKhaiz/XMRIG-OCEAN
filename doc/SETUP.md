@@ -16,6 +16,7 @@ and you move on.
 | 3 | CI for the site (`site.yml`) | 5 min | GitHub **Actions** write (token scope `workflows`) |
 | 4 | Publish the documentation site | 10 min | GitHub Pages, or Cloudflare/Vercel account |
 | 5 | Deploy the pool | 15 min | a `monerod` you control + Render/Fly account |
+| 5b | Mine a different coin | 10 min | that coin's wallet + a pool endpoint it publishes |
 | 6 | Point one miner at it | 5 min | a Linux box with root |
 | 7 | Optional: releases, custom domain, protection | 10 min | — |
 
@@ -395,6 +396,106 @@ a ledger in git is a payout history in public, and a bad merge is a wrong payout
 
 ---
 
+## 5b. Mine a different coin
+
+Seven coins, one installer. Both engines implement the whole RandomX family plus
+Panthera, which is the honest limit: a coin outside this table has no algorithm
+in this repository, and no configuration makes it mine one.
+
+| Coin | `--coin` | Algorithm | Notes |
+| --- | --- | --- | --- |
+| Monero | `xmr` | `rx/0` | the default, and the only coin with pool presets |
+| Wownero | `wow` | `rx/wow` | Monero fork, much smaller network |
+| ArQmA | `arq` | `rx/arq` | RandomARQ; a switching pool may send work here |
+| Graft | `graft` | `rx/graft` | RandomGRAFT |
+| Safex Cash | `sfx` | `rx/sfx` | RandomSFX |
+| YadaCoin | `yada` | `rx/yada` | RandomYada |
+| Scala | `xla` | `panthera` | not RandomX, still CPU work |
+
+Nothing needs installing for this: the same binary hashes all seven. What you
+supply by hand is the wallet and the pool endpoint, because neither can be
+guessed:
+
+1. **A wallet address for that coin.** Copy it from the coin's own wallet, not
+   from a screenshot. `oneclick.sh` checks the shape — the base58 alphabet and a
+   plausible length, plus a prefix warning where this repository knows one — and
+   the pool verifies the checksum. A wrong address mines for somebody else, and
+   nothing on a screen can prove an address is yours.
+2. **The pool endpoint.** The seven presets in the builder are Monero pools;
+   the smaller coins' endpoints and fees change too often to ship. Take
+   `host:port` from the coin's own community page or pinned message. `--coin wow`
+   with no `--pool` is an error, not a guess, and that is deliberate.
+3. **TLS or 443, if that is your network.** If the pool publishes a TLS port, add
+   `--tls`. If the machine can only reach 443, `--cloudflare=host:port` gives
+   WebSocket over TLS on the Zig engine.
+
+Plan first — it prints the coin, the algorithm, the engine and why:
+
+```bash
+sudo ./oneclick.sh plan --wallet YOUR_ADDRESS --coin wow --pool pool.example.org:3333
+```
+
+```text
+engine         zmrig  (RandomX family, 0% fee)
+pool           pool.example.org:3333
+algo           rx/wow
+coin           Wownero
+```
+
+Then install by replacing `plan` with `install` and adding `--yes`. The engine
+follows the algorithm: `rx/*` and `panthera` are the 0 % fee Zig engine's
+territory, and `--engine xmrig` is for debugging rather than for speed.
+
+Verify it the same way as Monero:
+
+```bash
+sudo ./oneclick.sh status                 # service, hashrate, accepted shares
+sudo ./oneclick.sh verify                 # 0% developer fee, verified
+sudo ./oneclick.sh report --power 95      # ZMRIG1. code for the calculator
+```
+
+A name that is not in the table is refused with the list, and an algorithm name
+that could break `config.json` is refused before anything is written — both are
+checked in `tests/oneclick/plan.sh`.
+
+### What the site does with these coins
+
+The builder and the wizard offer the same seven coins, and the calculator ranks
+them. The ranking is arithmetic, not an opinion:
+
+```text
+share       = rig H/s ÷ network H/s
+blocks/day  = 86400 ÷ block time
+coin/day    = share × blocks/day × block reward
+$/day       = coin/day × price
+```
+
+The numbers that go in are yours: block reward, block time and network hashrate
+from the coin's explorer. Prices come from CoinGecko only when you press the
+button, so the page works offline and no request leaves the browser before you
+ask for one. Only Monero ships defaults (120 s, 0.6 XMR, 4.5 GH/s, $300); every
+other coin starts blank, and a blank row says which field is missing instead of
+showing a zero that would look like an answer.
+
+Two things the table cannot see, and both are real money on one machine: pool
+luck on a small network (a rig holding 0.1 % of it waits days for a payout), and
+whether an exchange will buy the coin you mined.
+
+### Keeping it current
+
+There is no cron job and no build-time fetch to keep alive. Prices are pulled on
+demand; everything else you paste. Re-check the figures when the answer surprises
+you — a coin that leads by ten times is usually a stale network hashrate, not a
+tenfold opportunity.
+
+To add a coin to the site later, one file holds the list and the wording:
+`site/src/lib/coins.mjs`, plus a page under `site/docs/pools/` and its
+Vietnamese mirror. `site/tests/coins.test.mjs` fails if a coin claims an
+algorithm no engine hashes, if a non-Monero coin ships a pool preset or a default
+price, or if a missing number is silently treated as zero.
+
+---
+
 ## 6. Put one miner on it
 
 On the box that mines, as a user with `sudo`:
@@ -421,6 +522,10 @@ sudo ./oneclick.sh restart
 ```
 
 Check the first share lands: `sudo ./oneclick.sh logs | grep -m1 accepted`.
+
+Mining something other than Monero — Wownero, ArQmA, Graft, Safex Cash, YadaCoin,
+Scala — is §5b: the same installer with `--coin` and the pool endpoint that coin's
+community publishes.
 
 ---
 

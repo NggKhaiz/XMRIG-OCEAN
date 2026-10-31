@@ -1,0 +1,123 @@
+---
+title: Các coin khác
+description: Bảy thuật toán mà cả hai engine đều băm được, cách đào Wownero, ArQmA, Graft, Safex Cash, YadaCoin hay Scala bằng cùng một installer, và cách trang này xếp hạng theo số tiền thật.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-vi.png
+---
+
+import CoinMatrix from '@site/src/components/CoinMatrix';
+
+# Các coin khác
+
+Monero là mặc định vì thị trường sâu nhất và là đồng duy nhất ở đây có preset
+pool mà repo dám bảo đảm. Nó không phải đồng duy nhất hai engine băm được.
+
+Cả hai miner đều chạy được cả họ RandomX — bảy thuật toán — cộng thêm Panthera.
+Đó là giới hạn thật: một đồng nằm ngoài danh sách này không có thuật toán nào ở
+đây, và không cấu hình nào biến nó thành đào được.
+
+| Coin | Mã | Thuật toán | Đào bằng |
+| --- | --- | --- | --- |
+| Monero | XMR | `rx/0` | `--coin xmr` (mặc định) |
+| Wownero | WOW | `rx/wow` | `--coin wow` |
+| ArQmA | ARQ | `rx/arq` | `--coin arq` |
+| Graft | GRFT | `rx/graft` | `--coin graft` |
+| Safex Cash | SFX | `rx/sfx` | `--coin sfx` |
+| YadaCoin | YDA | `rx/yada` | `--coin yada` |
+| Scala | XLA | `panthera` | `--coin xla` |
+
+`--coin` là cách viết ngắn của `--algo rx/wow`; cả hai cho ra cùng một `"algo"`
+trong `config.json`. Tên không có trong bảng sẽ bị từ chối kèm danh sách, trước
+khi có gì được ghi lên máy.
+
+## Một lệnh, mọi đồng
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/NggKhaiz/ZMRIG/BETA/oneclick.sh \
+  | sudo bash -s -- install --wallet YOUR_ADDRESS --coin wow \
+      --pool pool.example.org:3333 --yes
+```
+
+Xem plan trước — nó in ra coin, thuật toán, engine và profile đã phân giải, không
+ghi gì:
+
+```bash
+sudo ./oneclick.sh plan --wallet YOUR_ADDRESS --coin wow --pool pool.example.org:3333
+```
+
+```text
+engine         zmrig  (RandomX family, 0% fee)
+pool           pool.example.org:3333
+algo           rx/wow
+coin           Wownero
+profile        free  (auto: no battery, electricity is treated as free)
+```
+
+Engine tự chọn: `rx/*` và `panthera` thuộc về engine Zig — engine phí 0 %. Ép
+engine C++ bằng `--engine xmrig` chỉ khi cần debug, không phải vì nó nhanh hơn —
+nó không nhanh hơn.
+
+## Endpoint do bạn cung cấp
+
+Bảy preset pool trong bộ dựng lệnh đều là pool Monero. Phí và endpoint của các
+đồng nhỏ đổi quá nhanh để repo giữ đúng, nên nó không giữ gì cả: `--coin wow`
+không kèm `--pool` là lỗi, không phải một phép đoán.
+
+Lấy endpoint từ cộng đồng của chính đồng đó — thường là một trang hoặc tin ghim
+trong chat — rồi truyền dạng `host:port`. Nếu pool công bố cổng TLS riêng, thêm
+`--tls`; nếu mạng chỉ cho ra 443, `--cloudflare=host:port` cho bạn WebSocket qua
+TLS trên engine Zig.
+
+## Cái gì được kiểm, cái gì không
+
+Bộ dựng lệnh kiểm địa chỉ Monero chính xác: 95 ký tự, 106 với địa chỉ tích hợp,
+chỉ bảng chữ base58. Với sáu đồng còn lại nó kiểm bảng chữ và độ dài hợp lý, cảnh
+báo khi prefix không phải cái nó biết — nó không nhận là đã kiểm checksum mà nó
+không tính. Pool làm việc đó, và chỉ pool mới làm được.
+
+Sai địa chỉ là đào cho người khác, và không trang web nào chứng minh được địa chỉ
+là của bạn. Sao chép từ ví của bạn, dán vào, rồi đối chiếu sáu ký tự đầu và cuối
+với màn hình ví.
+
+## Đồng nào lãi nhất
+
+Không có câu trả lời cố định: nó đổi theo giá, hashrate mạng và hashrate của
+chính bạn. Nên trang này không in một lời khuyên dựng trên số của năm ngoái. Nó
+tính từ số bạn nhập.
+
+<CoinMatrix />
+
+Công thức cho mỗi đồng:
+
+```text
+share       = H/s của rig ÷ H/s của mạng
+block/ngày  = 86400 ÷ thời gian block
+coin/ngày   = share × block/ngày × thưởng mỗi block
+$/ngày      = coin/ngày × giá
+```
+
+Nhập phần thưởng, thời gian block và hashrate mạng từ explorer của đồng đó; giá
+thì nhập tay hoặc bấm nút CoinGecko. Dòng còn thiếu số sẽ hiện thiếu trường nào
+thay vì số 0 — số 0 sẽ tự xếp cuối và trông như một câu trả lời thật.
+
+Hai thứ bảng này không thấy được:
+
+- **May mắn và phí pool.** Block của mạng nhỏ rất thưa, nên rig chiếm 0,1 % có
+  thể chờ vài ngày mới có payout. Độ dao động đó là tiền thật với một máy, và
+  không nằm trong con số trung bình ngày.
+- **Thanh khoản sàn.** Giá niêm yết vô nghĩa nếu bạn không bán được thứ mình
+  đào. Kiểm tra có thị trường trước khi dồn rig vào đồng mới.
+
+## Giữ số liệu luôn mới
+
+Không có gì được nướng vào lúc build. Giá chỉ được lấy từ CoinGecko khi bạn bấm
+nút, nên trang chạy được offline và không request nào rời trình duyệt trước đó.
+Các số bạn nhập ở lại trong trình duyệt đó.
+
+Hãy kiểm lại khi kết quả làm bạn ngạc nhiên: một đồng dẫn đầu gấp mười lần
+thường là do hashrate mạng đã cũ, không phải cơ hội gấp mười.
+
+:::note Giữ rig chạy
+Đào đồng khác là đổi cấu hình, không phải đổi installer. Nếu pool của đồng đó
+cũng trả cho nhiều thuật toán, hãy bỏ `--coin` và để pool tự chọn: zmrig quảng
+báo cả họ thuật toán lúc login, nên rig chuyển qua lại mà không phải cài lại.
+:::

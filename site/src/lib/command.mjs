@@ -18,11 +18,12 @@
 //     a human and pasted into a root shell.
 
 import { POOLS, findPool } from "./pools.mjs";
+import { COINS, coinOrDefault, findCoin } from "./coins.mjs";
 
 export const RAW_URL =
   "https://raw.githubusercontent.com/NggKhaiz/ZMRIG/BETA/oneclick.sh";
 
-const SAFE = /^[A-Za-z0-9._:@%+=,-]+$/;
+const SAFE = /^[A-Za-z0-9._:@%+=,/\-]+$/;
 
 export function shellQuote(value) {
   if (value === "") return "''";
@@ -30,19 +31,55 @@ export function shellQuote(value) {
   return "'" + String(value).replace(/'/g, "'\\''") + "'";
 }
 
-// Monero addresses: 95 characters (4… primary, 8… subaddress) or 106 for an
-// integrated address. Base58 excludes 0, O, I and l.
-export function walletState(value) {
+// CryptoNote addresses are base58: no 0, O, I or l. Monero's are exact — 95
+// characters starting with 4 (primary) or 8 (subaddress), 106 for an integrated
+// address. The other coins get the checks this file can be sure of (alphabet,
+// plausible length) plus a prefix *warning* when the coin's prefix is known: a
+// wrong prefix is worth saying out loud, but blocking somebody's valid address
+// because this file guessed a prefix wrongly would be worse than the miss. The
+// pool checks the checksum; nothing here pretends to.
+const BASE58 = /^[1-9A-HJ-NP-Za-km-z]+$/;
+
+export function walletState(value, coin) {
   const text = String(value || "").trim();
-  if (!text) return { status: "empty", ok: false, length: 0 };
-  if (!/^[48][1-9A-HJ-NP-Za-km-z]+$/.test(text)) {
-    return { status: "charset", ok: false, length: text.length };
+  const c = typeof coin === "string" ? coinOrDefault(coin) : coin || COINS[0];
+  const rule = c.address || {};
+  if (!text) return { status: "empty", ok: false, length: 0, coin: c.id };
+  if (!BASE58.test(text)) {
+    return { status: "charset", ok: false, length: text.length, coin: c.id };
   }
-  if (text.length === 95) return { status: "valid", ok: true, length: 95 };
-  if (text.length === 106 && text[0] === "4") {
-    return { status: "integrated", ok: true, length: 106 };
+
+  if (rule.strict) {
+    if (
+      rule.prefixes &&
+      !rule.prefixes.some((prefix) => text.startsWith(prefix))
+    ) {
+      return { status: "prefix", ok: false, length: text.length, coin: c.id };
+    }
+    if (rule.lengths.includes(95) && text.length === 95) {
+      return { status: "valid", ok: true, length: 95, coin: c.id };
+    }
+    if (rule.lengths.includes(106) && text.length === 106) {
+      return { status: "integrated", ok: true, length: 106, coin: c.id };
+    }
+    return { status: "length", ok: false, length: text.length, coin: c.id };
   }
-  return { status: "length", ok: false, length: text.length };
+
+  // Loose rule: CryptoNote addresses live in this range; outside it the string is
+  // not an address at all.
+  if (text.length < 90 || text.length > 120) {
+    return { status: "length", ok: false, length: text.length, coin: c.id };
+  }
+  const wrongPrefix =
+    rule.prefixes &&
+    rule.prefixes.length > 0 &&
+    !rule.prefixes.some((prefix) => text.startsWith(prefix));
+  return {
+    status: wrongPrefix ? "prefix" : "plausible",
+    ok: true,
+    length: text.length,
+    coin: c.id,
+  };
 }
 
 // `host:port`, with an optional scheme. A pool URL pasted from a provider page
@@ -87,6 +124,7 @@ export function hostState(value) {
 function normalise(state) {
   const s = state || {};
   return {
+    coin: findCoin(String(s.coin || "xmr")) ? String(s.coin || "xmr") : "xmr",
     wallet: String(s.wallet || "").trim(),
     rig: String(s.rig || "")
       .trim()
@@ -119,11 +157,16 @@ function quoteArgs(args) {
 
 export function build(state) {
   const s = normalise(state);
-  const known = findPool(s.pool);
+  const coin = coinOrDefault(s.coin);
+  // Pool presets exist for Monero only. For every other coin `known` is null and
+  // the endpoint has to be typed, which is the honest default: this repository
+  // knows the Monero pools' fees and endpoints, and does not know the others'.
+  const presetAllowed = coin.pools.length > 0;
+  const known = presetAllowed ? findPool(s.pool) : null;
   const isCustom = !known;
 
   const host = s.host || (known ? known.host : "");
-  const wallet = walletState(s.wallet);
+  const wallet = walletState(s.wallet, coin);
   const hostCheck = hostState(host);
   const connectCheck = s.connectTo ? hostState(s.connectTo) : null;
   const proxyCheck = s.proxy ? proxyState(s.proxyUrl) : null;
@@ -163,11 +206,21 @@ export function build(state) {
   if (known && known.switching && engine === "zmrig") {
     warnings.push({ key: "switchingPool", params: { pool: known.name } });
   }
+  if (coin.id !== "xmr") {
+    notes.push({
+      key: "algoPinned",
+      params: { algo: coin.algo, coin: coin.name },
+    });
+  }
 
   const args = ["install", "--wallet", s.wallet || "YOUR_WALLET"];
   if (s.rig) args.push("--rig-id", s.rig);
   if (engine !== "auto") args.push("--engine", engine);
   args.push("--pool", endpoint || "YOUR_POOL_HOST");
+  // Monero is left alone: pinning rx/0 on a switching pool would stop it from
+  // moving the rig to whichever RandomX coin pays best, which is the whole
+  // point of that pool. Every other coin is pinned to its own algorithm.
+  if (coin.algo !== "rx/0") args.push("--algo", coin.algo);
   if (failover.length) args.push("--failover", failover.join(","));
 
   if (s.cloudflare) {
@@ -201,6 +254,7 @@ export function build(state) {
   const planArgs = ["plan"];
   if (s.wallet) planArgs.push("--wallet", s.wallet);
   planArgs.push("--pool", endpoint || "YOUR_POOL_HOST");
+  if (coin.algo !== "rx/0") planArgs.push("--algo", coin.algo);
   if (failover.length) planArgs.push("--failover", failover.join(","));
   if (engine !== "auto") planArgs.push("--engine", engine);
   if (s.profile !== "auto") planArgs.push("--profile", s.profile);
@@ -212,7 +266,8 @@ export function build(state) {
   // --- state that must block the copy button -------------------------------
   if (!wallet.ok)
     blocked = wallet.status === "empty" ? "wallet-empty" : "wallet-invalid";
-  else if (isCustom && !hostCheck.ok) blocked = "host-invalid";
+  else if (isCustom && !hostCheck.ok)
+    blocked = hostCheck.status === "empty" ? "pool-empty" : "host-invalid";
   else if (s.proxy && !s.proxyUrl) blocked = "proxy-missing";
   else if (s.proxy && !proxyCheck.ok) blocked = "proxy-invalid";
   else if (s.connectTo && !connectCheck.ok) blocked = "connect-to-invalid";
@@ -226,6 +281,12 @@ export function build(state) {
   return {
     args,
     flags: args.filter((arg) => arg.startsWith("--")),
+    coin: {
+      id: coin.id,
+      name: coin.name,
+      symbol: coin.symbol,
+      algo: coin.algo,
+    },
     wallet,
     host: hostCheck,
     connectTo: connectCheck,

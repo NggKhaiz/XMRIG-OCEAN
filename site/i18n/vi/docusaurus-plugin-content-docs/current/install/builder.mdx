@@ -14,6 +14,7 @@ import InstallBuilder from '@site/src/components/InstallBuilder';
 
 | Bạn chọn | Installer nhận |
 | --- | --- |
+| Coin | `--algo rx/wow` — Monero không thêm gì, vì pool chuyển thuật toán có thể đổi rig sang đồng khác |
 | Ví | `--wallet <address>` |
 | Tên rig | `--rig-id <name>` |
 | Pool | `--pool <host:port>` hoặc `--pool tls://<host:port>` |
@@ -37,10 +38,17 @@ Hai quy tắc đáng biết vì chúng đổi cả lệnh, không chỉ thêm m�
 - Pool TLS trở thành một phần của giá trị `--pool` (`tls://host:port`), vì đó là
   dạng mà `oneclick.sh` phân tích.
 
-Địa chỉ bạn gõ được kiểm tra trước khi nút sao chép mở: 95 ký tự cho địa chỉ
-Monero chuẩn, 106 cho integrated, chỉ dùng bảng chữ base58. Host pool được kiểm
-tra dạng `host:port`, và URL đầy đủ `stratum+tcp://…` dán từ trang nhà cung cấp
-vẫn được chấp nhận.
+Địa chỉ bạn gõ được kiểm tra trước khi nút sao chép mở: với Monero là 95 ký tự,
+106 cho integrated, chỉ dùng bảng chữ base58. Với sáu đồng còn lại, kiểm tra là
+bảng chữ và độ dài hợp lý, kèm cảnh báo khi prefix không phải cái trang này biết —
+nó không giả vờ xác minh checksum mà nó không tính. Host pool được kiểm tra dạng
+`host:port`, và URL đầy đủ `stratum+tcp://…` dán từ trang nhà cung cấp vẫn được
+chấp nhận.
+
+Đồng coin quyết định hai việc. Nó ghim thuật toán (`--algo rx/wow` và tương tự) —
+trừ Monero, vì thêm cờ đó sẽ chặn pool chuyển thuật toán đổi rig sang đồng
+RandomX trả tốt nhất. Và nó quyết định có preset pool hay không: bảy preset đều là
+pool Monero, nên mọi đồng khác sẽ hỏi endpoint thay vì bịa ra một cái. Chi tiết và lệnh mẫu nằm ở [Các coin khác](/docs/pools/coins).
 
 Ô proxy nhận cả URL — `socks5://host:port` hoặc `http://user:pass@host:port` —
 vì đó là thứ miner phân tích. Địa chỉ dial chỉ là `host:port`; nó thay IP đã
