@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>Moved — the documentation</title>
+<meta name="description" content="The ZMRIG documentation: install, configuration, pools, networks that allow only 443, benchmarks and the profitability calculator, in English and Vietnamese.">
 <link rel="canonical" href="https://nggkhaiz.github.io/ZMRIG/docs/intro">
 <meta http-equiv="refresh" content="2; url=/ZMRIG/docs/intro">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -22,6 +23,12 @@
   <p><a href="/ZMRIG/docs/intro">Read the documentation</a> ·
      <a href="/ZMRIG/vi/docs/intro">Tài liệu tiếng Việt</a></p>
 </main>
-<script>location.replace("/ZMRIG/docs/intro");</script>
+<script>
+  location.replace(
+    location.pathname.indexOf("/vi/") !== -1
+      ? "/ZMRIG/vi/docs/intro"
+      : "/ZMRIG/docs/intro"
+  );
+</script>
 </body>
 </html>

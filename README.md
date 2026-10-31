@@ -10,7 +10,7 @@ by **[@nggkhaiz](https://github.com/NggKhaiz)**
 [![licence](https://img.shields.io/badge/licence-GPL--3.0-blue)](LICENSE)
 [![dev fee](https://img.shields.io/badge/developer%20fee-0%25-46b17b)](doc/ZERO_FEE.md)
 [![platform](https://img.shields.io/badge/platform-Linux%20x86--64%20%C2%B7%20macOS%20%C2%B7%20Windows-lightgrey)](#build-from-source)
-[![tests](https://img.shields.io/badge/tests-452%20checks%20%C2%B7%2011%20suites-46b17b)](#tests)
+[![tests](https://img.shields.io/badge/tests-453%20checks%20%C2%B7%2011%20suites-46b17b)](#tests)
 [![stars](https://img.shields.io/github/stars/NggKhaiz/ZMRIG?style=flat&color=f2763f)](https://github.com/NggKhaiz/ZMRIG/stargazers)
 [![last commit](https://img.shields.io/github/last-commit/NggKhaiz/ZMRIG)](https://github.com/NggKhaiz/ZMRIG/commits/BETA)
 
@@ -328,7 +328,7 @@ cd .. && ./zmrig/tests/unit.sh && ./zmrig/tests/cli.sh && ./zmrig/tests/health.s
 | `tests/oneclick/*.sh` | 56 | plan, config, governor, purge (removes only its own paths), branch switching |
 | `tests/docs/links.sh` | 84 | every relative link and every `#anchor` in the documentation resolves, including `/docs/…` site routes |
 | `site` `npm test` | 53 | command builder and its blocked states, calculator arithmetic against hand-computed numbers including break-even, pool table vs `oneclick.sh` and `doc/POOLS.md`, en/vi key parity and no dead or duplicated message |
-| `tests/docs/pages.sh` | 21 | the published site as Pages serves it: Docusaurus entry point, 21 pages in both locales, every `href`/`src`, sitemap, language and theme controls, one localised social card per page, old-URL redirects, committed build not stale |
+| `tests/docs/pages.sh` | 22 | the published site as Pages serves it: Docusaurus entry point, 21 pages in both locales, all 2040 local `href`/`src`, sitemap, language and theme controls, one localised social card per page, a title/description/lang on every page with no leaked placeholder, old-URL redirects, committed build not stale |
 
 ## Documentation
 

@@ -109,8 +109,13 @@ def resolve(url):
     candidates = [rel, rel + ".html", rel.rstrip("/") + "/index.html", rel + "/index.html"]
     return any(os.path.isfile(os.path.join(ROOT, c)) for c in candidates)
 
-pages = ["index.html", "404.html", "docs/intro.html", "vi/docs/intro.html",
-         "docs/economics/profitability.html", "vi/docs/economics/profitability.html"]
+# Every published page, not a sample: a broken asset on page 19 is exactly as
+# broken as one on the home page, and only this loop knows the difference.
+pages = ["index.html", "404.html"]
+for root, _dirs, files in os.walk("docs"):
+    pages += [os.path.join(root, f) for f in files if f.endswith(".html")]
+for root, _dirs, files in os.walk("vi"):
+    pages += [os.path.join(root, f) for f in files if f.endswith(".html")]
 bad = 0
 checked = 0
 for page in pages:
@@ -137,6 +142,66 @@ if [ "${broken:-1}" = "0" ] && [ "${checked:-0}" -gt 50 ]; then
 else
     bad "${broken:-?} of ${checked:-?} local reference(s) broken, listed above"
     head -10 /tmp/zmrig-assets-check.txt | sed 's/^/      /'
+fi
+
+# --- 3b. every page is a finished page -------------------------------------
+# The bugs a reader actually sees: a missing title in a tab, an empty share card,
+# and a placeholder that leaked out of a template. Cheap to check, embarrassing
+# to ship.
+python3 - <<'PY2' > /tmp/zmrig-page-quality.txt
+import os, re, sys
+
+bad = 0
+pages = []
+for base in ("docs", "vi"):
+    for root, _dirs, files in os.walk(base):
+        pages += [os.path.join(root, f) for f in files if f.endswith(".html")]
+
+TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.S)
+DESC = re.compile(r'<meta[^>]+name="description"[^>]+content="([^"]*)"')
+LEAKS = ("undefined", "NaN", "[object Object]", "{{", "}}", "lorem ipsum")
+# Minified JavaScript is full of "}}" and "NaN"; only what a reader can see
+# counts, so scripts and styles are removed before the scan.
+NOISE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.S)
+
+for page in pages:
+    html = open(page, encoding="utf-8").read()
+    title = TITLE.search(html)
+    if not title or not title.group(1).strip():
+        print(f"{page}: no title")
+        bad += 1
+    # A 404 and a noindex search page are not shareable, so they are not
+    # expected to carry a description; everything a visitor can land on is.
+    shareable = "noindex" not in html and not page.endswith("404.html")
+    desc = DESC.search(html)
+    if shareable and (not desc or len(desc.group(1).strip()) < 20):
+        print(f"{page}: missing or thin description")
+        bad += 1
+    body = NOISE.sub("", html.split("<body", 1)[-1])
+    for leak in LEAKS:
+        if leak in body:
+            print(f"{page}: leaked {leak!r}")
+            bad += 1
+            break
+    # The two redirect stubs are language-neutral: they pick the destination
+    # from the URL, so their own lang attribute is not a claim about content.
+    stub = os.path.basename(page) in ("wizard.html", "docs.html")
+    lang = "vi" if page.startswith("vi/") else "en"
+    if not stub and f'<html lang="{lang}"' not in html:
+        print(f"{page}: html lang is not {lang}")
+        bad += 1
+
+print(f"pages {len(pages)} bad {bad}")
+sys.exit(0 if bad == 0 else 1)
+PY2
+quality=$(tail -1 /tmp/zmrig-page-quality.txt)
+qpages=$(printf '%s' "$quality" | awk '{print $2}')
+qbad=$(printf '%s' "$quality" | awk '{print $4}')
+if [ "${qbad:-1}" = "0" ] && [ "${qpages:-0}" -ge 40 ]; then
+    ok "all ${qpages} pages have a title, a description, the right lang and no leaked placeholder"
+else
+    bad "${qbad:-?} problem(s) across ${qpages:-?} pages, listed above"
+    head -10 /tmp/zmrig-page-quality.txt | sed 's/^/      /'
 fi
 
 # --- 4. the sitemap advertises only pages that exist ----------------------
