@@ -83,9 +83,33 @@
 }
 
 .zm-hero h1 {
+  display: flex;
+  align-items: center;
+  gap: 0.42em;
   font-size: clamp(2.6rem, 7vw, 3.6rem);
   letter-spacing: -0.03em;
   margin: 0 0 0.75rem;
+}
+
+/* The mark is drawn in one tone, so it has to follow the page tone rather than
+   keep a colour of its own. Dark mode swaps in the white copy of the same file. */
+.zm-mark {
+  width: 0.82em;
+  height: 0.82em;
+  flex: none;
+}
+
+html[data-theme="dark"] .zm-mark--light,
+html:not([data-theme="dark"]) .zm-mark--dark {
+  display: none;
+}
+
+/* The navbar logo is 32 px of stroke; at that size a 3.4 px stroke is right, so
+   only the spacing needs a nudge. */
+.navbar__logo {
+  height: 30px;
+  width: 30px;
+  margin-right: 0.6rem;
 }
 
 .zm-lede {

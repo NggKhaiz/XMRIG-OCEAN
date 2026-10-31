@@ -27,7 +27,18 @@ const algolia = algoliaConfig();
 const config = {
   title: "ZMRIG",
   tagline: "RandomX miner, 0 % developer fee, made by @nggkhaiz",
-  favicon: "img/z.svg",
+  // A single tone mark: the RandomX cache (solid core) inside the dataset (the
+  // ring). `logo.svg` and `logo-dark.svg` are the same geometry in black and
+  // white; `favicon.svg` picks the tone from the browser's colour scheme so it
+  // stays visible on either tab bar.
+  favicon: "img/favicon.svg",
+  headTags: [
+    { tagName: "link", attributes: { rel: "apple-touch-icon", href: `${BASE}img/apple-touch-icon.png` } },
+    { tagName: "link", attributes: { rel: "icon", type: "image/png", sizes: "32x32", href: `${BASE}img/favicon-32.png` } },
+    { tagName: "link", attributes: { rel: "icon", type: "image/png", sizes: "192x192", href: `${BASE}img/favicon-192.png` } },
+    { tagName: "meta", attributes: { name: "theme-color", content: "#ffffff", media: "(prefers-color-scheme: light)" } },
+    { tagName: "meta", attributes: { name: "theme-color", content: "#0b0b0c", media: "(prefers-color-scheme: dark)" } },
+  ],
 
   url: SITE,
   baseUrl: BASE,
@@ -117,7 +128,7 @@ const config = {
       algolia: algolia ?? undefined,
       navbar: {
         title: "ZMRIG",
-        logo: { alt: "ZMRIG", src: "img/z.svg", srcDark: "img/z.svg" },
+        logo: { alt: "ZMRIG", src: "img/logo.svg", srcDark: "img/logo-dark.svg" },
         items: [
           {
             type: "docSidebar",

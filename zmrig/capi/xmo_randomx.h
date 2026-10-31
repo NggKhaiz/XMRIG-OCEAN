@@ -50,6 +50,17 @@ void        xmo_engine_free(xmo_engine *engine);
 size_t xmo_engine_dataset_size(const xmo_engine *engine);
 size_t xmo_engine_cache_size(const xmo_engine *engine);
 
+/*
+ * Bytes an engine for `algo` will map, without creating one: the cache always,
+ * the dataset too when full_memory is non-zero. The seven configurations in
+ * this repository are not the same size — Monero, Wownero, ArqmA, Graft, Safex
+ * and Yada need 2336 MiB, Panthera/Scala needs 160 — so anything that reserves
+ * memory or huge pages has to ask per algorithm instead of assuming Monero's.
+ */
+size_t xmo_algo_memory(int algo, int full_memory);
+size_t xmo_algo_dataset_memory(int algo);
+size_t xmo_algo_cache_memory(int algo);
+
 /* (Re)initialise cache + dataset for a new seed. threads >= 1. */
 int  xmo_engine_seed(xmo_engine *engine, const uint8_t *seed, size_t seed_len,
                      int threads, char *err, size_t errlen);

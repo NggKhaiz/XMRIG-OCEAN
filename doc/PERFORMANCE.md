@@ -106,7 +106,16 @@ donation switch).
 | 1 GiB explicit (`1gb-pages: auto`) | +1 % … +3 % on top of 2 MiB |
 | Transparent huge pages (fallback) | +2 % … +8 %, less predictable |
 
-`tune-linux.sh` reserves exactly what the RandomX dataset needs. Note that
+`tune-linux.sh` reserves exactly what the algorithm being mined needs, and that
+is not one number: `--algo panthera` reserves 96 pages (192 MB) where `rx/0`
+reserves 1168 (2336 MB). The sizes come from the compiled RandomX configuration:
+
+| Algorithm | Cache | Dataset | Total | 2 MiB pages |
+|---|---:|---:|---:|---:|
+| `rx/0`, `rx/wow`, `rx/arq`, `rx/graft`, `rx/sfx`, `rx/yada` | 256 MB | 2080 MB | 2336 MB | 1168 |
+| `panthera` (Scala/XLA) | 128 MB | 64 MB | 192 MB | 96 |
+
+Note that
 XMRig itself also *tops up* `/proc/sys/vm/nr_hugepages` when it cannot get
 enough pages (for example when a second miner or a benchmark runs while the
 service is up). That is upstream behaviour and it is why
@@ -118,7 +127,7 @@ Measured on the container used for this release (2 vCPU Xeon 2.6 GHz, 3.9 GiB,
 | What was done | H/s | vs previous row |
 |---|---|---|
 | nothing: 0 pages reserved, THP fallback (what a fresh VPS looks like) | 855.8 | — |
-| `zmrig` run as root: it reserves 1208 pages itself, then mines | **1070.0** | **+25.0 %** |
+| `zmrig` run as root: it reserves what the algorithm needs, then mines | **1070.0** | **+25.0 %** |
 | 4 threads instead of 2 on the same 2 vCPU | 1070.0 | ±0 % (no gain) |
 | 1 thread on the same box | 553.4 | −48 % (thread count matters) |
 
@@ -131,9 +140,12 @@ count decide the hashrate, everything else is noise.
 +25 % happens without anybody reading this page:
 
 ```
-$ sudo zmrig -o pool:3333 -u 4You...
-[15:27:54] info huge pages: reserved 1208 pages of 2 MiB (2416 MB), the RandomX dataset now uses 2 MiB pages
-[15:28:15] info benchmark: 6001 hashes in 5611 ms = 1.070 kH/s
+$ sudo zmrig -o pool:3333 -u 4You... -a rx/0
+huge pages: reserved 1168 pages of 2 MiB (2336 MB) for rx/0, so RandomX reads its cache and dataset through 2 MiB pages
+benchmark: 6001 hashes in 5611 ms = 1.070 kH/s
+
+$ sudo zmrig -o pool:3333 -u 4You... -a panthera
+huge pages: reserved 96 pages of 2 MiB (192 MB) for panthera, ...
 ```
 
 * it runs only when huge pages are **on** (`--no-huge-pages` turns it off too),

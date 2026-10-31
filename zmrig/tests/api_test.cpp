@@ -47,6 +47,46 @@ int main()
 
     std::printf("engine: %s\n", xmo_engine_name());
 
+    /* --- the engine sizes itself per algorithm ----------------------------
+     * Every RandomX fork in this repository has its own configuration, and the
+     * sizes are not interchangeable: Monero needs 2336 MiB of cache+dataset,
+     * Panthera/Scala 192. A miner that assumes Monero's number sends a 1 GiB
+     * VPS to light mode on a coin it could mine in fast mode with huge pages.
+     *
+     * These are pure queries — no engine is created, nothing is allocated. */
+    {
+        const size_t monero_cache = xmo_algo_cache_memory(XMO_RX_0);
+        const size_t monero_data  = xmo_algo_dataset_memory(XMO_RX_0);
+        const size_t scala_cache  = xmo_algo_cache_memory(XMO_RX_XLA);
+        const size_t scala_data   = xmo_algo_dataset_memory(XMO_RX_XLA);
+
+        std::printf("rx/0: cache %zu MB, dataset %zu MB; panthera: cache %zu MB, dataset %zu MB\n",
+                    monero_cache >> 20, monero_data >> 20, scala_cache >> 20, scala_data >> 20);
+
+        struct Expect { const char *name; bool ok; };
+        const Expect checks[] = {
+            { "Monero cache is 256 MiB",              monero_cache == 268435456 },
+            { "Monero dataset is 2 GiB + the extra items", monero_data == 2147483648UL + 33554368UL },
+            { "Panthera cache is 128 MiB",            scala_cache == 134217728 },
+            { "Panthera dataset is 32 MiB base + extras", scala_data == 33554432UL + 33554368UL },
+            { "Panthera is smaller than Monero",      scala_cache + scala_data < monero_cache + monero_data },
+            { "light mode maps the cache only",       xmo_algo_memory(XMO_RX_0, 0) == monero_cache },
+            { "full mode maps cache and dataset",     xmo_algo_memory(XMO_RX_0, 1) == monero_cache + monero_data },
+            /* The other five forks share Monero's dataset size, which is why a
+             * reservation made for rx/0 covers them after a pool switch. */
+            { "rx/wow has Monero's dataset size",     xmo_algo_dataset_memory(XMO_RX_WOW) == monero_data },
+            { "rx/arq has Monero's dataset size",     xmo_algo_dataset_memory(XMO_RX_ARQ) == monero_data },
+            { "rx/graft has Monero's dataset size",   xmo_algo_dataset_memory(XMO_RX_GRAFT) == monero_data },
+            { "rx/sfx has Monero's dataset size",     xmo_algo_dataset_memory(XMO_RX_SFX) == monero_data },
+            { "rx/yada has Monero's dataset size",    xmo_algo_dataset_memory(XMO_RX_YADA) == monero_data },
+        };
+
+        for (const auto &c : checks) {
+            std::printf(c.ok ? "PASS %s\n" : "FAIL %s\n", c.name);
+            if (!c.ok) ++failures;
+        }
+    }
+
     /* --- light mode (cache only), the fastest way to validate the API --- */
     xmo_engine *light = xmo_engine_new(XMO_RX_0, /*jit*/ 8, err, sizeof(err));
     if (!light) {
@@ -114,6 +154,74 @@ int main()
 
     xmo_vm_free(vm);
     xmo_engine_free(light);
+
+    /* --- every supported coin hashes its own reference vector ---------------
+     * One vector per configuration, copied from tests/hash/main.cpp. Before
+     * this, the suite only hashed rx/0 in light mode, which is how Panthera's
+     * light-mode JIT read 2 GiB into a 128 MiB cache and segfaulted for months
+     * without anybody noticing.
+     *
+     * rx/2 is missing on purpose: no coin uses it, and upstream v6.26 disagrees
+     * with itself about it - the interpreter ignores its AES tweak while the JIT
+     * applies it (tests/hash/main.cpp skips the JIT comparison for the same
+     * reason). There is nothing to compare against, so we do not pretend. */
+    {
+        struct AlgoVector {
+            int         algo;
+            const char *name;
+            const char *hex;
+        };
+
+        const AlgoVector variants[] = {
+            { XMO_RX_0,     "rx/0",     "1833ff322e60dad7d6885bcd5e0844ec8e4808a47d8d354806668f0c241a6af5" },
+            { XMO_RX_WOW,   "rx/wow",   "45896210539d9ba37377b9c186b7343304cd6bf797c75f3d1087ee63f22a73e4" },
+            { XMO_RX_ARQ,   "rx/arq",   "ca2b7afe5c50ab45296c5457337ff7cf27624139f05ec5d44c1e4ae8bfe95bb6" },
+            { XMO_RX_GRAFT, "rx/graft", "c4a9cfd2f0a9359c78f089902b44b42623fbf18a1a01786879bfed3f0be255f7" },
+            { XMO_RX_SFX,   "rx/sfx",   "3b88936e289ff3240dc074b289fe6464194bdfe31a80c9dc10c9c1eaa1975513" },
+            { XMO_RX_YADA,  "rx/yada",  "04d68fb9c445f4437dfce6ebb8028367b060140066ebaa416a4cd2ca63cdb723" },
+            { XMO_RX_XLA,   "panthera", "1805aa4fd26f5686dada26d9e16ccb290811b2a79404fdd1064f1ca092902212" },
+        };
+
+        for (const auto &variant : variants) {
+            char name[64];
+
+            xmo_engine *e = xmo_engine_new(variant.algo, /*jit*/ 8, err, sizeof(err));
+            if (!e) {
+                std::printf("FAIL %s engine: %s\n", variant.name, err);
+                ++failures;
+
+                continue;
+            }
+
+            if (xmo_engine_seed(e, reinterpret_cast<const uint8_t *>(seed.data()), seed.size(), 1, err, sizeof(err)) != 0) {
+                std::printf("FAIL %s seed: %s\n", variant.name, err);
+                ++failures;
+                xmo_engine_free(e);
+
+                continue;
+            }
+
+            xmo_vm *v = xmo_vm_new(e, 0, 0, err, sizeof(err));
+            if (!v) {
+                std::printf("FAIL %s vm: %s\n", variant.name, err);
+                ++failures;
+                xmo_engine_free(e);
+
+                continue;
+            }
+
+            uint8_t want[32];
+            uint8_t got[32] = {};
+            unhex(variant.hex, want);
+            xmo_hash(v, reinterpret_cast<const uint8_t *>(inA.data()), inA.size(), got);
+
+            std::snprintf(name, sizeof(name), "%s light hash", variant.name);
+            check(name, got, want);
+
+            xmo_vm_free(v);
+            xmo_engine_free(e);
+        }
+    }
 
     /* --- full memory mode equals light mode, and the dataset is 2 GiB ---
      * Needs 2.25 GiB, so it only runs when the machine has reserved huge pages

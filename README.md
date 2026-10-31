@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="site/static/img/logo.svg" alt="" width="72" height="72">
+
 # ZMRIG
 
 **A RandomX miner with no developer fee, the pool that pays for it,<br>a proxy for the whole farm, and the site that puts it together.**
@@ -10,7 +12,7 @@ by **[@nggkhaiz](https://github.com/NggKhaiz)**
 [![licence](https://img.shields.io/badge/licence-GPL--3.0-blue)](LICENSE)
 [![dev fee](https://img.shields.io/badge/developer%20fee-0%25-46b17b)](doc/ZERO_FEE.md)
 [![platform](https://img.shields.io/badge/platform-Linux%20x86--64%20%C2%B7%20macOS%20%C2%B7%20Windows-lightgrey)](#build-from-source)
-[![tests](https://img.shields.io/badge/tests-474%20checks%20%C2%B7%2011%20suites-46b17b)](#tests)
+[![tests](https://img.shields.io/badge/tests-477%20checks%20%C2%B7%2011%20suites-46b17b)](#tests)
 [![stars](https://img.shields.io/github/stars/NggKhaiz/ZMRIG?style=flat&color=f2763f)](https://github.com/NggKhaiz/ZMRIG/stargazers)
 [![last commit](https://img.shields.io/github/last-commit/NggKhaiz/ZMRIG)](https://github.com/NggKhaiz/ZMRIG/commits/BETA)
 
@@ -351,8 +353,8 @@ cd .. && ./zmrig/tests/unit.sh && ./zmrig/tests/cli.sh && ./zmrig/tests/health.s
 | `web` `node --test legacy/tests/` | 57 | the archived site: wizard and builder produced the same command, pool table matched `oneclick.sh`, branch names, donation address |
 | `proxy` `npm test` | 60 | extranonce allocation, vardiff, real sockets, WebSocket rig, banned pool left alone |
 | `pool` `npm test` | 29 | PPLNS in BigInt, share verification, payouts, audit log, end-to-end with a real miner |
-| `zmrig/tests/unit.sh` | 16 modules | options, hashing, health, report codes, stratum parsing, proxy handshakes |
-| `zmrig/tests/cli.sh` | 40 | flags, exit codes, `--help` covers the parser |
+| `zmrig/tests/unit.sh` | 17 modules | options, hashing, health, report codes, stratum parsing, proxy handshakes, and the per-algorithm memory rule |
+| `zmrig/tests/cli.sh` | 42 | flags, exit codes, `--help` covers the parser, `--check` reports the memory of the coin it was asked about |
 | `zmrig/tests/net.sh` | 29 | TCP/TLS/WS/WSS against a fake pool, ban and refusal handling, failover, seed change |
 | `zmrig/tests/health.sh` | 7 | the watchdog, both directions: an honest pool is not a fault, an all-reject pool is |
 | `tests/oneclick/*.sh` | 63 | plan, config, governor, purge (removes only its own paths), branch switching, `--coin` mapping and the algorithm-name guard |

@@ -90,7 +90,7 @@ Lệnh con mặc định là `install` khi có ví và `status` khi không có.
 | --- | --- |
 | `/usr/local/bin/zmrig` | miner Zig |
 | `/usr/local/bin/xmrig` | miner C++, khi chọn engine đó |
-| `/usr/local/bin/zmrig-tune` | tinh chỉnh host (`--status`, `--hugepages 1G`, …) |
+| `/usr/local/bin/zmrig-tune` | tinh chỉnh host (`--status`, `--hugepages 1G`, `--algo panthera` đặt mức theo coin đó, …) |
 | `/usr/local/bin/zmrig-bench` | đo hashrate lặp lại được |
 | `/usr/local/bin/zmrig-verify` | kiểm tra phí 0 % |
 | `/etc/zmrig/config.json` | cấu hình, quyền 600 |

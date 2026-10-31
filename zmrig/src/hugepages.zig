@@ -118,34 +118,37 @@ fn readNumber(path: []const u8) ?u64 {
 test "pages are rounded up, so a rest of 1 MB still gets a page" {
     const testing = std.testing;
 
-    // 2416 MB of RandomX memory in 2 MiB pages.
-    try testing.expectEqual(@as(u64, 1208), pagesFor(2416, 2048));
+    // 2336 MB, what rx/0 needs (256 cache + 2080 dataset), in 2 MiB pages.
+    try testing.expectEqual(@as(u64, 1168), pagesFor(2336, 2048));
+    // Panthera/Scala needs 192 MB, and asking for Monero's pages would be 12x
+    // more than the box has to give.
+    try testing.expectEqual(@as(u64, 96), pagesFor(192, 2048));
     try testing.expectEqual(@as(u64, 0), pagesFor(0, 2048));
     // A remainder must round up or the dataset will not fit.
     try testing.expectEqual(@as(u64, 2), pagesFor(3, 2048));
     // An unknown page size cannot be turned into a page count.
-    try testing.expectEqual(@as(u64, 0), pagesFor(2416, 0));
+    try testing.expectEqual(@as(u64, 0), pagesFor(2336, 0));
 }
 
 test "reserving only when the pool is short and huge pages are wanted" {
     const testing = std.testing;
 
     const empty = State{ .reserved = 0, .free = 0, .page_kb = 2048 };
-    // 1208 pages is exactly 2416 MB in 2 MiB pages; 1200 is one page short.
-    const full = State{ .reserved = 1208, .free = 900, .page_kb = 2048 };
-    const short = State{ .reserved = 1200, .free = 900, .page_kb = 2048 };
+    // 1168 pages is exactly 2336 MB in 2 MiB pages; 1160 is eight short.
+    const full = State{ .reserved = 1168, .free = 900, .page_kb = 2048 };
+    const short = State{ .reserved = 1160, .free = 900, .page_kb = 2048 };
     const unknown = State{ .reserved = 0, .free = 0, .page_kb = 0 };
 
-    try testing.expectEqual(@as(@TypeOf(shouldReserve(1, true, empty)), .reserve), shouldReserve(2416, true, empty));
-    try testing.expectEqual(@as(@TypeOf(shouldReserve(1, true, full)), .enough), shouldReserve(2416, true, full));
+    try testing.expectEqual(@as(@TypeOf(shouldReserve(1, true, empty)), .reserve), shouldReserve(2336, true, empty));
+    try testing.expectEqual(@as(@TypeOf(shouldReserve(1, true, full)), .enough), shouldReserve(2336, true, full));
 
-    try testing.expectEqual(@as(@TypeOf(shouldReserve(1, true, short)), .reserve), shouldReserve(2416, true, short));
+    try testing.expectEqual(@as(@TypeOf(shouldReserve(1, true, short)), .reserve), shouldReserve(2336, true, short));
 
     // --no-huge-pages must not touch a root-only sysctl.
-    try testing.expectEqual(@as(@TypeOf(shouldReserve(1, true, empty)), .enough), shouldReserve(2416, false, empty));
+    try testing.expectEqual(@as(@TypeOf(shouldReserve(1, true, empty)), .enough), shouldReserve(2336, false, empty));
 
     // A kernel without hugetlbfs is not a reason to try (or to fail).
-    try testing.expectEqual(@as(@TypeOf(shouldReserve(1, true, empty)), .unsupported), shouldReserve(2416, true, unknown));
+    try testing.expectEqual(@as(@TypeOf(shouldReserve(1, true, empty)), .unsupported), shouldReserve(2336, true, unknown));
 
     // Light mode needs far less, and a small pool may already cover it.
     const small = State{ .reserved = 200, .free = 200, .page_kb = 2048 };

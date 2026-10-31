@@ -10,8 +10,8 @@ image: https://nggkhaiz.github.io/ZMRIG/img/og-en.png
 
 | Symptom | Usual cause | What to do |
 | --- | --- | --- |
-| `dataset ready` takes 20–30 s | normal: building 2 GiB | not a fault; `--mode light` takes 0.6 s but keeps 9 % of the hashrate |
-| 20–30 % below expected hashrate | huge pages were not granted | `grep HugePages /proc/meminfo`; the log must say `huge pages 2336 MB` |
+| `dataset ready` takes 20–30 s | normal: building 2 GiB | not a fault; `--mode light` takes 0.6 s but keeps 9 % of the hashrate. `panthera` builds 64 MB and is ready in about 0.4 s |
+| 20–30 % below expected hashrate | huge pages were not granted | `grep HugePages /proc/meminfo`; the log must say `huge pages … (explicit)`, not `(THP fallback)` |
 | the process is killed, exit 137 | out of RAM while building the dataset (huge pages already hold the rest) | fix the huge-page reservation, or use `--mode light` |
 | `cannot read …: check the path or run as root` | the config is root-only | run with `sudo` |
 | `config ok` but nothing mines | no `-c`, or no pool given | `--check` only inspects the file it was given |
@@ -23,6 +23,25 @@ image: https://nggkhaiz.github.io/ZMRIG/img/og-en.png
 | `--tls-ca` has no effect | the file is in `/tmp` and the unit uses `PrivateTmp` | put it at `/etc/zmrig/tls-ca.pem` |
 
 ## Bugs that were fixed, so you do not have to meet them
+
+- **Light mode crashed on Panthera/Scala.** The JIT snippet that reads the
+  dataset masked the block number with Monero's 2 GiB mask, so a coin with a
+  32 MB dataset addressed memory it did not own, up to 2 GiB past the end of its
+  128 MB cache: `SIGSEGV` a fraction of a second after `--check` said the config
+  was fine. The snippet is now patched with the mask of the algorithm at hand,
+  the way the dataset-read path already was. Every algorithm has a reference
+  vector in `--self-test` now, so this cannot come back quietly.
+- **Every algorithm was sized as Monero.** The miner reserved 2416 MB of huge
+  pages and refused to start without them, whatever the coin. Panthera needs
+  192 MB; a 512 MB VPS can mine it in fast mode. The reservation, the
+  `--mode=auto` decision, the memory gate in front of `--bench` and
+  `zmrig-tune --algo` all read the compiled configuration of the algorithm now.
+- **Switching algorithm leaked 2.3 GiB.** The cache was allocated with
+  `posix_memalign` and freed with `munmap`, so the pages stayed mapped. A pool
+  that rotates coins (MoneroOcean does) would run the machine out of memory
+  after a handful of switches. Allocation and release now use the same path —
+  `mmap`, so the memory is also never written twice before the dataset
+  initialiser fills it.
 
 - **`--background` was ignored** and the miner stayed in the foreground. It now
   forks, calls `setsid` and closes stdio.

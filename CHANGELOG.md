@@ -1,3 +1,70 @@
+# Unreleased — every coin sized and tuned for itself
+
+Both engines hashed seven coins; only Monero decided how much memory they used.
+The miner reserved 2416 MB of huge pages, refused to start without them and fell
+back to light mode below 3 GiB of RAM — for a Scala/Panthera rig that needs 192 MB
+and is happy on a 512 MB VPS. This release reads the compiled configuration of
+the algorithm at hand, everywhere it matters, and fixes the one bug that made
+light mode on that coin crash.
+
+### Fixed
+- **Light mode crashed on Panthera/Scala.** The JIT snippet that reads the dataset
+  (`randomx_program_read_dataset_sshash_init`) masked the block number with the
+  compile-time 2 GiB mask. With `DatasetBaseSize` at 32 MB the program addresses
+  cache lines it does not own — up to 2 GiB past the end of a 128 MB cache — and
+  the process dies with `SIGSEGV` inside generated code, a fraction of a second
+  after `--check` reported a healthy config. The emitted snippet is now patched
+  with the mask of the running algorithm, the way the dataset-read path already
+  was. `--self-test` has a reference vector for every algorithm now, so a bug of
+  this shape cannot come back quietly.
+- **Switching algorithm leaked the cache.** `posix_memalign` was released with
+  `munmap`, which does nothing to a heap pointer: 2.3 GiB stayed mapped per
+  switch. A pool that rotates coins (MoneroOcean) exhausted the machine in a few
+  switches. Allocation and release now go through the same `mmap` path, so the
+  memory is also never written twice before the dataset initialiser fills it.
+- **Two different huge-page counts in one binary.** The reservation said 1208
+  pages, the engine's own advice said 1168, for the same 2336 MB. One rule now.
+
+### Changed
+- **Memory is sized per algorithm** (`zmrig/src/memory.zig`). `--mode=auto`, the
+  huge-page reservation, the memory gate in front of `--bench` and `--report`,
+  and the startup message all use `xmo_algo_memory()` — the same numbers
+  RandomX compiled. Monero 256 + 2080 MB, Panthera 128 + 64 MB; measured totals
+  2 449 473 472 B and 201 326 528 B.
+- **`zmrig-tune --algo=`** (and `oneclick.sh --coin`) size the reservation for
+  that coin: 96 pages for Panthera instead of 1168, so the host is not asked for
+  2.3 GB it will never touch. Unknown algorithms reserve for the largest
+  configuration: too much is harmless, too little is not.
+- **`--bench`/`--report` check for the memory they are about to use**, not for
+  Monero's 2400 MB. A Panthera benchmark no longer refuses to start on a host
+  that can hold it.
+- **AMD hosts get the AMD JIT.** `RANDOMX_FLAG_AMD` is set from the detected CPU,
+  as upstream XMRig does; the CFROUND sequence is cheaper there and the hashes are
+  identical.
+- **One huge-page message, not two.** The engine's advisory line is suppressed
+  when the reservation code has already reported the same thing with the same
+  number.
+
+### Tests
+- **`zmrig/tests/api_test.cpp`**: every algorithm hashes its reference vector in
+  light mode, and the per-algorithm sizes are asserted (Monero 256 + 2080 MiB,
+  Panthera 128 + 64 MiB, light mode = cache only).
+- **`zmrig/src/memory.zig`** owns the `auto` rule and tests it without linking C:
+  a 1 GiB box picks fast mode for Panthera and light for Monero, and an explicit
+  mode is never second-guessed.
+- **`--self-test`** covers all seven algorithms (was `rx/0` only, so
+  `--self-test --algo=panthera` verified Monero and reported success).
+
+### Brand
+- **A new mark**, and the letter Z is gone. It is the RandomX cache (the solid
+  core) inside the dataset (the ring around it): the two layers of memory every
+  coin here builds before it can hash, drawn as a die with two corners cut at 45°
+  so the block has an axis. One geometry, one tone, no gradient, no letterform.
+  `site/tools/make-logo.py` writes `logo.svg`, `logo-dark.svg`, an adaptive
+  `favicon.svg` and the three PNG icons; the social cards paste the same render.
+  Light pages get black, dark pages get white, the favicon follows
+  `prefers-color-scheme`.
+
 # Unreleased — seven coins, one installer
 
 Monero was the only coin the site offered, while both engines hashed six more the
