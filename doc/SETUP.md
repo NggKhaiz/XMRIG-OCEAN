@@ -225,40 +225,64 @@ committed copy is older than `site/build`, which is what CI runs.
 
 ### 4a. GitHub Pages (the live site)
 
-Pages for this repository is set to **Deploy from a branch → `BETA` → `/`**, so
-the branch root is the published site and the built output has to be committed.
-That is why the root contains `docs/`, `vi/` and `assets/` as generated
-directories — do not edit them by hand.
+Two deployments point at the same URL, and whichever finishes last decides what
+a visitor sees:
 
-**Settings → Pages → Build and deployment → Source: `Deploy from a branch`,
-Branch: `BETA`, folder: `/ (root)`.**
+| Deployment | Reads | Why it exists |
+| --- | --- | --- |
+| `Deploy site` (`.github/workflows/pages.yml`) | the `web/` directory, uploaded as the Pages artifact | this is the intended path |
+| `pages build and deployment` | the branch root | because **Settings → Pages → Source** is still *Deploy from a branch* |
 
-The API refuses to change this with the token available to a workflow
-(`403` on both `build_type` and `source`), so it stays a manual step.
+Neither can be changed from here: the workflow file needs the `workflows`
+permission, and the Pages setting needs repository administration. So
+`scripts/publish-site.sh` writes the same build to both places and
+`./scripts/publish-site.sh --check` (plus `tests/docs/pages.sh`) fails the
+moment they disagree. A visitor gets the documentation site either way.
+
+To simplify later — one setting, no code change:
+
+1. **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+2. Then a publish only has to write `web/`: delete the root copy from
+   `scripts/publish-site.sh` and the `OWNED_FILES` / `OWNED_DIRS` loops become
+   unnecessary.
+
+What the script does now:
+
+```bash
+./scripts/publish-site.sh            # build in site/, copy to web/ and the root
+./scripts/publish-site.sh --check    # fail if either copy is stale
+```
+
+`web/` is replaced whole, so an asset from a previous build cannot survive and
+serve a stale page. In the repository root only the paths Docusaurus owns are
+replaced — `index.html`, `404.html`, `search.html`, `search-index.json`,
+`sitemap.xml`, `robots.txt`, `assets/`, `docs/`, `vi/`, `img/` — so nothing a
+human wrote there can be lost, and `legacy/`, `doc/`, `site/` and the source
+trees are never touched.
+
+`.nojekyll` is written by the script (Docusaurus only emits it when it deploys
+with `gh-pages` itself) and stops Jekyll from eating `assets/`, whose files start
+with `_`. `404.html` is generated with the site's own navigation, so a wrong URL
+is a useful page rather than a dead end.
 
 | URL | What |
 | --- | --- |
 | `https://nggkhaiz.github.io/ZMRIG/` | home page (English) |
 | `https://nggkhaiz.github.io/ZMRIG/docs/intro` | documentation |
 | `https://nggkhaiz.github.io/ZMRIG/vi/docs/intro` | the same page in Vietnamese |
-| `https://nggkhaiz.github.io/ZMRIG/web/wizard.html` | the previous static wizard, still served |
-
-`.nojekyll` at the root stops Jekyll from touching `assets/` (Docusaurus emits
-files beginning with `_`). `404.html` is generated, with the site's own
-navigation, so a wrong URL is a useful page rather than a dead end.
+| `https://nggkhaiz.github.io/ZMRIG/docs/install/builder` | command builder |
+| `https://nggkhaiz.github.io/ZMRIG/docs/economics/profitability` | profitability calculator |
+| `https://nggkhaiz.github.io/ZMRIG/wizard.html` | redirect into the builder, for links from the previous site |
+| `https://nggkhaiz.github.io/ZMRIG/docs.html` | redirect into the documentation, same reason |
 
 Verify after a publish:
 
 ```bash
+./scripts/publish-site.sh --check                                 # both copies current
+bash tests/docs/pages.sh                                          # 21 checks
 curl -sI https://nggkhaiz.github.io/ZMRIG/docs/intro | head -1     # 200
 curl -s  https://nggkhaiz.github.io/ZMRIG/robots.txt | tail -1     # Sitemap: …
-bash tests/docs/pages.sh                                           # 18 checks locally
 ```
-
-If Pages is ever switched to **Source: GitHub Actions**, point the workflow at
-`site/build` instead and stop committing the output — `baseUrl` stays
-`/ZMRIG/`. Until then the `Deploy site` workflow's deploy job fails by design in
-branch mode and can be ignored.
 
 ### 4b. Cloudflare Pages
 
