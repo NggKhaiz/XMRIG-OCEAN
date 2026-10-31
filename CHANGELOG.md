@@ -26,6 +26,17 @@ content in both languages. No binary changed.
 - **`robots.txt` is part of the build** (`site/static/`), not a hand-kept file in
   the repository root that could drift from the sitemap.
 
+### Fixed
+- **The fleet break-even price counted revenue from machines whose power is
+  unknown** against only the metered machines' energy, which overstates the
+  number — the one figure that decides whether to keep mining. It now uses the
+  metered machines' revenue, and the test pins the difference.
+- **The bilingual calculator printed the English comment lines** inside the
+  "after the install" block on the Vietnamese page. Those blocks are commands to
+  paste, so the commentary is gone rather than translated twice.
+- **The power card read "Energy per day" above a wattage.** It now says what it
+  shows: wall power, with `kWh/day` under it.
+
 ### Tests
 - **`tests/docs/pages.sh`** runs against `web/` (the tree Pages actually
   uploads), 21 checks: adds the two redirect stubs and the archive check, and

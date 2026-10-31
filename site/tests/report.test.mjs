@@ -178,10 +178,16 @@ test("totals count unknown-power machines instead of assuming zero watts", () =>
   assert.ok(Math.abs(sum.wallWatts - known.wallWatts) < 0.001);
   assert.ok(Math.abs(sum.hashrate - (748 + 748)) < 0.001);
   assert.ok(Math.abs(sum.kwhMonth - known.kwhDay * 30) < 0.001);
-  // Revenue divided by consumption: the price at which profit is exactly zero.
+  // Revenue of the metered machine divided by its consumption: the price at
+  // which profit is exactly zero. The machine whose power is unknown cannot
+  // contribute energy, so it must not contribute revenue to this ratio either.
   assert.ok(
-    Math.abs(sum.breakEvenPrice - sum.revenueDay / sum.kwhDay) < 1e-12,
+    Math.abs(sum.breakEvenPrice - known.revenueDay / known.kwhDay) < 1e-12,
     String(sum.breakEvenPrice),
+  );
+  assert.ok(
+    sum.breakEvenPrice < sum.revenueDay / sum.kwhDay,
+    "counting unmetered revenue would overstate the break-even price",
   );
 });
 

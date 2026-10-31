@@ -245,16 +245,15 @@ export function build(state) {
     commands: {
       install,
       plan,
+      // Commands only, no commentary: this block is meant to be selected and
+      // pasted, and a shell comment inside it would be pasted too. The headings
+      // above the blocks are translated; these lines are not prose.
       after: [
-        "# service state and log — needed for any debugging",
         "sudo systemctl status zmrig --no-pager -l",
         "sudo journalctl -u zmrig -n 40 --no-pager",
-        "",
-        "# measure the machine and print a code for the calculator",
         "sudo ./oneclick.sh report --power 0",
       ].join("\n"),
       remove: [
-        "# look before deleting",
         "sudo ./oneclick.sh purge --dry-run",
         "sudo ./oneclick.sh purge",
       ].join("\n"),

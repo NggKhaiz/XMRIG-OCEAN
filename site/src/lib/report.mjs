@@ -180,6 +180,7 @@ export function totals(rows) {
     profitDay: 0,
     unknownPower: 0,
   };
+  let meteredRevenue = 0;
 
   for (const row of rows) {
     const r = row.result;
@@ -193,14 +194,18 @@ export function totals(rows) {
       sum.kwhDay += r.kwhDay;
       sum.costDay += r.costDay;
       sum.profitDay += r.profitDay;
+      // Revenue of the metered machines only: see breakEvenPrice below.
+      meteredRevenue += r.revenueDay;
     }
   }
 
   sum.efficiency = sum.wallWatts ? sum.hashrate / sum.wallWatts : null;
   sum.kwhMonth = sum.kwhDay * 30;
   sum.profitMonth = sum.profitDay * 30;
-  // The electricity price at which the fleet stops making money. A fleet with
-  // no known power cannot answer, so it stays null rather than 0.
-  sum.breakEvenPrice = sum.kwhDay ? sum.revenueDay / sum.kwhDay : null;
+  // The electricity price at which the fleet stops making money: revenue of the
+  // machines whose power is known, divided by their energy. Using the whole
+  // fleet's revenue against only part of its energy would overstate the number,
+  // and a fleet with no known power cannot answer at all — null, not 0.
+  sum.breakEvenPrice = sum.kwhDay ? meteredRevenue / sum.kwhDay : null;
   return sum;
 }
