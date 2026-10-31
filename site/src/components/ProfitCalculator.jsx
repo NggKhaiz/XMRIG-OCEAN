@@ -508,8 +508,7 @@ export default function ProfitCalculator() {
               <span className="zm-card__label">{t("calc.totalWatts")}</span>
               <strong>{fixed(sum.wallWatts, 0, locale)} W</strong>
               <span className="zm-card__sub">
-                {fixed(sum.kwhDay, 2, locale)} kWh ·{" "}
-                {t("calc.totalKwh").toLowerCase()}
+                {fixed(sum.kwhDay, 2, locale)} {t("calc.kwh")}
               </span>
             </div>
             <div className="zm-card">
