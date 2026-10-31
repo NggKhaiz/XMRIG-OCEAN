@@ -8,6 +8,7 @@ import {
   PREFIX,
 } from "../lib/report.mjs";
 import { translate } from "../lib/messages.mjs";
+import CoinMatrix from "./CoinMatrix";
 
 const STORAGE_KEY = "zmrig.calc.v2";
 
@@ -637,6 +638,12 @@ export default function ProfitCalculator() {
       )}
 
       <p className="zm-caption">{t("calc.note")}</p>
+
+      {/* The fleet total is handed straight in: "which coin pays best for *this*
+          hardware" is the question the calculator exists to answer, and the
+          comparison is where it gets answered. */}
+      <h2 id="coins">{t("coins.title")}</h2>
+      <CoinMatrix hashrate={sum.hashrate > 0 ? sum.hashrate : undefined} />
     </div>
   );
 }

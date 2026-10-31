@@ -14,6 +14,7 @@ import InstallBuilder from '@site/src/components/InstallBuilder';
 
 | You choose | The installer receives |
 | --- | --- |
+| Coin | `--algo rx/wow` — Monero adds nothing, because a switching pool may move the rig |
 | Wallet | `--wallet <address>` |
 | Rig name | `--rig-id <name>` |
 | Pool | `--pool <host:port>` or `--pool tls://<host:port>` |
@@ -38,10 +39,18 @@ adding a flag:
 - A TLS pool becomes part of the `--pool` value (`tls://host:port`), because
   that is the form `oneclick.sh` parses.
 
-The address you type is validated before the copy button unlocks: 95 characters
-for a standard Monero address, 106 for an integrated one, base58 alphabet only.
-A pool host is validated as `host:port`, and a full `stratum+tcp://…` URL pasted
-from a provider page is accepted.
+The address you type is validated before the copy button unlocks: for Monero,
+95 characters, 106 for an integrated address, base58 alphabet only. For the other
+six coins the check is the alphabet and a plausible length, plus a warning when
+the prefix is not the one this site knows — it does not pretend to verify a
+checksum it never computes. A pool host is validated as `host:port`, and a full
+`stratum+tcp://…` URL pasted from a provider page is accepted.
+
+The coin decides two things. It pins the algorithm (`--algo rx/wow` and so on) —
+except for Monero, where adding the flag would stop a switching pool from moving
+the rig to whichever RandomX coin pays best. And it decides whether a pool preset
+is offered: the seven presets are Monero pools, so every other coin asks you for
+its endpoint instead of inventing one. [Other coins](/docs/pools/coins) has the details and the commands.
 
 The proxy field wants the whole URL — `socks5://host:port` or
 `http://user:pass@host:port` — because that is what the miner parses. The dial

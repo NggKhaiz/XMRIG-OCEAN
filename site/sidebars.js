@@ -46,6 +46,7 @@ const sidebars = {
       collapsible: true,
       items: [
         "pools/choosing",
+        "pools/coins",
         "economics/profitability",
         "economics/report-codes",
       ],

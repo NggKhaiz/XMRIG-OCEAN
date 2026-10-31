@@ -9,6 +9,11 @@ export const messages = {
   en: {
     "builder.intro":
       "Every switch below maps to one flag. What you see is exactly what the installer receives — nothing is added later.",
+    "builder.coin": "Coin",
+    "builder.coinHint":
+      "The seven algorithms both engines hash. Pool presets exist for Monero only, so the other coins ask you for the endpoint.",
+    "builder.coinNoPools":
+      "{coin} has no preset here. Paste the endpoint your pool publishes — host:port, and the TLS port if it has one.",
     "builder.wallet": "Wallet address",
     "builder.rig": "Rig name (optional)",
     "builder.rigHint": "Shown on the pool dashboard to tell machines apart.",
@@ -56,8 +61,9 @@ export const messages = {
     "builder.remove": "Remove it again",
     "builder.notes": "What this changes",
     "builder.blocked.wallet-empty": "Paste a wallet address to get a command.",
-    "builder.blocked.wallet-invalid":
-      "That does not look like a Monero address.",
+    "builder.blocked.wallet-invalid": "That does not look like a {coin} address.",
+    "builder.blocked.pool-empty":
+      "{coin} needs a pool endpoint — this site does not know one, so it will not invent it.",
     "builder.blocked.host-invalid": "Enter the pool as host:port.",
     "builder.blocked.proxy-invalid":
       "The proxy must look like socks5://host:port or http://user:pass@host:port.",
@@ -65,12 +71,16 @@ export const messages = {
       "Dial address must be host:port, for example 203.0.113.10:3333.",
     "builder.blocked.proxy-missing": "Enter the proxy URL.",
     "builder.wallet.empty": "Not entered yet.",
-    "builder.wallet.valid": "Valid address (95 characters).",
+    "builder.wallet.valid": "Valid Monero address (95 characters).",
     "builder.wallet.integrated": "Integrated address (106 characters).",
+    "builder.wallet.plausible":
+      "Base58 address, {n} characters. The pool checks the checksum — this page does not.",
+    "builder.wallet.prefix":
+      "Length is plausible, but {coin} addresses start with {prefixes}. Look again before installing — a wrong address mines for somebody else.",
     "builder.wallet.charset":
-      "Invalid character — Monero addresses are base58 (no 0, O, I, l).",
+      "Invalid character — CryptoNote addresses are base58 (no 0, O, I, l).",
     "builder.wallet.length":
-      "Length {n} — a standard address is 95 characters.",
+      "Length {n}: {coin} addresses are 95 characters, 106 integrated.",
     "builder.host.empty":
       "Enter the pool as host:port, e.g. pool.example.com:3333.",
     "builder.host.shape":
@@ -91,6 +101,8 @@ export const messages = {
       "Metered profile: keeps the powersave governor and fewer SMT threads — a few percent less hashrate, more hashes per watt.",
     "builder.note.profileFree":
       "Free profile: uses every CPU, for machines whose power is free.",
+    "builder.note.algoPinned":
+      "Pinned with --algo {algo}: {coin} is only mined with that algorithm, so both engines give the same shares.",
     "builder.warn.engineForced":
       "The C++ engine has no WebSocket client and no proxy support, so the command uses zmrig.",
     "builder.warn.switchingPool":
@@ -151,6 +163,48 @@ export const messages = {
     "calc.note":
       "Every figure is an estimate. Network difficulty, coin price and share luck move constantly; the miner's own measurements are the only hard numbers here.",
 
+    "coins.title": "Coin comparison",
+    "coins.lead":
+      "One rig, seven algorithms. Fill in a coin's own numbers and the table ranks what it actually pays per day — with your figures, not with mine.",
+    "coins.hashrate": "Rig hashrate (H/s)",
+    "coins.hashrateHint":
+      "Used for every coin that has no figure of its own. The fleet total fills it in when machines are loaded above.",
+    "coins.prices": "Fetch prices (CoinGecko)",
+    "coins.pricesLoading": "Asking CoinGecko…",
+    "coins.pricesOk": "Updated {n} price(s) from CoinGecko.",
+    "coins.pricesError":
+      "CoinGecko did not answer — offline, blocked or rate-limited. Prices are unchanged; type them yourself if you want them now.",
+    "coins.pricesHint":
+      "Nothing is fetched until you press that button, so this page works offline and no request leaves your browser before you ask for one.",
+    "coins.best": "Best coin at this hashrate",
+    "coins.bestLine":
+      "{coin} pays about {revenue} per day for {hashrate} — {coinDay} {symbol}.",
+    "coins.bestEmpty":
+      "No coin has every number yet, so there is nothing honest to recommend. Enter the rig’s hashrate, then reward, block time and network hashrate for one coin below.",
+    "coins.build": "Build the {coin} command",
+    "coins.tableCoin": "Coin",
+    "coins.tableRevenue": "Revenue/day",
+    "coins.tableCoinDay": "Coin/day",
+    "coins.tableStatus": "Numbers",
+    "coins.ready": "complete",
+    "coins.needs": "missing {fields}",
+    "coins.edit": "The numbers used",
+    "coins.fieldReward": "Block reward",
+    "coins.fieldBlockTime": "Block time (s)",
+    "coins.fieldNetwork": "Network hashrate (H/s)",
+    "coins.fieldPrice": "Price (USD)",
+    "coins.fieldRig": "This rig (H/s)",
+    "coins.reset": "Forget my numbers",
+    "coins.note":
+      "Every field is yours to fill. A coin with a blank field shows why it cannot be ranked instead of a zero that looks like an answer, and no pool endpoint is invented for a coin this repository does not know.",
+    "coins.source":
+      "Reward, block time and network hashrate come from the coin's own explorer; prices from CoinGecko on request. The numbers stay in this browser.",
+    "coins.missingReward": "reward",
+    "coins.missingBlockTime": "block time",
+    "coins.missingNetwork": "network hashrate",
+    "coins.missingPrice": "price",
+    "coins.missingHashrate": "rig hashrate",
+
     "pooltable.pool": "Pool",
     "pooltable.fee": "Fee",
     "pooltable.min": "Minimum payout",
@@ -166,6 +220,11 @@ export const messages = {
   vi: {
     "builder.intro":
       "Mỗi ô dưới đây ứng với đúng một cờ. Lệnh hiện ra là đúng thứ installer nhận — không có gì được thêm vào sau.",
+    "builder.coin": "Đồng coin",
+    "builder.coinHint":
+      "Bảy thuật toán mà cả hai engine đều băm được. Preset pool chỉ có cho Monero, các đồng khác sẽ hỏi endpoint.",
+    "builder.coinNoPools":
+      "{coin} không có preset ở đây. Dán endpoint mà pool của bạn công bố — host:port, và cổng TLS nếu có.",
     "builder.wallet": "Địa chỉ ví",
     "builder.rig": "Tên máy (tuỳ chọn)",
     "builder.rigHint": "Hiện trên dashboard của pool để phân biệt các máy.",
@@ -212,7 +271,9 @@ export const messages = {
     "builder.remove": "Gỡ cài đặt",
     "builder.notes": "Lệnh này thay đổi gì",
     "builder.blocked.wallet-empty": "Dán địa chỉ ví để có lệnh.",
-    "builder.blocked.wallet-invalid": "Chuỗi này không giống địa chỉ Monero.",
+    "builder.blocked.wallet-invalid": "Chuỗi này không giống địa chỉ {coin}.",
+    "builder.blocked.pool-empty":
+      "{coin} cần endpoint pool — trang này không biết endpoint nào nên sẽ không tự bịa.",
     "builder.blocked.host-invalid": "Nhập pool dạng host:port.",
     "builder.blocked.proxy-invalid":
       "Proxy phải có dạng socks5://host:port hoặc http://user:pass@host:port.",
@@ -220,11 +281,16 @@ export const messages = {
       "Địa chỉ dial phải là host:port, ví dụ 203.0.113.10:3333.",
     "builder.blocked.proxy-missing": "Nhập địa chỉ proxy.",
     "builder.wallet.empty": "Chưa nhập gì.",
-    "builder.wallet.valid": "Địa chỉ hợp lệ (95 ký tự).",
+    "builder.wallet.valid": "Địa chỉ Monero hợp lệ (95 ký tự).",
     "builder.wallet.integrated": "Địa chỉ tích hợp (106 ký tự).",
+    "builder.wallet.plausible":
+      "Địa chỉ base58, {n} ký tự. Pool kiểm tra checksum — trang này thì không.",
+    "builder.wallet.prefix":
+      "Độ dài hợp lý, nhưng địa chỉ {coin} bắt đầu bằng {prefixes}. Xem lại trước khi cài — sai địa chỉ là đào cho người khác.",
     "builder.wallet.charset":
-      "Ký tự không hợp lệ — địa chỉ Monero dùng base58 (không có 0, O, I, l).",
-    "builder.wallet.length": "Dài {n} ký tự — địa chỉ thường dài 95.",
+      "Ký tự không hợp lệ — địa chỉ CryptoNote dùng base58 (không có 0, O, I, l).",
+    "builder.wallet.length":
+      "Dài {n} ký tự: địa chỉ {coin} dài 95, địa chỉ tích hợp 106.",
     "builder.host.empty": "Nhập host:port, ví dụ pool.example.com:3333.",
     "builder.host.shape":
       "Chưa đúng dạng host:port. Dán URL đầy đủ từ trang của pool cũng được.",
@@ -244,6 +310,8 @@ export const messages = {
       "Chế độ trả điện: giữ governor tiết kiệm điện và bớt thread SMT — hashrate thấp hơn vài %, H/W cao hơn.",
     "builder.note.profileFree":
       "Chế độ free: dùng hết CPU, chỉ hợp máy có điện free.",
+    "builder.note.algoPinned":
+      "Ghim bằng --algo {algo}: {coin} chỉ đào bằng thuật toán đó, nên cả hai engine cho share như nhau.",
     "builder.warn.engineForced":
       "Engine C++ không nói được WebSocket và không qua proxy, nên lệnh dùng zmrig.",
     "builder.warn.switchingPool":
@@ -302,6 +370,48 @@ export const messages = {
       "{n} máy không báo công suất; chúng bị loại khỏi tổng điện chứ không được đoán.",
     "calc.note":
       "Mọi con số đều là ước lượng. Độ khó mạng, giá coin và may mắn share thay đổi liên tục; chỉ số đo của miner là số thật.",
+
+    "coins.title": "So sánh coin",
+    "coins.lead":
+      "Một rig, bảy thuật toán. Nhập số của từng đồng và bảng xếp hạng theo số tiền thật mỗi ngày — bằng số của bạn, không phải số của tôi.",
+    "coins.hashrate": "Hashrate của rig (H/s)",
+    "coins.hashrateHint":
+      "Dùng cho mọi đồng không có số riêng. Tổng hashrate của fleet tự điền khi có máy ở trên.",
+    "coins.prices": "Lấy giá (CoinGecko)",
+    "coins.pricesLoading": "Đang hỏi CoinGecko…",
+    "coins.pricesOk": "Đã cập nhật {n} giá từ CoinGecko.",
+    "coins.pricesError":
+      "CoinGecko không trả lời — mất mạng, bị chặn hoặc bị giới hạn tần suất. Giá giữ nguyên; cần thì tự nhập.",
+    "coins.pricesHint":
+      "Không có gì được tải cho tới khi bạn bấm nút này, nên trang chạy được cả khi offline và không request nào rời trình duyệt trước đó.",
+    "coins.best": "Coin tốt nhất ở hashrate này",
+    "coins.bestLine":
+      "{coin} trả khoảng {revenue} mỗi ngày cho {hashrate} — {coinDay} {symbol}.",
+    "coins.bestEmpty":
+      "Chưa đồng nào có đủ số, nên không có gì để giới thiệu một cách trung thực. Nhập hashrate của rig, rồi phần thưởng, thời gian block và hashrate mạng cho một đồng ở dưới.",
+    "coins.build": "Tạo lệnh cho {coin}",
+    "coins.tableCoin": "Đồng",
+    "coins.tableRevenue": "Doanh thu/ngày",
+    "coins.tableCoinDay": "Coin/ngày",
+    "coins.tableStatus": "Số liệu",
+    "coins.ready": "đủ",
+    "coins.needs": "thiếu {fields}",
+    "coins.edit": "Số đang dùng",
+    "coins.fieldReward": "Thưởng mỗi block",
+    "coins.fieldBlockTime": "Thời gian block (giây)",
+    "coins.fieldNetwork": "Hashrate mạng (H/s)",
+    "coins.fieldPrice": "Giá (USD)",
+    "coins.fieldRig": "Rig này (H/s)",
+    "coins.reset": "Xoá số tôi đã nhập",
+    "coins.note":
+      "Mọi ô là của bạn. Đồng còn thiếu số sẽ hiện lý do không xếp hạng được thay vì số 0 trông như câu trả lời, và không endpoint pool nào bị bịa ra cho đồng mà repo này không biết.",
+    "coins.source":
+      "Phần thưởng, thời gian block và hashrate mạng lấy từ explorer của chính đồng đó; giá từ CoinGecko khi bạn yêu cầu. Các số ở lại trong trình duyệt này.",
+    "coins.missingReward": "phần thưởng",
+    "coins.missingBlockTime": "thời gian block",
+    "coins.missingNetwork": "hashrate mạng",
+    "coins.missingPrice": "giá",
+    "coins.missingHashrate": "hashrate rig",
 
     "pooltable.pool": "Pool",
     "pooltable.fee": "Phí",

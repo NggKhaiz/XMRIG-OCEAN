@@ -10,7 +10,7 @@ by **[@nggkhaiz](https://github.com/NggKhaiz)**
 [![licence](https://img.shields.io/badge/licence-GPL--3.0-blue)](LICENSE)
 [![dev fee](https://img.shields.io/badge/developer%20fee-0%25-46b17b)](doc/ZERO_FEE.md)
 [![platform](https://img.shields.io/badge/platform-Linux%20x86--64%20%C2%B7%20macOS%20%C2%B7%20Windows-lightgrey)](#build-from-source)
-[![tests](https://img.shields.io/badge/tests-453%20checks%20%C2%B7%2011%20suites-46b17b)](#tests)
+[![tests](https://img.shields.io/badge/tests-474%20checks%20%C2%B7%2011%20suites-46b17b)](#tests)
 [![stars](https://img.shields.io/github/stars/NggKhaiz/ZMRIG?style=flat&color=f2763f)](https://github.com/NggKhaiz/ZMRIG/stargazers)
 [![last commit](https://img.shields.io/github/last-commit/NggKhaiz/ZMRIG)](https://github.com/NggKhaiz/ZMRIG/commits/BETA)
 
@@ -102,6 +102,36 @@ the site are generated from one module, and `site/tests/pools.test.mjs` fails if
 that table ever disagrees with `oneclick.sh` or `doc/POOLS.md`. The step-by-step
 wizard it replaced was folded into that page; `web/wizard.html` now redirects
 into the documentation.
+
+### Other coins
+
+Both engines hash the whole RandomX family plus Panthera, so the same installer
+mines seven coins. `--coin` is the short form of `--algo`, and the plan prints
+which coin it resolved:
+
+| `--coin` | Coin | Algorithm |
+| --- | --- | --- |
+| `xmr` | Monero (default) | `rx/0` |
+| `wow` | Wownero | `rx/wow` |
+| `arq` | ArQmA | `rx/arq` |
+| `graft` | Graft | `rx/graft` |
+| `sfx` | Safex Cash | `rx/sfx` |
+| `yada` | YadaCoin | `rx/yada` |
+| `xla` | Scala | `panthera` |
+
+```bash
+sudo ./oneclick.sh plan --wallet YourWowneroAddress... --coin wow --pool pool.example.org:3333
+sudo ./oneclick.sh install --wallet YourWowneroAddress... --coin wow --pool pool.example.org:3333
+```
+
+Pool presets exist for Monero only: the smaller coins' endpoints and fees change
+too often to hard-code, so `--coin wow` without `--pool` is an error rather than
+a guess. The engine follows the algorithm (`rx/*` and `panthera` → the 0 % fee
+Zig engine), and the address is checked for the shape this repository can be
+sure of — the pool verifies the checksum. Which coin pays best for your
+hashrate: **[other coins](https://nggkhaiz.github.io/ZMRIG/docs/pools/coins)**,
+where the ranking comes from numbers you paste, and prices are fetched only when
+you ask.
 
 See every automatic decision and its reason without touching the machine:
 
@@ -325,10 +355,10 @@ cd .. && ./zmrig/tests/unit.sh && ./zmrig/tests/cli.sh && ./zmrig/tests/health.s
 | `zmrig/tests/cli.sh` | 40 | flags, exit codes, `--help` covers the parser |
 | `zmrig/tests/net.sh` | 29 | TCP/TLS/WS/WSS against a fake pool, ban and refusal handling, failover, seed change |
 | `zmrig/tests/health.sh` | 7 | the watchdog, both directions: an honest pool is not a fault, an all-reject pool is |
-| `tests/oneclick/*.sh` | 56 | plan, config, governor, purge (removes only its own paths), branch switching |
+| `tests/oneclick/*.sh` | 63 | plan, config, governor, purge (removes only its own paths), branch switching, `--coin` mapping and the algorithm-name guard |
 | `tests/docs/links.sh` | 84 | every relative link and every `#anchor` in the documentation resolves, including `/docs/…` site routes |
-| `site` `npm test` | 53 | command builder and its blocked states, calculator arithmetic against hand-computed numbers including break-even, pool table vs `oneclick.sh` and `doc/POOLS.md`, en/vi key parity and no dead or duplicated message |
-| `tests/docs/pages.sh` | 22 | the published site as Pages serves it: Docusaurus entry point, 21 pages in both locales, all 2040 local `href`/`src`, sitemap, language and theme controls, one localised social card per page, a title/description/lang on every page with no leaked placeholder, old-URL redirects, committed build not stale |
+| `site` `npm test` | 67 | command builder and its blocked states, calculator arithmetic against hand-computed numbers including break-even, pool table vs `oneclick.sh` and `doc/POOLS.md`, coin matrix and ranking (a missing number is never a zero, no invented pool or price), en/vi key parity and no dead or duplicated message |
+| `tests/docs/pages.sh` | 22 | the published site as Pages serves it: Docusaurus entry point, 22 pages in both locales, all 2146 local `href`/`src`, both sitemaps, language and theme controls, one localised social card per page, a title/description/lang on every page with no leaked placeholder, old-URL redirects, committed build not stale |
 
 ## Documentation
 

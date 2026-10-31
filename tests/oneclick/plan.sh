@@ -179,6 +179,60 @@ else
     fail "an explicit host:port was rewritten"
 fi
 
+# --- other coins -------------------------------------------------------
+# `--coin` is the short form of `--algo`; both have to name an algorithm one of
+# the two engines actually implements, or the install produces a config nothing
+# can run. The plan is the place to catch that, before anything is written.
+
+out=$(plan --coin=wow --pool=pool.wownero.example:7777)
+if printf '%s' "$out" | grep -q "algo *rx/wow"; then
+    pass "--coin=wow plans rx/wow"
+else
+    fail "--coin=wow did not plan rx/wow"
+fi
+
+if printf '%s' "$out" | grep -q "coin *Wownero"; then
+    pass "the plan names the coin, not just the algorithm"
+else
+    fail "the plan does not name the coin"
+fi
+
+if [ "$(engine_of "$out")" = "zmrig" ]; then
+    pass "a RandomX variant stays on the fee-free engine"
+else
+    fail "--coin=wow should resolve to zmrig, got '$(engine_of "$out")'"
+fi
+
+out=$(plan --coin=xla --pool=pool.scala.example:3333)
+if printf '%s' "$out" | grep -q "algo *panthera"; then
+    pass "--coin=xla maps to panthera"
+else
+    fail "--coin=xla did not map to panthera"
+fi
+
+out=$(plan --coin=nonsense 2>&1)
+if printf '%s' "$out" | grep -q "unknown coin"; then
+    pass "an unknown coin is refused with the list"
+else
+    fail "an unknown coin was accepted"
+fi
+
+# Any algorithm name is allowed (the C++ engine has 34), but the value lands in
+# config.json, so a character that could break the JSON is refused.
+out=$(plan --algo='rx/0";"x' 2>&1)
+if printf '%s' "$out" | grep -q "algorithm names use"; then
+    pass "an algorithm name that would corrupt config.json is refused"
+else
+    fail "a hostile algorithm name was accepted"
+fi
+
+out=$(plan --coin=xmr --algo=rx/wow 2>&1)
+if printf '%s' "$out" | grep -q "contradicts"; then
+    pass "a contradictory --coin/--algo pair is refused"
+else
+    fail "a contradiction was silently resolved"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
     echo "plan: all checks passed"
