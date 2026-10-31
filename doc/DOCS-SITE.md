@@ -9,32 +9,34 @@ This page covers what only a maintainer needs: how the site is published given
 this repository's Pages configuration, how to turn on Algolia DocSearch, and
 which files are generated and must not be edited by hand.
 
-## Why the build output is committed
+## How it is published
 
-GitHub Pages for this repository is set to **Deploy from a branch → `BETA` →
-`/`**, which means the branch root *is* the published site. That setting can be
-changed only from the repository's settings page; a workflow token cannot do it
-(the API returns `403` for both `build_type` and `source`).
-
-So instead of an Actions artifact, the built site is copied into the repository
-root by one script:
+Two deployments point at the same URL. `Deploy site`
+(`.github/workflows/pages.yml`) uploads `web/` as the Pages artifact; GitHub's
+own *pages build and deployment* publishes the branch root, because
+**Settings → Pages → Source** is still *Deploy from a branch*. Whichever runs
+last wins, so `scripts/publish-site.sh` writes the same build to both and
+`--check` fails the moment they disagree:
 
 ```bash
-./scripts/publish-site.sh            # build in site/, then copy to the root
-./scripts/publish-site.sh --check    # fail if the committed copy is stale
+./scripts/publish-site.sh            # build in site/, copy to web/ and the root
+./scripts/publish-site.sh --check    # fail if either copy is stale
 ```
 
-It replaces only the paths Docusaurus owns — `index.html`, `404.html`,
-`search.html`, `search-index.json`, `sitemap.xml`, `assets/`, `docs/`, `vi/`,
-`img/`. It never deletes `web/` (the previous static site), `robots.txt`,
-`.nojekyll` or any file a human wrote.
+`web/` is replaced whole — a stale asset cannot survive a deploy. In the
+repository root only the paths Docusaurus owns are replaced (`index.html`,
+`404.html`, `search.html`, `search-index.json`, `sitemap.xml`, `robots.txt`,
+`assets/`, `docs/`, `vi/`, `img/`), so nothing a human wrote can be lost.
 
-`tests/docs/pages.sh` fails if the committed copy differs from `site/build`, so
-a content change that was not published cannot be merged silently.
+`web/wizard.html` and `web/docs.html` are not part of the build: they come from
+`site/static/` and redirect old links (`/ZMRIG/wizard.html?pool=c3pool`) into the
+documentation. The previous hand-written site is kept at `legacy/`, which is
+never uploaded.
 
-If Pages is ever moved to "Source: GitHub Actions", the committed copy becomes
-redundant: point the workflow at `site/build` and delete the copied paths. The
-`baseUrl` stays `/ZMRIG/` either way.
+`tests/docs/pages.sh` fails if either copy differs from `site/build`, so a
+content change that was not published cannot be merged silently. Switching the
+Pages source to *GitHub Actions* would make the root copy unnecessary; the
+settings are in [`doc/SETUP.md`](SETUP.md) §4a.
 
 ## Working on it
 

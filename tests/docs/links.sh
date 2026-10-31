@@ -43,12 +43,12 @@ slug() {
               -e 's/^-//' -e 's/-$//'
 }
 
-# Markdown under web/content/ is not read from disk: docs.js renders it inside
-# docs.html, so its relative links resolve against web/. Treat it that way here
-# or every wizard link would look broken.
+# Markdown under legacy/content/ is not read from disk: docs.js renders it
+# inside docs.html, so its relative links resolve against legacy/. Treat it that
+# way here or every wizard link would look broken.
 base_dir() {
     case "$1" in
-        ./web/content/*) echo "./web" ;;
+        ./legacy/content/*) echo "./legacy" ;;
         *) echo "$(dirname "$1")" ;;
     esac
 }
@@ -119,7 +119,7 @@ for file in "${files[@]}"; do
                     # docs.html is a shell: its anchors are slugs from the
                     # manifest, not ids in the markup.
                     if [ "$(basename "$resolved")" = "docs.html" ]; then
-                        if grep -q "\"slug\": *\"$anchor\"" web/content/vi/index.json 2>/dev/null; then
+                        if grep -q "\"slug\": *\"$anchor\"" legacy/content/vi/index.json 2>/dev/null; then
                             ok "$file -> $path#$anchor"
                         else
                             bad "$file -> $path#$anchor (no such page in index.json)"

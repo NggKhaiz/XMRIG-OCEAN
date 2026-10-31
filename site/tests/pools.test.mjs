@@ -28,6 +28,9 @@ test("every pool has a unique id and a valid host:port", () => {
   const ids = new Set();
   for (const pool of POOLS) {
     assert.ok(!ids.has(pool.id), `duplicate id ${pool.id}`);
+    // The id is a URL parameter on the builder (?pool=c3pool), so it has to
+    // survive a link: no spaces, no capitals, nothing that needs escaping.
+    assert.match(pool.id, /^[a-z0-9-]+$/, `${pool.id} is not URL-safe`);
     ids.add(pool.id);
     assert.match(pool.host, /^[^\s:]+:\d{2,5}$/, pool.host);
     if (pool.tlsHost) assert.match(pool.tlsHost, /^[^\s:]+:\d{2,5}$/, pool.tlsHost);

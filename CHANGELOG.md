@@ -1,3 +1,39 @@
+# Unreleased — the documentation site is the site
+
+`https://nggkhaiz.github.io/ZMRIG/` used to serve the hand-written site in
+`web/`. It now serves the Docusaurus build, at the same URL, with the same
+content in both languages. No binary changed.
+
+### Changed
+- **`web/` is the published site.** `.github/workflows/pages.yml` uploads `web`
+  as the Pages artifact, so the build is written there instead of only to the
+  repository root. `scripts/publish-site.sh` writes both trees from one build —
+  the artifact one, and the branch root that GitHub's *pages build and
+  deployment* still publishes because **Settings → Pages → Source** is set to
+  *Deploy from a branch*. Whichever deployment finishes last, a visitor gets the
+  same pages; `--check` fails the moment they disagree. Switching that setting to
+  *GitHub Actions* makes the root copy unnecessary (`doc/SETUP.md` §4a).
+- **`web/` is replaced whole on every publish**, so no asset from a previous
+  build can survive and serve a stale page. In the repository root only the
+  paths Docusaurus owns are replaced.
+- **The previous site moved to `legacy/`**, out of the deployed tree, and its
+  tests run from there (`npm run test:web`, 57 checks unchanged).
+- **`/ZMRIG/wizard.html` and `/ZMRIG/docs.html` are redirects now**, not pages:
+  a bookmark, a forum post or the README of some fork still lands on the command
+  builder or the documentation, in the visitor's language.
+- **`?pool=` works on the builder**, so the pool tables in the docs link straight
+  to a pre-selected pool — the one behaviour of the old wizard worth keeping.
+- **`robots.txt` is part of the build** (`site/static/`), not a hand-kept file in
+  the repository root that could drift from the sitemap.
+
+### Tests
+- **`tests/docs/pages.sh`** runs against `web/` (the tree Pages actually
+  uploads), 21 checks: adds the two redirect stubs and the archive check, and
+  still refuses a stale copy.
+- **`legacy/tests/`** keeps running: the archived site is not deployed, but the
+  checks that guard branch names, the donation address and the pool table are
+  still cheap and still true.
+
 # Unreleased — the documentation site
 
 The site is no longer hand-written HTML. It is Docusaurus 3, in `site/`, with
