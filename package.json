@@ -9,7 +9,7 @@
   "scripts": {
     "build": "node scripts/generate_cl.js",
     "test": "node run_tests.js",
-    "test:web": "node --test web/tests/*.test.js",
+    "test:web": "node --test legacy/tests/*.test.js",
     "test:pool": "node --test pool/tests/*.test.js",
     "test:oneclick": "bash tests/oneclick/plan.sh && bash tests/oneclick/config.sh && bash tests/oneclick/governor.sh && bash tests/oneclick/purge.sh",
     "test:docs": "bash tests/docs/links.sh",

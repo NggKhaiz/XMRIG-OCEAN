@@ -1,3 +1,57 @@
+# Unreleased — the documentation site is the site
+
+`https://nggkhaiz.github.io/ZMRIG/` used to serve the hand-written site in
+`web/`. It now serves the Docusaurus build, at the same URL, with the same
+content in both languages. No binary changed.
+
+### Changed
+- **`web/` is the published site.** `.github/workflows/pages.yml` uploads `web`
+  as the Pages artifact, so the build is written there instead of only to the
+  repository root. `scripts/publish-site.sh` writes both trees from one build —
+  the artifact one, and the branch root that GitHub's *pages build and
+  deployment* still publishes because **Settings → Pages → Source** is set to
+  *Deploy from a branch*. Whichever deployment finishes last, a visitor gets the
+  same pages; `--check` fails the moment they disagree. Switching that setting to
+  *GitHub Actions* makes the root copy unnecessary (`doc/SETUP.md` §4a).
+- **`web/` is replaced whole on every publish**, so no asset from a previous
+  build can survive and serve a stale page. In the repository root only the
+  paths Docusaurus owns are replaced.
+- **The previous site moved to `legacy/`**, out of the deployed tree, and its
+  tests run from there (`npm run test:web`, 57 checks unchanged).
+- **`/ZMRIG/wizard.html` and `/ZMRIG/docs.html` are redirects now**, not pages:
+  a bookmark, a forum post or the README of some fork still lands on the command
+  builder or the documentation, in the visitor's language.
+- **`?pool=` works on the builder**, so the pool tables in the docs link straight
+  to a pre-selected pool — the one behaviour of the old wizard worth keeping.
+- **`robots.txt` is part of the build** (`site/static/`), not a hand-kept file in
+  the repository root that could drift from the sitemap.
+
+### Fixed
+- **The proxy installed its signal handlers too late.** They were registered
+  after the listeners were created, so a `systemctl restart` in the first
+  milliseconds killed the process by signal instead of exiting 0 — and its own
+  e2e suite failed one run in eight because of it. The handlers now exist before
+  anything is opened, and the banner prints the rig commands before the upstream
+  connection is attempted, so a person at the terminal sees them first.
+- **The fleet break-even price counted revenue from machines whose power is
+  unknown** against only the metered machines' energy, which overstates the
+  number — the one figure that decides whether to keep mining. It now uses the
+  metered machines' revenue, and the test pins the difference.
+- **The bilingual calculator printed the English comment lines** inside the
+  "after the install" block on the Vietnamese page. Those blocks are commands to
+  paste, so the commentary is gone rather than translated twice.
+- **The power card read "Energy per day" above a wattage.** It now says what it
+  shows: wall power, with `kWh/day` under it.
+
+### Tests
+- **`tests/docs/pages.sh`** runs against `web/` (the tree Pages actually
+  uploads), 22 checks: every local reference on every page (2040 of them, not a
+  sample of six), a title, a description and the right `lang` on each page with
+  no leaked placeholder, the two redirect stubs, and still refuses a stale copy.
+- **`legacy/tests/`** keeps running: the archived site is not deployed, but the
+  checks that guard branch names, the donation address and the pool table are
+  still cheap and still true.
+
 # Unreleased — the documentation site
 
 The site is no longer hand-written HTML. It is Docusaurus 3, in `site/`, with

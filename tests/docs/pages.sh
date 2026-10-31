@@ -2,11 +2,10 @@
 #
 # pages.sh - the published site as GitHub Pages will serve it.
 #
-# The documentation site is built with Docusaurus into `site/build`, and then
-# copied into the repository root by `scripts/publish-site.sh`, because Pages for
-# this repository is set to "Deploy from a branch → BETA → /" and that setting
-# cannot be changed by a workflow token. So the published site is the branch
-# root, and these checks are the machine version of clicking through it.
+# The documentation site is built with Docusaurus into `site/build` and copied
+# into `web/` by `scripts/publish-site.sh`. `web/` is exactly what
+# `.github/workflows/pages.yml` uploads as the Pages artifact, so these checks
+# are the machine version of clicking through the published site.
 #
 #   bash tests/docs/pages.sh
 #
@@ -15,7 +14,10 @@
 set -uo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${0}")/../.." && pwd)
-cd "$ROOT" || exit 2
+cd "$ROOT/web" 2>/dev/null || {
+    printf ' FAIL web/ does not exist; run ./scripts/publish-site.sh\n'
+    exit 1
+}
 
 pass=0
 fail=0
@@ -29,7 +31,7 @@ else
     bad "index.html is not the Docusaurus build (run ./scripts/publish-site.sh)"
 fi
 
-for file in 404.html .nojekyll robots.txt; do
+for file in index.html 404.html .nojekyll robots.txt; do
     [ -f "$file" ] && ok "present: ${file}" || bad "missing ${file}"
 done
 
@@ -39,14 +41,24 @@ else
     bad "404.html is not the Docusaurus 404 page"
 fi
 
-# The previous static site stays in the repository as history; it must not be
-# deleted by a publish run, because `web/` holds the wizard people still link to.
-[ -f web/index.html ] && ok "legacy site kept at web/ (not deleted by publishing)" \
-    || bad "web/index.html disappeared"
+# The hand-written site that used to live here is archived beside the build, not
+# inside it: an archive that Pages uploads is a second copy of the truth.
+[ -f "$ROOT/legacy/index.html" ] && ok "the previous static site is archived at legacy/, not deployed" \
+    || bad "legacy/index.html disappeared"
+
+# Old links keep working: /ZMRIG/wizard.html and /ZMRIG/docs.html are redirects
+# into the documentation, so a bookmark from the previous site is not a 404.
+for stub in wizard.html docs.html; do
+    if [ -f "$stub" ] && grep -q 'url=/ZMRIG/docs/' "$stub"; then
+        ok "${stub} redirects into the documentation"
+    else
+        bad "${stub} is missing or does not redirect"
+    fi
+done
 
 # --- 2. every documented route exists in both locales ----------------------
-ids=$(node -e '
-const sidebars = require("./site/sidebars.js");
+ids=$(ZMRIG_SIDEBARS="$ROOT/site/sidebars.js" node -e '
+const sidebars = require(process.env.ZMRIG_SIDEBARS);
 const out = [];
 (function walk(items) {
   for (const item of items) {
@@ -97,8 +109,13 @@ def resolve(url):
     candidates = [rel, rel + ".html", rel.rstrip("/") + "/index.html", rel + "/index.html"]
     return any(os.path.isfile(os.path.join(ROOT, c)) for c in candidates)
 
-pages = ["index.html", "404.html", "docs/intro.html", "vi/docs/intro.html",
-         "docs/economics/profitability.html", "vi/docs/economics/profitability.html"]
+# Every published page, not a sample: a broken asset on page 19 is exactly as
+# broken as one on the home page, and only this loop knows the difference.
+pages = ["index.html", "404.html"]
+for root, _dirs, files in os.walk("docs"):
+    pages += [os.path.join(root, f) for f in files if f.endswith(".html")]
+for root, _dirs, files in os.walk("vi"):
+    pages += [os.path.join(root, f) for f in files if f.endswith(".html")]
 bad = 0
 checked = 0
 for page in pages:
@@ -125,6 +142,66 @@ if [ "${broken:-1}" = "0" ] && [ "${checked:-0}" -gt 50 ]; then
 else
     bad "${broken:-?} of ${checked:-?} local reference(s) broken, listed above"
     head -10 /tmp/zmrig-assets-check.txt | sed 's/^/      /'
+fi
+
+# --- 3b. every page is a finished page -------------------------------------
+# The bugs a reader actually sees: a missing title in a tab, an empty share card,
+# and a placeholder that leaked out of a template. Cheap to check, embarrassing
+# to ship.
+python3 - <<'PY2' > /tmp/zmrig-page-quality.txt
+import os, re, sys
+
+bad = 0
+pages = []
+for base in ("docs", "vi"):
+    for root, _dirs, files in os.walk(base):
+        pages += [os.path.join(root, f) for f in files if f.endswith(".html")]
+
+TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.S)
+DESC = re.compile(r'<meta[^>]+name="description"[^>]+content="([^"]*)"')
+LEAKS = ("undefined", "NaN", "[object Object]", "{{", "}}", "lorem ipsum")
+# Minified JavaScript is full of "}}" and "NaN"; only what a reader can see
+# counts, so scripts and styles are removed before the scan.
+NOISE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.S)
+
+for page in pages:
+    html = open(page, encoding="utf-8").read()
+    title = TITLE.search(html)
+    if not title or not title.group(1).strip():
+        print(f"{page}: no title")
+        bad += 1
+    # A 404 and a noindex search page are not shareable, so they are not
+    # expected to carry a description; everything a visitor can land on is.
+    shareable = "noindex" not in html and not page.endswith("404.html")
+    desc = DESC.search(html)
+    if shareable and (not desc or len(desc.group(1).strip()) < 20):
+        print(f"{page}: missing or thin description")
+        bad += 1
+    body = NOISE.sub("", html.split("<body", 1)[-1])
+    for leak in LEAKS:
+        if leak in body:
+            print(f"{page}: leaked {leak!r}")
+            bad += 1
+            break
+    # The two redirect stubs are language-neutral: they pick the destination
+    # from the URL, so their own lang attribute is not a claim about content.
+    stub = os.path.basename(page) in ("wizard.html", "docs.html")
+    lang = "vi" if page.startswith("vi/") else "en"
+    if not stub and f'<html lang="{lang}"' not in html:
+        print(f"{page}: html lang is not {lang}")
+        bad += 1
+
+print(f"pages {len(pages)} bad {bad}")
+sys.exit(0 if bad == 0 else 1)
+PY2
+quality=$(tail -1 /tmp/zmrig-page-quality.txt)
+qpages=$(printf '%s' "$quality" | awk '{print $2}')
+qbad=$(printf '%s' "$quality" | awk '{print $4}')
+if [ "${qbad:-1}" = "0" ] && [ "${qpages:-0}" -ge 40 ]; then
+    ok "all ${qpages} pages have a title, a description, the right lang and no leaked placeholder"
+else
+    bad "${qbad:-?} problem(s) across ${qpages:-?} pages, listed above"
+    head -10 /tmp/zmrig-page-quality.txt | sed 's/^/      /'
 fi
 
 # --- 4. the sitemap advertises only pages that exist ----------------------
@@ -228,8 +305,8 @@ fi
 stale=0
 for file in index.html 404.html sitemap.xml docs/intro.html vi/docs/intro.html \
             docs/economics/profitability.html; do
-    if [ -f "site/build/$file" ]; then
-        cmp -s "site/build/$file" "$file" || { stale=$((stale + 1)); printf '      stale: %s\n' "$file"; }
+    if [ -f "$ROOT/site/build/$file" ]; then
+        cmp -s "$ROOT/site/build/$file" "$file" || { stale=$((stale + 1)); printf '      stale: %s\n' "$file"; }
     fi
 done
 if [ "$stale" -eq 0 ]; then

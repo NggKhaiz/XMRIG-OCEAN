@@ -1,272 +1,35 @@
-<!DOCTYPE html>
-<html lang="vi" data-theme="dark">
+<!doctype html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Wizard cài đặt — ZMRIG</title>
-<meta name="description" content="Wizard cài ZMRIG: chọn ví, pool và mạng qua bốn bước, nhận đúng một lệnh cài, kèm lệnh xem trước không thay đổi gì trên máy.">
-<meta name="color-scheme" content="dark light">
-<meta name="author" content="@nggkhaiz">
-<link rel="author" href="https://github.com/NggKhaiz">
-<meta property="og:site_name" content="ZMRIG">
-<meta name="twitter:card" content="summary">
-<meta name="theme-color" content="#0d0f12">
-<meta property="og:title" content="Wizard cài đặt — ZMRIG">
-<meta property="og:description" content="Bốn bước: ví, pool, máy, mạng. Nhận đúng một lệnh cài, kèm lệnh xem trước không thay đổi gì.">
-<meta property="og:type" content="website">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f2763f'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' text-anchor='middle' fill='%231a1008'%3Ez%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="assets/site.css">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.coingecko.com; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<title>Moved — the wizard is now the command builder</title>
+<meta name="description" content="The four-step wizard and the command builder are one page inside the ZMRIG documentation, in English and Vietnamese.">
+<link rel="canonical" href="https://nggkhaiz.github.io/ZMRIG/docs/install/builder">
+<meta http-equiv="refresh" content="2; url=/ZMRIG/docs/install/builder">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:#fff;color:#16181d;
+       font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  main{max-width:34rem;padding:2rem}
+  a{color:#0b6b4f}
+  @media (prefers-color-scheme:dark){body{background:#15181d;color:#e7e9ee}a{color:#5fd1a4}}
+</style>
 </head>
-<body class="wizard-page">
-
-<header class="topbar">
-  <div class="wrap">
-    <a class="brand" href="index.html"><span class="mark">z</span> zmrig</a>
-    <nav class="nav" aria-label="Chính">
-      <a href="index.html">Trang chủ</a>
-      <a href="docs.html">Tài liệu</a>
-      <a href="docs.html#chon-pool" class="hide-sm">Chọn pool</a>
-      <a href="index.html#dashboard" class="hide-sm">Bảng tính</a>
-      <a href="https://github.com/NggKhaiz/ZMRIG" class="hide-sm" target="_blank" rel="noreferrer">GitHub</a>
-      <button class="icon-btn" type="button" data-theme-toggle aria-label="Đổi giao diện">☀</button>
-    </nav>
-  </div>
-</header>
-
+<body>
 <main>
-  <div class="wrap">
-
-    <div class="wizard-head">
-      <p class="eyebrow">Wizard cài đặt</p>
-      <h1>Bốn câu hỏi, một lệnh.</h1>
-      <p class="lede muted" style="max-width:64ch">
-        Mỗi bước chỉ hỏi thứ mà installer không tự quyết được: ví, pool, và mạng của máy.
-        Engine, số thread và chế độ điện để installer tự dò — bạn chỉ cần nói khi muốn khác đi.
-      </p>
-    </div>
-
-    <ol class="stepper" id="w-stepper" aria-label="Các bước">
-      <li data-step="1"><button type="button" data-goto="1"><span class="n">1</span><span class="t">Ví</span></button></li>
-      <li data-step="2"><button type="button" data-goto="2"><span class="n">2</span><span class="t">Pool</span></button></li>
-      <li data-step="3"><button type="button" data-goto="3"><span class="n">3</span><span class="t">Máy</span></button></li>
-      <li data-step="4"><button type="button" data-goto="4"><span class="n">4</span><span class="t">Mạng</span></button></li>
-      <li data-step="5"><button type="button" data-goto="5"><span class="n">5</span><span class="t">Lệnh</span></button></li>
-    </ol>
-    <div class="progress" aria-hidden="true"><i id="w-progress"></i></div>
-
-    <form id="wizard" autocomplete="off" novalidate>
-
-      <!-- 1 ------------------------------------------------------------- -->
-      <section class="w-step card" data-panel="1">
-        <h2>Ví nhận tiền đào</h2>
-        <p class="muted small">
-          Một địa chỉ Monero. Ví chính bắt đầu bằng <code>4</code>, subaddress bằng <code>8</code>.
-          Không bao giờ nhập seed hay private key ở đây — trang này không gửi gì đi đâu cả.
-        </p>
-
-        <div class="field">
-          <label for="w-wallet">Địa chỉ ví</label>
-          <input id="w-wallet" type="text" spellcheck="false" autocomplete="off" placeholder="4… hoặc 8… (95 ký tự)" aria-describedby="w-wallet-hint">
-          <p class="hint" id="w-wallet-hint">Chưa nhập gì.</p>
-        </div>
-
-        <div class="field" style="max-width:320px">
-          <label for="w-rig">Tên máy <span class="muted">(tuỳ chọn)</span></label>
-          <input id="w-rig" type="text" spellcheck="false" autocomplete="off" placeholder="vps-hn-01" maxlength="32">
-          <p class="hint">Hiện trên dashboard của pool để bạn biết máy nào đang chạy.</p>
-        </div>
-      </section>
-
-      <!-- 2 ------------------------------------------------------------- -->
-      <section class="w-step card" data-panel="2" hidden>
-        <h2>Pool</h2>
-        <p class="muted small">
-          Phí và minimum quyết định thu nhập nhiều hơn hashrate. Số liệu dưới đây kiểm tra tháng 10/2026;
-          chi tiết và cách đi vòng khi bị chặn DNS ở <a href="docs.html#chon-pool">tài liệu / Chọn pool</a>.
-        </p>
-
-        <div class="pool-grid" id="w-pool-grid" role="radiogroup" aria-label="Pool"></div>
-
-        <div class="field" id="w-host-field" hidden style="margin-top:14px">
-          <label for="w-host">host:port của pool</label>
-          <input id="w-host" type="text" spellcheck="false" autocomplete="off" placeholder="pool.example.com:3333">
-          <p class="hint" id="w-host-hint">Dán cả URL cũng được.</p>
-        </div>
-
-        <div class="row" style="margin-top:14px">
-          <div class="field">
-            <label for="w-tls"><input type="checkbox" id="w-tls"> Dùng TLS cho kết nối pool</label>
-            <p class="hint" id="w-tls-hint">Bật khi mạng chặn cổng thường hoặc khi muốn mã hoá stratum.</p>
-          </div>
-          <div class="field">
-            <label for="w-failover">Pool dự phòng <span class="muted">(khuyến nghị)</span></label>
-            <select id="w-failover">
-              <option value="">Không có</option>
-            </select>
-            <p class="hint">Chỉ dùng khi pool chính không tới được hoặc từ chối IP này. Chọn pool khác hạ tầng để không cùng bị chặn.</p>
-          </div>
-        </div>
-      </section>
-
-      <!-- 3 ------------------------------------------------------------- -->
-      <section class="w-step card" data-panel="3" hidden>
-        <h2>Máy này</h2>
-        <p class="muted small">Để trống mọi thứ ở đây là cách tốt nhất: installer dò CPU, RAM, huge pages rồi quyết định.</p>
-
-        <div class="choice-grid" role="radiogroup" aria-label="Engine">
-          <label class="choice">
-            <input type="radio" name="w-engine" value="auto" checked>
-            <span class="choice-body">
-              <b>Tự nhận diện</b>
-              <span class="small muted">Pool chuyển thuật toán → engine C++ (mọi thuật toán). Pool chỉ RandomX → zmrig, 0 % phí.</span>
-            </span>
-          </label>
-          <label class="choice">
-            <input type="radio" name="w-engine" value="zmrig">
-            <span class="choice-body">
-              <b>zmrig</b>
-              <span class="small muted">Engine Zig, chỉ họ RandomX, 0 % phí dev, nói được WebSocket/TLS trên 443.</span>
-            </span>
-          </label>
-          <label class="choice">
-            <input type="radio" name="w-engine" value="xmrig">
-            <span class="choice-body">
-              <b>xmrig (C++)</b>
-              <span class="small muted">34 thuật toán. Không nói được WebSocket, không qua proxy được.</span>
-            </span>
-          </label>
-        </div>
-
-        <div class="row" style="margin-top:14px">
-          <div class="field">
-            <label for="w-profile">Chế độ điện</label>
-            <select id="w-profile">
-              <option value="auto">Tự nhận diện — free trên máy điện free, watt khi chạy pin</option>
-              <option value="free">Điện free — hashrate tối đa</option>
-              <option value="watt">Tiết kiệm điện — tối đa H/W</option>
-            </select>
-          </div>
-          <div class="field" style="flex:0 1 180px">
-            <label for="w-cpu">CPU tối đa (%)</label>
-            <input id="w-cpu" type="number" min="10" max="100" step="5" value="100" inputmode="numeric">
-          </div>
-        </div>
-
-        <div class="checks-col">
-          <label><input type="checkbox" id="w-noautotune"> <span>Không dò số thread tốt nhất</span> <code>--no-autotune</code></label>
-          <label><input type="checkbox" id="w-nicehash"> <span>Pool thuê hash / NiceHash</span> <code>--nicehash</code></label>
-        </div>
-      </section>
-
-      <!-- 4 ------------------------------------------------------------- -->
-      <section class="w-step card" data-panel="4" hidden>
-        <h2>Mạng của máy</h2>
-        <p class="muted small">
-          VPS và mạng công ty thường chặn mọi cổng trừ 80/443. Ba câu hỏi dưới đây quyết định miner
-          nói chuyện với pool bằng đường nào.
-        </p>
-
-        <div class="checks-col">
-          <label><input type="checkbox" id="w-cloudflare"> <span>Máy chỉ ra ngoài được qua 443 / sau CDN</span> <code>--cloudflare</code></label>
-          <label><input type="checkbox" id="w-proxy"> <span>Phải đi qua proxy HTTP/SOCKS5</span> <code>--proxy</code></label>
-          <label><input type="checkbox" id="w-msr"> <span>VPS/container không cho ghi MSR</span> <code>--no-msr</code></label>
-          <label><input type="checkbox" id="w-notune"> <span>Không chỉnh hệ thống, chỉ cài miner</span> <code>--no-tune</code></label>
-          <label><input type="checkbox" id="w-nohealth"> <span>Không tự khởi động lại khi mất doanh thu</span> <code>--no-health-restart</code></label>
-        </div>
-
-        <div class="row" style="margin-top:12px">
-          <div class="field" id="w-proxy-field" hidden>
-            <label for="w-proxy-url">Địa chỉ proxy</label>
-            <input id="w-proxy-url" type="text" spellcheck="false" placeholder="socks5://127.0.0.1:9050">
-          </div>
-          <div class="field" id="w-wspath-field" hidden style="flex:0 1 200px">
-            <label for="w-wspath">Đường dẫn WebSocket</label>
-            <input id="w-wspath" type="text" spellcheck="false" value="/stratum">
-          </div>
-        </div>
-
-        <p class="hint" id="w-net-hint">
-          Không chắc? Để trống. Miner thử TCP thường trước, và pool dự phòng sẽ cứu bạn nếu đường chính bị chặn.
-        </p>
-      </section>
-
-      <!-- 5 ------------------------------------------------------------- -->
-      <section class="w-step card" data-panel="5" hidden>
-        <h2>Lệnh của bạn</h2>
-        <div class="summary-table">
-          <ul class="summary" id="w-summary"></ul>
-        </div>
-
-        <pre><code id="w-output">…</code></pre>
-
-        <div class="btn-row">
-          <button class="btn primary" type="button" id="w-copy">Copy lệnh cài</button>
-          <button class="btn small" type="button" id="w-copy-plan">Copy lệnh xem trước</button>
-          <button class="btn small" type="button" id="w-copy-link">Copy liên kết lựa chọn</button>
-          <button class="btn small" type="button" id="w-restart">Làm lại</button>
-        </div>
-        <p class="status" id="w-status" role="status" aria-live="polite"></p>
-        <p class="hint" id="w-warn" hidden></p>
-
-        <details class="help" open style="margin-top:14px">
-          <summary>Sau khi cài</summary>
-          <ol class="small muted" style="margin:10px 0 0 18px; padding:0">
-            <li><code>sudo systemctl status zmrig</code> — phải thấy <code>active (running)</code>.</li>
-            <li><code>zmrig --report</code> in một mã <code>ZMRIG1.…</code>; dán vào <a href="index.html#dashboard">bảng tính</a> để biết H/W và lợi nhuận.</li>
-            <li>Đăng ký worker trên trang pool để xem hashrate và số dư.</li>
-          </ol>
-        </details>
-
-        <details class="help" style="margin-top:10px">
-          <summary>Gỡ cài đặt</summary>
-          <pre style="margin:10px 0 0"><code id="w-remove">sudo ./oneclick.sh purge --dry-run
-sudo ./oneclick.sh purge</code></pre>
-        </details>
-      </section>
-
-      <div class="wizard-nav">
-        <button class="btn" type="button" id="w-back">← Quay lại</button>
-        <span class="grow"></span>
-        <span class="hint" id="w-blocked" role="status" aria-live="polite"></span>
-        <button class="btn primary" type="button" id="w-next">Tiếp →</button>
-      </div>
-
-    </form>
-
-  </div>
+  <h1>The wizard is now the command builder</h1>
+  <p>The step-by-step wizard and the command builder became one page inside the
+     documentation, in English and Vietnamese.</p>
+  <p><a href="/ZMRIG/docs/install/builder">Open the command builder</a> ·
+     <a href="/ZMRIG/vi/docs/install/builder">Bộ dựng lệnh (tiếng Việt)</a></p>
 </main>
-
-<footer>
-  <div class="wrap footer-grid">
-    <div class="f-brand">
-      <a class="brand" href="index.html"><span class="mark">z</span> ZMRIG</a>
-      <p class="small muted">
-        RandomX miner 0&nbsp;% phí developer, by
-        <a href="https://github.com/NggKhaiz" target="_blank" rel="noreferrer">@nggkhaiz</a>.
-        GPL-3.0. Không tracking, không analytics, không tài khoản.
-      </p>
-    </div>
-    <nav class="f-links" aria-label="Chân trang">
-      <a href="index.html">Trang chủ</a>
-      <a href="wizard.html">Wizard</a>
-      <a href="docs.html">Tài liệu</a>
-      <a href="docs.html#chon-pool">Chọn pool</a>
-      <a href="index.html#dashboard">Bảng tính</a>
-      <a href="index.html#ung-ho">Ủng hộ</a>
-    </nav>
-    <div class="f-meta">
-      <span class="tag">v6.32.1</span>
-      <a href="https://github.com/NggKhaiz/ZMRIG/blob/BETA/LICENSE" target="_blank" rel="noreferrer">Giấy phép</a>
-      <a href="https://github.com/NggKhaiz/ZMRIG/blob/BETA/NOTICE" target="_blank" rel="noreferrer">Ghi công</a>
-      <a href="https://github.com/NggKhaiz/ZMRIG/issues" target="_blank" rel="noreferrer">Báo lỗi</a>
-    </div>
-  </div>
-</footer>
-
-<script src="assets/site.js"></script>
-<script src="assets/pools.js"></script>
-<script src="assets/command.js"></script>
-<script src="assets/wizard.js"></script>
+<script>
+  // Docusaurus copies this file into /vi/ as well, so the destination follows
+  // the language of the URL that was asked for.
+  var target = location.pathname.indexOf("/vi/") !== -1
+    ? "/ZMRIG/vi/docs/install/builder"
+    : "/ZMRIG/docs/install/builder";
+  location.replace(target + location.search + location.hash);
+</script>
 </body>
 </html>

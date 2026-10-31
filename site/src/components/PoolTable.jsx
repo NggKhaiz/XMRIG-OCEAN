@@ -1,4 +1,5 @@
 import React from "react";
+import useBaseUrl from "@docusaurus/useBaseUrl";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
 import { POOLS, feeLabel, minLabel } from "../lib/pools.mjs";
 import { translate } from "../lib/messages.mjs";
@@ -9,6 +10,9 @@ export default function PoolTable() {
   const { i18n } = useDocusaurusContext();
   const locale = i18n.currentLocale === "vi" ? "vi" : "en";
   const t = (key) => translate(locale, key);
+  // useBaseUrl already prepends the locale (`/ZMRIG/vi/` on the Vietnamese
+  // pages), so the same call is correct in both.
+  const builderPath = useBaseUrl("/docs/install/builder");
 
   return (
     <div className="zm-table-wrap">
@@ -27,7 +31,9 @@ export default function PoolTable() {
           {POOLS.map((pool) => (
             <tr key={pool.id}>
               <th scope="row">
-                {pool.name}
+                <a href={`${builderPath}?pool=${pool.id}#zm-builder`}>
+                  {pool.name}
+                </a>
                 {pool.switching ? (
                   <span className="zm-badge">
                     {locale === "vi" ? "chuyển thuật toán" : "switching"}

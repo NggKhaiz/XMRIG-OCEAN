@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
 import { POOLS, feeLabel, minLabel } from "../lib/pools.mjs";
 import { build } from "../lib/command.mjs";
@@ -36,6 +36,16 @@ export default function InstallBuilder() {
   const [state, setState] = useState(INITIAL);
   const result = useMemo(() => build(state), [state]);
 
+  // Links from elsewhere carry the pool as `?pool=c3pool` — the old wizard did
+  // this, so the pool table can keep pointing at the builder. Only a known id is
+  // accepted: the value is used as a key, never echoed into the command.
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get("pool");
+    if (wanted && POOLS.some((pool) => pool.id === wanted)) {
+      setState((prev) => ({ ...prev, pool: wanted }));
+    }
+  }, []);
+
   const set = (key) => (event) => {
     const target = event.target;
     const value = target.type === "checkbox" ? target.checked : target.value;
@@ -66,7 +76,7 @@ export default function InstallBuilder() {
   const isCustom = !selectedPool;
 
   return (
-    <div className="zm-builder">
+    <div className="zm-builder" id="zm-builder">
       <form className="zm-builder__form" onSubmit={(e) => e.preventDefault()}>
         <p className="zm-caption">{t("builder.intro")}</p>
 
