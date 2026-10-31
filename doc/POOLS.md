@@ -116,3 +116,19 @@ compare `xmrPerDay` at the same `hashrate`:
 MoneroOcean wins when the switching premium is real for this CPU (it varies with
 which coins are hot); SupportXMR wins when it is not, and always wins on
 variance. Measure, then decide — the numbers move month to month.
+
+## Pools for the other coins
+
+Every row above is a Monero pool. The engines also hash Wownero, ArQmA, Graft,
+Safex Cash, YadaCoin and Scala (`--coin`, see `doc/SETUP.md` §5b), and this
+repository deliberately keeps **no** endpoint or fee for those: they change, and
+a stale hostname sends a rig to a dead pool for a week. Take `host:port` from the
+coin's own community and pass it to `--pool`.
+
+```bash
+sudo ./oneclick.sh install --coin wow --pool pool.example.org:3333 --wallet=Wo...
+```
+
+A switching pool (MoneroOcean and clones) is still the simplest way to end up on
+whatever pays best: leave `--coin` off, and the rig advertises the whole RandomX
+family at login.
