@@ -63,7 +63,7 @@ test("several codes in one paste, and raw JSON, both work", () => {
   assert.equal(many.rigs.length, 2);
   assert.deepEqual(
     many.rigs.map((rig) => rig.id),
-    ["mini-pc", "vps"]
+    ["mini-pc", "vps"],
   );
 
   const raw = decodeMany(JSON.stringify([RIG, { ...RIG, id: "desk" }]));
@@ -89,7 +89,12 @@ test("normalise fills the four hashrate windows and rejects nonsense power", () 
 });
 
 test("mergeSettings ignores unknown keys and empty values", () => {
-  const merged = mergeSettings({ price: 0.2, window: "2", nope: 1, psuEff: "" });
+  const merged = mergeSettings({
+    price: 0.2,
+    window: "2",
+    nope: 1,
+    psuEff: "",
+  });
   assert.equal(merged.price, 0.2);
   assert.equal(merged.window, 2);
   assert.equal(merged.psuEff, DEFAULTS.psuEff);
@@ -101,11 +106,17 @@ test("wall power from RAPL is scaled by PSU efficiency plus overhead", () => {
   const result = compute(rig, { window: 1 }, null);
   // 45 / 0.87 + 25 = 76.72 W; 76.72 * 24 / 1000 = 1.841 kWh/day
   // 1.841 * 0.1 = 0.1841 $/day
-  assert.ok(Math.abs(result.wallWatts - 76.72) < 0.01, String(result.wallWatts));
+  assert.ok(
+    Math.abs(result.wallWatts - 76.72) < 0.01,
+    String(result.wallWatts),
+  );
   assert.ok(Math.abs(result.kwhDay - 1.8413) < 0.001, String(result.kwhDay));
   assert.ok(Math.abs(result.costDay - 0.18413) < 0.001, String(result.costDay));
   // 0.748 kH/s * 0.000096 XMR/kH/s/day * $300 = 0.02154 $/day
-  assert.ok(Math.abs(result.revenueDay - 0.021542) < 0.0001, String(result.revenueDay));
+  assert.ok(
+    Math.abs(result.revenueDay - 0.021542) < 0.0001,
+    String(result.revenueDay),
+  );
   assert.ok(result.profitDay < 0, "a rented VPS at 0.10 $/kWh loses money");
 });
 
@@ -139,7 +150,7 @@ test("network mode uses blocks and the pool fee", () => {
   const result = compute(
     rig,
     { payoutMode: "network", networkHash: 4.5e9, blockReward: 0.6, poolFee: 1 },
-    null
+    null,
   );
   // 4500 / 4.5e9 * 720 * 0.6 * 0.99 = 0.00042768 XMR/day
   assert.ok(Math.abs(result.xmrDay - 0.00042768) < 1e-9, String(result.xmrDay));
@@ -149,7 +160,7 @@ test("break-even price is revenue per kWh", () => {
   const rig = normalise(RIG);
   const result = compute(rig, {}, null);
   assert.ok(
-    Math.abs(result.breakEvenPrice - result.revenueDay / result.kwhDay) < 1e-12
+    Math.abs(result.breakEvenPrice - result.revenueDay / result.kwhDay) < 1e-12,
   );
   // 0.021542 / 1.8413 = 0.0117 $/kWh
   assert.ok(result.breakEvenPrice > 0.011 && result.breakEvenPrice < 0.012);
@@ -167,4 +178,15 @@ test("totals count unknown-power machines instead of assuming zero watts", () =>
   assert.ok(Math.abs(sum.wallWatts - known.wallWatts) < 0.001);
   assert.ok(Math.abs(sum.hashrate - (748 + 748)) < 0.001);
   assert.ok(Math.abs(sum.kwhMonth - known.kwhDay * 30) < 0.001);
+  // Revenue divided by consumption: the price at which profit is exactly zero.
+  assert.ok(
+    Math.abs(sum.breakEvenPrice - sum.revenueDay / sum.kwhDay) < 1e-12,
+    String(sum.breakEvenPrice),
+  );
+});
+
+test("a fleet with no known power has no break-even price", () => {
+  const unknown = compute(normalise({ ...RIG, pw: null }), {}, null);
+  const sum = totals([{ rig: normalise(RIG), result: unknown }]);
+  assert.equal(sum.breakEvenPrice, null);
 });

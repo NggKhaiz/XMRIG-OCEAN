@@ -675,11 +675,9 @@
   color: var(--zm-accent);
 }
 
+/* All three labels stay visible. Showing only the active one makes "Light" and
+   "Dark" indistinguishable icons, which fails WCAG 1.4.1 (colour/icon alone). */
 .zm-theme-switch__label {
-  display: none;
-}
-
-.zm-theme-switch__btn.is-active .zm-theme-switch__label {
   display: inline;
 }
 
@@ -722,7 +720,19 @@
     padding: 2.25rem 0 2rem;
   }
 
+  /* On a phone the icons have to carry the switch, so the text is hidden
+     visually but kept for screen readers — `display: none` would remove the
+     accessible name as well. */
   .zm-theme-switch__label {
-    display: none !important;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 }

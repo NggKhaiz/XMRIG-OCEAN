@@ -1,6 +1,7 @@
 ---
 title: Zero fee, verified
 description: What a developer fee costs on RandomX, what was removed in this tree, and the commands that prove the binary contains no second pool and no wallet.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-en.png
 ---
 
 # Zero fee, verified

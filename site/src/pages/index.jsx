@@ -1,11 +1,11 @@
 import React from "react";
+import Head from "@docusaurus/Head";
 import Layout from "@theme/Layout";
 import Link from "@docusaurus/Link";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
 import CopyButton from "../components/CopyButton";
 
-const RAW =
-  "https://raw.githubusercontent.com/NggKhaiz/ZMRIG/BETA/oneclick.sh";
+const RAW = "https://raw.githubusercontent.com/NggKhaiz/ZMRIG/BETA/oneclick.sh";
 
 const COMMAND = `curl -fsSL ${RAW} \\
   | sudo bash -s -- --wallet 4YourMoneroAddress`;
@@ -13,8 +13,7 @@ const COMMAND = `curl -fsSL ${RAW} \\
 const COPY = {
   en: {
     eyebrow: "RandomX miner · 0 % developer fee",
-    lede:
-      "One command installs a miner that needs a wallet address and nothing else: it detects the CPU, reserves huge pages, measures the real thread count, writes a systemd unit and proves it takes no cut. The documentation below is the whole manual — installation, pools, networks that only allow 443, measured benchmarks and a calculator that costs nothing to run.",
+    lede: "One command installs a miner that needs a wallet address and nothing else: it detects the CPU, reserves huge pages, measures the real thread count, writes a systemd unit and proves it takes no cut. The documentation below is the whole manual — installation, pools, networks that only allow 443, measured benchmarks and a calculator that costs nothing to run.",
     cta: "Read the documentation",
     cta2: "Build a command",
     copy: "Copy",
@@ -54,8 +53,7 @@ const COPY = {
   },
   vi: {
     eyebrow: "Miner RandomX · 0 % phí developer",
-    lede:
-      "Một lệnh cài xong miner chỉ cần địa chỉ ví: nó tự nhận CPU, tự đặt huge pages, tự đo số thread thật, viết systemd unit và chứng minh mình không lấy phần trăm nào. Phần tài liệu bên dưới là toàn bộ sách hướng dẫn — cài đặt, pool, mạng chỉ mở 443, benchmark đo được, và bảng tính chạy miễn phí ngay trong trình duyệt.",
+    lede: "Một lệnh cài xong miner chỉ cần địa chỉ ví: nó tự nhận CPU, tự đặt huge pages, tự đo số thread thật, viết systemd unit và chứng minh mình không lấy phần trăm nào. Phần tài liệu bên dưới là toàn bộ sách hướng dẫn — cài đặt, pool, mạng chỉ mở 443, benchmark đo được, và bảng tính chạy miễn phí ngay trong trình duyệt.",
     cta: "Đọc tài liệu",
     cta2: "Tự ghép lệnh",
     copy: "Copy",
@@ -99,9 +97,16 @@ export default function Home() {
   const { i18n } = useDocusaurusContext();
   const locale = i18n.currentLocale === "vi" ? "vi" : "en";
   const c = COPY[locale];
+  const socialImage = `https://nggkhaiz.github.io/ZMRIG/img/og-${locale}.png`;
 
   return (
     <Layout title="ZMRIG" description={c.lede}>
+      <Head>
+        <meta property="og:type" content="website" />
+        <meta property="og:image" content={socialImage} />
+        <meta name="twitter:image" content={socialImage} />
+        <meta name="twitter:card" content="summary_large_image" />
+      </Head>
       <header className="zm-hero">
         <div className="zm-wrap">
           <p className="zm-eyebrow">
@@ -114,7 +119,12 @@ export default function Home() {
             <pre>
               <code>{COMMAND}</code>
             </pre>
-            <CopyButton text={COMMAND} label={c.copy} copiedLabel={c.copied} className="zm-btn zm-btn--dark" />
+            <CopyButton
+              text={COMMAND}
+              label={c.copy}
+              copiedLabel={c.copied}
+              className="zm-btn zm-btn--dark"
+            />
           </div>
 
           <div className="zm-btn-row">

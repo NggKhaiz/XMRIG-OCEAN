@@ -10,7 +10,7 @@ by **[@nggkhaiz](https://github.com/NggKhaiz)**
 [![licence](https://img.shields.io/badge/licence-GPL--3.0-blue)](LICENSE)
 [![dev fee](https://img.shields.io/badge/developer%20fee-0%25-46b17b)](doc/ZERO_FEE.md)
 [![platform](https://img.shields.io/badge/platform-Linux%20x86--64%20%C2%B7%20macOS%20%C2%B7%20Windows-lightgrey)](#build-from-source)
-[![tests](https://img.shields.io/badge/tests-440%20checks%20%C2%B7%2011%20suites-46b17b)](#tests)
+[![tests](https://img.shields.io/badge/tests-450%20checks%20%C2%B7%2011%20suites-46b17b)](#tests)
 [![stars](https://img.shields.io/github/stars/NggKhaiz/ZMRIG?style=flat&color=f2763f)](https://github.com/NggKhaiz/ZMRIG/stargazers)
 [![last commit](https://img.shields.io/github/last-commit/NggKhaiz/ZMRIG)](https://github.com/NggKhaiz/ZMRIG/commits/BETA)
 
@@ -326,8 +326,8 @@ cd .. && ./zmrig/tests/unit.sh && ./zmrig/tests/cli.sh && ./zmrig/tests/health.s
 | `zmrig/tests/health.sh` | 7 | the watchdog, both directions: an honest pool is not a fault, an all-reject pool is |
 | `tests/oneclick/*.sh` | 56 | plan, config, governor, purge (removes only its own paths), branch switching |
 | `tests/docs/links.sh` | 85 | every relative link and every `#anchor` in the documentation resolves, including `/docs/…` site routes |
-| `site` `npm test` | 44 | command builder rules, calculator arithmetic against hand-computed numbers, pool table vs `oneclick.sh` and `doc/POOLS.md`, en/vi parity |
-| `tests/docs/pages.sh` | 17 | the published site as Pages serves it: Docusaurus entry point, 21 pages in both locales, every `href`/`src`, sitemap, language and theme controls, committed build not stale |
+| `site` `npm test` | 53 | command builder and its blocked states, calculator arithmetic against hand-computed numbers including break-even, pool table vs `oneclick.sh` and `doc/POOLS.md`, en/vi key parity and no dead or duplicated message |
+| `tests/docs/pages.sh` | 18 | the published site as Pages serves it: Docusaurus entry point, 21 pages in both locales, every `href`/`src`, sitemap, language and theme controls, one localised social card per page, committed build not stale |
 
 ## Documentation
 

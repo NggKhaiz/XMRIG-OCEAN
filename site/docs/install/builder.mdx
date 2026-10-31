@@ -1,6 +1,7 @@
 ---
 title: Command builder
 description: Build the exact oneclick.sh command for your machine. Every switch maps to one flag, and the preview command changes nothing on the host.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-en.png
 ---
 
 import InstallBuilder from '@site/src/components/InstallBuilder';
@@ -21,6 +22,7 @@ import InstallBuilder from '@site/src/components/InstallBuilder';
 | Fixed profile | `--profile free` or `--profile watt` (absent = automatic) |
 | 443-only network | `--cloudflare --ws-path <path>` |
 | Proxy | `--proxy <url>` |
+| Pool name filtered here | `--connect-to <host:port>` |
 | Host refuses MSR writes | `--no-msr` |
 | Rented hash | `--nicehash` |
 | Do not tune the host | `--no-tune` |
@@ -40,6 +42,12 @@ The address you type is validated before the copy button unlocks: 95 characters
 for a standard Monero address, 106 for an integrated one, base58 alphabet only.
 A pool host is validated as `host:port`, and a full `stratum+tcp://…` URL pasted
 from a provider page is accepted.
+
+The proxy field wants the whole URL — `socks5://host:port` or
+`http://user:pass@host:port` — because that is what the miner parses. The dial
+address is `host:port` only; it replaces the resolved IP but keeps the pool's
+hostname in SNI and the `Host` header, which is the point: a name blocked by a
+local resolver still works if you know where it lives.
 
 ## Preview first
 

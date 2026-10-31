@@ -100,10 +100,14 @@ const config = {
   themeConfig:
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
+      // No `image` here on purpose: a theme-level default is not locale-aware,
+      // so every Vietnamese page would advertise the English card. Pages set
+      // their own `image` front matter instead — see doc/DOCS-SITE.md.
       metadata: [
         { name: "author", content: "@nggkhaiz" },
         { property: "og:site_name", content: "ZMRIG" },
-        { name: "twitter:card", content: "summary" },
+        { property: "og:type", content: "website" },
+        { name: "twitter:card", content: "summary_large_image" },
       ],
       colorMode: {
         defaultMode: "light",
@@ -121,9 +125,21 @@ const config = {
             position: "left",
             label: "Documentation",
           },
-          { to: "/docs/install/quickstart", position: "left", label: "Install" },
-          { to: "/docs/economics/profitability", position: "left", label: "Calculator" },
-          { to: "/docs/reference/benchmarks", position: "left", label: "Benchmarks" },
+          {
+            to: "/docs/install/quickstart",
+            position: "left",
+            label: "Install",
+          },
+          {
+            to: "/docs/economics/profitability",
+            position: "left",
+            label: "Calculator",
+          },
+          {
+            to: "/docs/reference/benchmarks",
+            position: "left",
+            label: "Benchmarks",
+          },
           { type: "localeDropdown", position: "right" },
           {
             href: REPO,
@@ -149,7 +165,10 @@ const config = {
             title: "Operations",
             items: [
               { label: "Pools", to: "/docs/pools/choosing" },
-              { label: "Networks that only allow 443", to: "/docs/operate/networks" },
+              {
+                label: "Networks that only allow 443",
+                to: "/docs/operate/networks",
+              },
               { label: "Performance", to: "/docs/operate/performance" },
               { label: "Troubleshooting", to: "/docs/operate/troubleshooting" },
             ],
@@ -157,7 +176,10 @@ const config = {
           {
             title: "Project",
             items: [
-              { label: "Profitability calculator", to: "/docs/economics/profitability" },
+              {
+                label: "Profitability calculator",
+                to: "/docs/economics/profitability",
+              },
               { label: "Farm proxy", to: "/docs/fleet/proxy" },
               { label: "Self-hosted pool", to: "/docs/fleet/pool" },
               { label: "Testing", to: "/docs/development/testing" },

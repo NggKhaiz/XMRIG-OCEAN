@@ -1,6 +1,7 @@
 ---
 title: Lỗi thường gặp
 description: Bảng triệu chứng → nguyên nhân cho những lỗi thật sự xảy ra, những bug đã sửa để bạn không phải gặp, và cần gửi gì khi báo lỗi.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-vi.png
 ---
 
 # Lỗi thường gặp

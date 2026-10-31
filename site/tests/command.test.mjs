@@ -127,6 +127,32 @@ test("copy is blocked on a bad wallet or a bad custom host", () => {
     build({ wallet: WALLET, proxy: true, proxyUrl: "" }).blocked,
     "proxy-missing"
   );
+  assert.equal(
+    build({ wallet: WALLET, proxy: true, proxyUrl: "proxy.example" }).blocked,
+    "proxy-invalid"
+  );
+  assert.equal(
+    build({ wallet: WALLET, connectTo: "203.0.113.10" }).blocked,
+    "connect-to-invalid"
+  );
+});
+
+test("a proxy URL keeps its credentials and a dial address only its host", () => {
+  const proxied = build({
+    wallet: WALLET,
+    proxy: true,
+    proxyUrl: "socks5://miner:secret@proxy.example:1080",
+  });
+  assert.equal(proxied.blocked, null);
+  assert.equal(proxied.proxy.scheme, "socks5");
+  assert.equal(proxied.proxy.port, 1080);
+  const at = proxied.args.indexOf("--proxy");
+  assert.equal(proxied.args[at + 1], "socks5://miner:secret@proxy.example:1080");
+
+  const dial = build({ wallet: WALLET, connectTo: "203.0.113.10:3333" });
+  assert.equal(dial.blocked, null);
+  const idx = dial.args.indexOf("--connect-to");
+  assert.equal(dial.args[idx + 1], "203.0.113.10:3333");
 });
 
 test("plan uses the same resolution as install and changes nothing", () => {

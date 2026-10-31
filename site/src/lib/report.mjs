@@ -199,5 +199,8 @@ export function totals(rows) {
   sum.efficiency = sum.wallWatts ? sum.hashrate / sum.wallWatts : null;
   sum.kwhMonth = sum.kwhDay * 30;
   sum.profitMonth = sum.profitDay * 30;
+  // The electricity price at which the fleet stops making money. A fleet with
+  // no known power cannot answer, so it stays null rather than 0.
+  sum.breakEvenPrice = sum.kwhDay ? sum.revenueDay / sum.kwhDay : null;
   return sum;
 }

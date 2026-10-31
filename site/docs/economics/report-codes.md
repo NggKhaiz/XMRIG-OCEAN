@@ -1,6 +1,7 @@
 ---
 title: Report codes
 description: The ZMRIG1. format — what a machine measures, how to decode a code yourself, and why it contains no wallet or token.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-en.png
 ---
 
 # Report codes

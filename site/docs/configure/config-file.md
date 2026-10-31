@@ -1,6 +1,7 @@
 ---
 title: Configuration file
 description: Precedence, a complete config.json written by the installer, and every key the Zig engine understands.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-en.png
 ---
 
 # Configuration file

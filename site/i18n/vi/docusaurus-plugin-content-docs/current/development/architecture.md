@@ -1,6 +1,7 @@
 ---
 title: Kiến trúc
 description: Ba engine, bản đồ module của miner Zig, đường đi của một job từ pool tới CPU và ngược lại, và những thread tồn tại lúc chạy.
+image: https://nggkhaiz.github.io/ZMRIG/img/og-vi.png
 ---
 
 # Kiến trúc
