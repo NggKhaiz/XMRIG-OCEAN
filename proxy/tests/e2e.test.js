@@ -93,7 +93,10 @@ test('one command starts a proxy that serves rigs over TCP and WebSocket', async
     await sleep(100);
   });
 
-  const banner = await proxy.waitForOutput(/stratum listening/);
+  // Wait for the last line of the banner, not the first: the rig commands are
+  // printed after the listening line, and asserting on a half-written banner is
+  // a test that fails one run in eight.
+  const banner = await proxy.waitForOutput(/Status: http:/);
   assert.match(banner, new RegExp(`stratum listening on 127\\.0\\.0\\.1:${port}`));
   assert.match(banner, /zmrig --pool=stratum\+tcp:\/\//, 'the banner must print a command a rig can run');
 
