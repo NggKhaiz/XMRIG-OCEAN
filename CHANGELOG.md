@@ -27,6 +27,12 @@ content in both languages. No binary changed.
   the repository root that could drift from the sitemap.
 
 ### Fixed
+- **The proxy installed its signal handlers too late.** They were registered
+  after the listeners were created, so a `systemctl restart` in the first
+  milliseconds killed the process by signal instead of exiting 0 — and its own
+  e2e suite failed one run in eight because of it. The handlers now exist before
+  anything is opened, and the banner prints the rig commands before the upstream
+  connection is attempted, so a person at the terminal sees them first.
 - **The fleet break-even price counted revenue from machines whose power is
   unknown** against only the metered machines' energy, which overstates the
   number — the one figure that decides whether to keep mining. It now uses the

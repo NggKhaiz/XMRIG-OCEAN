@@ -148,6 +148,18 @@ async function main(argv = process.argv.slice(2)) {
 // --- start -----------------------------------------------------------------
 
 async function start(config, log) {
+  // A signal that arrives while the listeners are still being created used to
+  // kill the process outright: the handlers were installed after
+  // `startServers()`, so `systemctl restart` in the first few milliseconds looked
+  // like a crash (exit by signal instead of 0). The handler exists first and
+  // calls whatever the shutdown step happens to be at the time.
+  let stop = async () => {
+    process.exit(0);
+  };
+  const shutdown = () => stop();
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
+
   const missing = missingBinaries(config);
   if (missing.length) {
     for (const item of missing) process.stderr.write(`--tunnel=${item.tunnel} needs ${item.binary}: ${item.hint}\n`);
@@ -198,6 +210,11 @@ async function start(config, log) {
 
   for (const line of tunnel.info) log('info', line);
 
+  // The rig commands come before the upstream connection is opened: they are
+  // what a person waiting at the terminal needs first, and they do not depend on
+  // the pool being reachable.
+  banner(config, server.ports, log);
+
   upstream.start();
 
   // Difficulty is re-checked on a timer, not on every share: a rig that keeps
@@ -212,9 +229,7 @@ async function start(config, log) {
   }, 60_000);
   interval.unref?.();
 
-  banner(config, server.ports, log);
-
-  const shutdown = async () => {
+  stop = async () => {
     log('info', 'shutting down');
     clearInterval(vardiffTimer);
     clearInterval(interval);
@@ -225,9 +240,6 @@ async function start(config, log) {
     await server.close();
     process.exit(0);
   };
-
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
 
   return new Promise(() => {}); // runs until a signal
 }
